@@ -20,7 +20,9 @@ jobs:
     - name: Build the image
       uses: docker/build-push-action@v3.2.0
       with:
-        build-args: SHARELATEX_BASE_TAG=sharelatex/sharelatex-base,MONOREPO_REVISION=${{ github.sha }}
+        build-args: |
+          SHARELATEX_BASE_TAG=sharelatex/sharelatex-base
+          MONOREPO_REVISION=${{ github.sha }}
         file: server-ce/Dockerfile
         tags: ghcr.io/lakelink/overleaf-oauth2:latest
         push: true
