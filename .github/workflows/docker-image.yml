@@ -1,0 +1,24 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [ "oauth2" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Docker Login
+      uses: docker/login-action@v2.1.0
+      with:
+        registry: "ghcr.io"
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build the image
+      uses: docker/build-push-action@v3.2.0
+      with:
+        build-args: SHARELATEX_BASE_TAG=sharelatex/sharelatex-base,MONOREPO_REVISION=${{ github.sha }}
+        tags: ghcr.io/lakelink/overleaf-oauth2:latest
+        push: true
