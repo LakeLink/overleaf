@@ -46,6 +46,10 @@ block content
 									span(data-ol-inflight="idle") #{translate("login")}
 									span(hidden data-ol-inflight="pending") #{translate("logging_in")}…
 								a.pull-right(href='/user/password/reset') #{translate("forgot_your_password")}?
+							.form-group.text-center(style="padding-top: 10px")
+								a.btn-block.login-btn(href="/oauth/redirect" style='padding-left: 0px')
+									| Log in via LakeHub
+
 							if login_support_text
 								hr
 								p.text-center !{login_support_text}	
