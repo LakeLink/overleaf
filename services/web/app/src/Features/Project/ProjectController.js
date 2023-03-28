@@ -43,8 +43,8 @@ const { hasAdminAccess } = require('../Helpers/AdminAuthorizationHelper')
 const InstitutionsFeatures = require('../Institutions/InstitutionsFeatures')
 const SubscriptionViewModelBuilder = require('../Subscription/SubscriptionViewModelBuilder')
 const SurveyHandler = require('../Survey/SurveyHandler')
-const { expressify } = require('../../util/promises')
-const ProjectListController = require('./ProjectListController')
+const ProjectAuditLogHandler = require('./ProjectAuditLogHandler')
+const PublicAccessLevels = require('../Authorization/PublicAccessLevels')
 
 /**
  * @typedef {import("./types").GetProjectsRequest} GetProjectsRequest
@@ -131,9 +131,21 @@ const ProjectController = {
 
   updateProjectAdminSettings(req, res, next) {
     const projectId = req.params.Project_id
+    const user = SessionManager.getSessionUser(req.session)
+    const publicAccessLevel = req.body.publicAccessLevel
+    const publicAccessLevels = [
+      PublicAccessLevels.READ_ONLY,
+      PublicAccessLevels.READ_AND_WRITE,
+      PublicAccessLevels.PRIVATE,
+      PublicAccessLevels.TOKEN_BASED,
+    ]
 
-    const jobs = []
-    if (req.body.publicAccessLevel != null) {
+    if (
+      req.body.publicAccessLevel != null &&
+      publicAccessLevels.includes(publicAccessLevel)
+    ) {
+      const jobs = []
+
       jobs.push(callback =>
         EditorController.setPublicAccessLevel(
           projectId,
@@ -141,14 +153,26 @@ const ProjectController = {
           callback
         )
       )
-    }
 
-    async.series(jobs, error => {
-      if (error != null) {
-        return next(error)
-      }
-      res.sendStatus(204)
-    })
+      jobs.push(callback =>
+        ProjectAuditLogHandler.addEntry(
+          projectId,
+          'toggle-access-level',
+          user._id,
+          { publicAccessLevel: req.body.publicAccessLevel, status: 'OK' },
+          callback
+        )
+      )
+
+      async.series(jobs, error => {
+        if (error != null) {
+          return next(error)
+        }
+        res.sendStatus(204)
+      })
+    } else {
+      res.sendStatus(500)
+    }
   },
 
   deleteProject(req, res) {
@@ -174,9 +198,9 @@ const ProjectController = {
 
     ProjectDeleter.archiveProject(projectId, userId, function (err) {
       if (err != null) {
-        return next(err)
+        next(err)
       } else {
-        return res.sendStatus(200)
+        res.sendStatus(200)
       }
     })
   },
@@ -187,9 +211,9 @@ const ProjectController = {
 
     ProjectDeleter.unarchiveProject(projectId, userId, function (err) {
       if (err != null) {
-        return next(err)
+        next(err)
       } else {
-        return res.sendStatus(200)
+        res.sendStatus(200)
       }
     })
   },
@@ -200,9 +224,9 @@ const ProjectController = {
 
     ProjectDeleter.trashProject(projectId, userId, function (err) {
       if (err != null) {
-        return next(err)
+        next(err)
       } else {
-        return res.sendStatus(200)
+        res.sendStatus(200)
       }
     })
   },
@@ -213,9 +237,9 @@ const ProjectController = {
 
     ProjectDeleter.untrashProject(projectId, userId, function (err) {
       if (err != null) {
-        return next(err)
+        next(err)
       } else {
-        return res.sendStatus(200)
+        res.sendStatus(200)
       }
     })
   },
@@ -382,28 +406,7 @@ const ProjectController = {
     })
   },
 
-  async projectListPage(req, res, next) {
-    try {
-      const assignment = await SplitTestHandler.promises.getAssignment(
-        req,
-        res,
-        'project-dashboard-react'
-      )
-      if (assignment.variant === 'enabled') {
-        ProjectListController.projectListReactPage(req, res, next)
-      } else {
-        ProjectController._projectListAngularPage(req, res, next)
-      }
-    } catch (error) {
-      logger.warn(
-        { err: error },
-        'failed to get "project-dashboard-react" split test assignment'
-      )
-      ProjectController._projectListAngularPage(req, res, next)
-    }
-  },
-
-  _projectListAngularPage(req, res, next) {
+  projectListPage(req, res, next) {
     const timer = new metrics.Timer('project-list')
     const userId = SessionManager.getLoggedInUserId(req.session)
     const currentUser = SessionManager.getSessionUser(req.session)
@@ -464,7 +467,7 @@ const ProjectController = {
                 // and does async.series
                 const allInReconfirmNotificationPeriods =
                   (results && results[0]) || []
-                return cb(null, {
+                cb(null, {
                   list: fullEmails,
                   allInReconfirmNotificationPeriods,
                 })
@@ -491,39 +494,18 @@ const ProjectController = {
             }
           )
         },
-        primaryEmailCheckActive(cb) {
-          SplitTestHandler.getAssignment(
-            req,
-            res,
-            'primary-email-check',
-            (err, assignment) => {
-              if (err) {
-                logger.warn(
-                  { err },
-                  'failed to get "primary-email-check" split test assignment'
+        userIsMemberOfGroupSubscription(cb) {
+          LimitationsManager.userIsMemberOfGroupSubscription(
+            currentUser,
+            (error, isMember) => {
+              if (error) {
+                logger.error(
+                  { err: error },
+                  'Failed to check whether user is a member of group subscription'
                 )
-                cb(null, false)
-              } else {
-                cb(null, assignment.variant === 'active')
+                return cb(null, false)
               }
-            }
-          )
-        },
-        newJoinerSurveyBannerActive(cb) {
-          SplitTestHandler.getAssignment(
-            req,
-            res,
-            'new-joiner-survey-banner',
-            (err, assignment) => {
-              if (err) {
-                logger.warn(
-                  { err },
-                  'failed to get "new-joiner-survey-banner" split test assignment'
-                )
-                cb(null, false)
-              } else {
-                cb(null, assignment.variant === 'active')
-              }
+              cb(null, isMember)
             }
           )
         },
@@ -548,13 +530,12 @@ const ProjectController = {
           notifications,
           user,
           userEmailsData,
-          primaryEmailCheckActive,
-          newJoinerSurveyBannerActive,
+          userIsMemberOfGroupSubscription,
         } = results
 
         if (
           user &&
-          primaryEmailCheckActive &&
+          Features.hasFeature('saas') &&
           UserPrimaryEmailCheckHandler.requiresPrimaryEmailCheck(user)
         ) {
           return res.redirect('/user/emails/primary-email-check')
@@ -679,11 +660,18 @@ const ProjectController = {
           )
         }
 
-        const isNewJoiner =
-          user.signUpDate &&
-          Date.now() - user.signUpDate.getTime() < 1000 * 60 * 60 * 24
-        const shouldDisplayNewJoinerBanner =
-          newJoinerSurveyBannerActive && isNewJoiner
+        const hasPaidAffiliation = userAffiliations.some(
+          affiliation => affiliation.licence && affiliation.licence !== 'free'
+        )
+
+        const showGroupsAndEnterpriseBanner =
+          Features.hasFeature('saas') &&
+          !userIsMemberOfGroupSubscription &&
+          !hasPaidAffiliation
+
+        const groupsAndEnterpriseBannerVariant =
+          showGroupsAndEnterpriseBanner &&
+          _.sample(['did-you-know', 'on-premise', 'people', 'FOMO'])
 
         ProjectController._injectProjectUsers(projects, (error, projects) => {
           if (error != null) {
@@ -709,7 +697,8 @@ const ProjectController = {
             showThinFooter: true, // don't show the fat footer on the projects dashboard, as there's a fixed space available
             usersBestSubscription: results.usersBestSubscription,
             survey: results.survey,
-            shouldDisplayNewJoinerBanner,
+            showGroupsAndEnterpriseBanner,
+            groupsAndEnterpriseBannerVariant,
           }
 
           const paidUser =
@@ -914,16 +903,15 @@ const ProjectController = {
             }
           )
         },
-        newSourceEditorAssignment(cb) {
+        legacySourceEditorAssignment(cb) {
           SplitTestHandler.getAssignment(
             req,
             res,
-            'source-editor',
-            {},
+            'source-editor-legacy',
             (error, assignment) => {
               // do not fail editor load if assignment fails
               if (error) {
-                cb(null)
+                cb(null, { variant: 'default' })
               } else {
                 cb(null, assignment)
               }
@@ -934,39 +922,8 @@ const ProjectController = {
           SplitTestHandler.getAssignment(
             req,
             res,
-            'pdfjs',
+            'pdfjs-31',
             {},
-            (error, assignment) => {
-              // do not fail editor load if assignment fails
-              if (error) {
-                cb(null, { variant: 'default' })
-              } else {
-                cb(null, assignment)
-              }
-            }
-          )
-        },
-        dictionaryEditorAssignment(cb) {
-          SplitTestHandler.getAssignment(
-            req,
-            res,
-            'dictionary-editor',
-            {},
-            (error, assignment) => {
-              // do not fail editor load if assignment fails
-              if (error) {
-                cb(null, { variant: 'default' })
-              } else {
-                cb(null, assignment)
-              }
-            }
-          )
-        },
-        interstitialPaymentFromPaywallAssignment(cb) {
-          SplitTestHandler.getAssignment(
-            req,
-            res,
-            'interstitial-payment-from-paywall',
             (error, assignment) => {
               // do not fail editor load if assignment fails
               if (error) {
@@ -982,40 +939,6 @@ const ProjectController = {
             req,
             res,
             'latex-log-parser',
-            (error, assignment) => {
-              // do not fail editor load if assignment fails
-              if (error) {
-                cb(null, { variant: 'default' })
-              } else {
-                cb(null, assignment)
-              }
-            }
-          )
-        },
-        compileTimeWarningAssignment: [
-          'user',
-          (results, cb) => {
-            if (results.user?.features?.compileTimeout <= 60) {
-              SplitTestHandler.getAssignment(
-                req,
-                res,
-                'compile-time-warning',
-                {},
-                () => {
-                  // do not fail editor load if assignment fails
-                  cb()
-                }
-              )
-            } else {
-              cb()
-            }
-          },
-        ],
-        linkSharingUpgradePromptAssignment(cb) {
-          SplitTestHandler.getAssignment(
-            req,
-            res,
-            'link-sharing-upgrade-prompt',
             (error, assignment) => {
               // do not fail editor load if assignment fails
               if (error) {
@@ -1086,6 +1009,132 @@ const ProjectController = {
             }
           )
         },
+        editorDocumentationButton(cb) {
+          SplitTestHandler.getAssignment(
+            req,
+            res,
+            'documentation-on-editor',
+            (error, assignment) => {
+              // do not fail editor load if assignment fails
+              if (error) {
+                cb(null, { variant: 'default' })
+              } else {
+                cb(null, assignment)
+              }
+            }
+          )
+        },
+        richTextAssignment(cb) {
+          SplitTestHandler.getAssignment(
+            req,
+            res,
+            'rich-text',
+            (error, assignment) => {
+              // do not fail editor load if assignment fails
+              if (error) {
+                cb(null, { variant: 'default' })
+              } else {
+                cb(null, assignment)
+              }
+            }
+          )
+        },
+        onboardingVideoTourAssignment(cb) {
+          SplitTestHandler.getAssignment(
+            req,
+            res,
+            'onboarding-video-tour',
+            (error, assignment) => {
+              // do not fail editor load if assignment fails
+              if (error) {
+                cb(null, { variant: 'default' })
+              } else {
+                cb(null, assignment)
+              }
+            }
+          )
+        },
+        historyViewAssignment(cb) {
+          SplitTestHandler.getAssignment(
+            req,
+            res,
+            'history-view',
+            (error, assignment) => {
+              // do not fail editor load if assignment fails
+              if (error) {
+                cb(null, { variant: 'default' })
+              } else {
+                cb(null, assignment)
+              }
+            }
+          )
+        },
+        accessCheckForOldCompileDomainAssigment(cb) {
+          SplitTestHandler.getAssignment(
+            req,
+            res,
+            'access-check-for-old-compile-domain',
+            () => {
+              // We'll pick up the assignment from the res.locals assignment.
+              cb()
+            }
+          )
+        },
+        forceNewDomainAssignment(cb) {
+          SplitTestHandler.getAssignment(
+            req,
+            res,
+            'force-new-compile-domain',
+            () => {
+              // We'll pick up the assignment from the res.locals assignment.
+              cb()
+            }
+          )
+        },
+        userContentDomainAccessCheckAssigment(cb) {
+          SplitTestHandler.getAssignment(
+            req,
+            res,
+            'user-content-domain-access-check',
+            () => {
+              // We'll pick up the assignment from the res.locals assignment.
+              cb()
+            }
+          )
+        },
+        userContentDomainAccessCheckDelayAssigment(cb) {
+          SplitTestHandler.getAssignment(
+            req,
+            res,
+            'user-content-domain-access-check-delay',
+            () => {
+              // We'll pick up the assignment from the res.locals assignment.
+              cb()
+            }
+          )
+        },
+        userContentDomainAccessCheckMaxChecksAssigment(cb) {
+          SplitTestHandler.getAssignment(
+            req,
+            res,
+            'user-content-domain-access-check-max-checks',
+            () => {
+              // We'll pick up the assignment from the res.locals assignment.
+              cb()
+            }
+          )
+        },
+        reportUserContentDomainAccessCheckErrorAssigment(cb) {
+          SplitTestHandler.getAssignment(
+            req,
+            res,
+            'report-user-content-domain-access-check-error',
+            () => {
+              // We'll pick up the assignment from the res.locals assignment.
+              cb()
+            }
+          )
+        },
       },
       (
         err,
@@ -1099,10 +1148,12 @@ const ProjectController = {
           isTokenMember,
           isInvitedMember,
           brandVariation,
-          newSourceEditorAssignment,
+          legacySourceEditorAssignment,
           pdfjsAssignment,
-          dictionaryEditorAssignment,
           editorLeftMenuAssignment,
+          richTextAssignment,
+          onboardingVideoTourAssignment,
+          historyViewAssignment,
         }
       ) => {
         if (err != null) {
@@ -1179,10 +1230,11 @@ const ProjectController = {
 
             const detachRole = req.params.detachRole
 
-            const showNewSourceEditorOption =
-              newSourceEditorAssignment?.variant === 'codemirror' ||
-              user.betaProgram ||
-              shouldDisplayFeature('new_source_editor', false) // also allow override via ?new_source_editor=true
+            const showLegacySourceEditor =
+              !Features.hasFeature('saas') ||
+              legacySourceEditorAssignment.variant === 'default' ||
+              // Also allow override via legacy_source_editor=true in query string
+              shouldDisplayFeature('legacy_source_editor')
 
             const editorLeftMenuReact =
               editorLeftMenuAssignment?.variant === 'react'
@@ -1200,10 +1252,6 @@ const ProjectController = {
                 : ['all']
             const galileoPromptWords = req.query?.galileoPromptWords || ''
 
-            const dictionaryEditorEnabled =
-              !Features.hasFeature('saas') ||
-              dictionaryEditorAssignment?.variant === 'enabled'
-
             // Persistent upgrade prompts
             // in header & in share project modal
             const showUpgradePrompt =
@@ -1212,6 +1260,12 @@ const ProjectController = {
               !subscription &&
               !userIsMemberOfGroupSubscription &&
               !userHasInstitutionLicence
+
+            const showOnboardingVideoTour =
+              Features.hasFeature('saas') &&
+              userId &&
+              onboardingVideoTourAssignment.variant === 'active' &&
+              req.session.justRegistered
 
             const template =
               detachRole === 'detached'
@@ -1277,10 +1331,12 @@ const ProjectController = {
               gitBridgePublicBaseUrl: Settings.gitBridgePublicBaseUrl,
               wsUrl,
               showSupport: Features.hasFeature('support'),
+              showTemplatesServerPro: Features.hasFeature(
+                'templates-server-pro'
+              ),
               pdfjsVariant: pdfjsAssignment.variant,
-              dictionaryEditorEnabled,
               debugPdfDetach,
-              showNewSourceEditorOption,
+              showLegacySourceEditor,
               showSymbolPalette,
               galileoEnabled,
               galileoFeatures,
@@ -1290,6 +1346,10 @@ const ProjectController = {
               showUpgradePrompt,
               fixedSizeDocument: true,
               useOpenTelemetry: Settings.useOpenTelemetryClient,
+              showCM6SwitchAwaySurvey: Settings.showCM6SwitchAwaySurvey,
+              richTextVariant: richTextAssignment.variant,
+              showOnboardingVideoTour,
+              historyViewReact: historyViewAssignment.variant === 'react',
             })
             timer.done()
           }
@@ -1346,7 +1406,7 @@ const ProjectController = {
             status: 'success',
           })
         }
-        return callback(null, user)
+        callback(null, user)
       }
     )
   },
@@ -1585,9 +1645,5 @@ const LEGACY_THEME_LIST = [
   'vibrant_ink',
   'xcode',
 ]
-
-ProjectController.projectListPage = expressify(
-  ProjectController.projectListPage
-)
 
 module.exports = ProjectController

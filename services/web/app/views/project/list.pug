@@ -14,6 +14,7 @@ block append meta
 	meta(name="ol-allInReconfirmNotificationPeriods" data-type="json" content=allInReconfirmNotificationPeriods)
 	meta(name="ol-reconfirmedViaSAML" content=reconfirmedViaSAML)
 	meta(name="ol-survey-name" data-type="string" content=(survey ? survey.name : undefined))
+	meta(name="ol-groupsAndEnterpriseBannerVariant" data-type="string" content=groupsAndEnterpriseBannerVariant)
 
 block content
 
@@ -65,28 +66,6 @@ block content
 									) &times;
 
 					.project-list-main.col-md-10.col-xs-9
-						
-						if shouldDisplayNewJoinerBanner
-							.alert.alert-info(
-								ng-if="shouldShowNewJoinerSurvey"
-							)
-								.notification-body
-									strong #{translate("new_joiner_survey_text_1")}
-									| &nbsp;
-									span #{translate("new_joiner_survey_text_2")}
-									span.pull-right
-										a.btn.btn-sm.btn-info(
-											href="https://docs.google.com/forms/d/e/1FAIpQLSduwnJnerjeqeRIwvyn209mRUfoL96-USTOx7B0INBsqhR48A/viewform?usp=sf_link"
-											target="_blank"
-											rel="noopener noreferrer"
-											ng-click="dismissNewJoinerSurvey()"
-										) 
-											strong #{translate("take_survey")}
-										| &nbsp;
-										button(ng-click="dismissNewJoinerSurvey()").close
-											span(aria-hidden="true") &times;
-											span.sr-only #{translate("close")}
-				
 						include ./list/notifications
 						include ./list/project-list
 

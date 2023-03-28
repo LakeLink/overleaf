@@ -4,20 +4,22 @@ const settings = require('@overleaf/settings')
 const OError = require('@overleaf/o-error')
 const UserGetter = require('../User/UserGetter')
 
-async function initializeProject() {
+async function initializeProject(projectId) {
   if (
     !(
       settings.apis.project_history &&
       settings.apis.project_history.initializeHistoryForNewProjects
     )
   ) {
-    return
+    return null
   }
   const response = await fetch(`${settings.apis.project_history.url}/project`, {
     method: 'POST',
     headers: {
+      'Content-Type': 'application/json',
       Accept: 'application/json',
     },
+    body: JSON.stringify({ historyId: projectId.toString() }),
   })
   if (!response.ok) {
     throw new OError('failed to initialize project history', {
@@ -25,11 +27,11 @@ async function initializeProject() {
     })
   }
   const body = await response.json()
-  const overleafId = body && body.project && body.project.id
-  if (!overleafId) {
+  const historyId = body && body.project && body.project.id
+  if (!historyId) {
     throw new OError('project-history did not provide an id', { body })
   }
-  return { overleaf_id: overleafId }
+  return historyId
 }
 
 async function flushProject(projectId) {

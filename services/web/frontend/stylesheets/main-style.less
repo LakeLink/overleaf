@@ -2,6 +2,8 @@
 @import (less) '../fonts/merriweather.css';
 @import (less) '../fonts/source-code-pro.css';
 @import (less) '../fonts/stix-two-math.css';
+@import (less) '../fonts/noto-serif.css';
+@import (less) '../fonts/material-symbols.css';
 
 @is-overleaf-light: false;
 @show-rich-text: true;
@@ -29,6 +31,7 @@
 @import (less) 'vendor/codemirror-show-hint.css';
 
 // Core CSS
+@import 'core/page.less';
 @import 'core/scaffolding.less';
 @import 'core/type.less';
 @import 'core/grid.less';
@@ -67,6 +70,8 @@
 @import 'components/beta-badges.less';
 @import 'components/divider.less';
 @import 'components/input-switch.less';
+@import 'components/container.less';
+@import 'components/split-menu.less';
 
 // Components w/ JavaScript
 @import 'components/modals.less';

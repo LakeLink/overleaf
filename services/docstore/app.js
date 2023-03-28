@@ -15,7 +15,7 @@ const {
   Joi,
   errors: handleValidationErrors,
 } = require('celebrate')
-const mongodb = require('./app/js/mongodb')
+const { mongoClient } = require('./app/js/mongodb')
 const Errors = require('./app/js/Errors')
 const HttpController = require('./app/js/HttpController')
 
@@ -91,6 +91,8 @@ app.use(function (error, req, res, next) {
     return res.sendStatus(404)
   } else if (error instanceof Errors.DocModifiedError) {
     return res.sendStatus(409)
+  } else if (error instanceof Errors.DocVersionDecrementedError) {
+    return res.sendStatus(409)
   } else {
     return res.status(500).send('Oops, something went wrong')
   }
@@ -101,8 +103,8 @@ const { host } = Settings.internal.docstore
 
 if (!module.parent) {
   // Called directly
-  mongodb
-    .waitForDb()
+  mongoClient
+    .connect()
     .then(() => {
       const server = app.listen(port, host, function (err) {
         if (err) {

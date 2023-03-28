@@ -2,11 +2,13 @@ import { Transaction } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { round } from 'lodash'
 import grammarlyExtensionPresent from '../shared/utils/grammarly'
+import getMeta from '../utils/meta'
 
 const TIMER_START_NAME = 'CM6-BeforeUpdate'
 const TIMER_END_NAME = 'CM6-AfterUpdate'
 const TIMER_DOM_UPDATE_NAME = 'CM6-DomUpdate'
 const TIMER_MEASURE_NAME = 'CM6-Update'
+const TIMER_KEYPRESS_MEASURE_NAME = 'CM6-Keypress-Measure'
 
 let latestDocLength = 0
 const sessionStart = Date.now()
@@ -46,6 +48,22 @@ try {
   }
 } catch (e) {}
 
+let performanceLongtaskSupported = false
+let longTaskSinceLastReportCount = 0
+
+// Detect support for long task monitoring
+try {
+  if (PerformanceObserver.supportedEntryTypes.includes('longtask')) {
+    performanceLongtaskSupported = true
+
+    // Register observer for long task notifications
+    const observer = new PerformanceObserver(list => {
+      longTaskSinceLastReportCount += list.getEntries().length
+    })
+    observer.observe({ entryTypes: ['longtask'] })
+  }
+} catch (e) {}
+
 function isInputOrDelete(userEventType: string | undefined) {
   return (
     !!userEventType && ['input', 'delete'].includes(userEventType.split('.')[0])
@@ -62,24 +80,29 @@ function isKeypress(userEventType: string | undefined) {
   )
 }
 
-export function timedDispatch() {
+export function dispatchTimer(): {
+  start: (tr: Transaction) => void
+  end: (tr: Transaction, view: EditorView) => void
+} {
+  if (!performanceOptionsSupport) {
+    return { start: () => {}, end: () => {} }
+  }
+
   let userEventsSinceDomUpdateCount = 0
   let keypressesSinceDomUpdateCount = 0
+  const unpaintedKeypressStartTimes: number[] = []
 
-  return (
-    view: EditorView,
-    tr: Transaction,
-    dispatchFn: (tr: Transaction) => void
-  ) => {
-    if (!performanceOptionsSupport) {
-      dispatchFn(tr)
-      return
+  const start = (tr: Transaction) => {
+    const userEventType = tr.annotation(Transaction.userEvent)
+
+    if (isKeypress(userEventType)) {
+      unpaintedKeypressStartTimes.push(performance.now())
     }
 
     performance.mark(TIMER_START_NAME)
+  }
 
-    dispatchFn(tr)
-
+  const end = (tr: Transaction, view: EditorView) => {
     performance.mark(TIMER_END_NAME)
 
     const userEventType = tr.annotation(Transaction.userEvent)
@@ -107,12 +130,24 @@ export function timedDispatch() {
           })
           userEventsSinceDomUpdateCount = 0
           keypressesSinceDomUpdateCount = 0
+
+          const keypressEnd = performance.now()
+
+          for (const keypressStart of unpaintedKeypressStartTimes) {
+            performance.measure(TIMER_KEYPRESS_MEASURE_NAME, {
+              start: keypressStart,
+              end: keypressEnd,
+            })
+          }
+          unpaintedKeypressStartTimes.length = 0
         },
       })
     }
 
     latestDocLength = tr.state.doc.length
   }
+
+  return { start, end }
 }
 
 function calculateMean(durations: number[]) {
@@ -144,6 +179,31 @@ function calculateMax(numbers: number[]) {
   return numbers.reduce((a, b) => Math.max(a, b), 0)
 }
 
+function clearCM6Perf(type: string) {
+  switch (type) {
+    case 'measure':
+      performance.clearMeasures(TIMER_MEASURE_NAME)
+      performance.clearMarks(TIMER_START_NAME)
+      performance.clearMarks(TIMER_END_NAME)
+      break
+
+    case 'dom':
+      performance.clearMarks(TIMER_DOM_UPDATE_NAME)
+      break
+
+    case 'keypress':
+      performance.clearMeasures(TIMER_KEYPRESS_MEASURE_NAME)
+      break
+  }
+}
+
+// clear performance measures and marks when switching between Source and Rich Text
+window.addEventListener('editor:visual-switch', () => {
+  clearCM6Perf('measure')
+  clearCM6Perf('dom')
+  clearCM6Perf('keypress')
+})
+
 export function reportCM6Perf() {
   // Get entries triggered by keystrokes
   const cm6Entries = performance.getEntriesByName(
@@ -151,9 +211,7 @@ export function reportCM6Perf() {
     'measure'
   ) as PerformanceMeasure[]
 
-  performance.clearMeasures(TIMER_MEASURE_NAME)
-  performance.clearMarks(TIMER_START_NAME)
-  performance.clearMarks(TIMER_END_NAME)
+  clearCM6Perf('measure')
 
   const inputEvents = cm6Entries.filter(({ detail }) =>
     isInputOrDelete(detail.userEventType)
@@ -182,9 +240,9 @@ export function reportCM6Perf() {
   const domUpdateEntries = performance.getEntriesByName(
     TIMER_DOM_UPDATE_NAME,
     'mark'
-  ) as PerformanceMeasure[]
+  ) as PerformanceMark[]
 
-  performance.clearMarks(TIMER_DOM_UPDATE_NAME)
+  clearCM6Perf('dom')
 
   let lags = 0
   let nonLags = 0
@@ -210,6 +268,30 @@ export function reportCM6Perf() {
     4
   )
 
+  // Get entries triggered by keystrokes
+  const keypressPaintEntries = performance.getEntriesByName(
+    TIMER_KEYPRESS_MEASURE_NAME,
+    'measure'
+  ) as PerformanceMeasure[]
+
+  const keypressPaintDurations = keypressPaintEntries.map(
+    ({ duration }) => duration
+  )
+
+  const meanKeypressPaint = round(calculateMean(keypressPaintDurations), 2)
+
+  clearCM6Perf('keypress')
+
+  let longTasks = null
+
+  // Get long task entries (Chromium-based browsers only at time of writing)
+  if (performanceLongtaskSupported) {
+    longTasks = longTaskSinceLastReportCount
+    longTaskSinceLastReportCount = 0
+  }
+
+  const release = getMeta('ol-ExposedSettings')?.sentryRelease || null
+
   return {
     max,
     mean,
@@ -226,6 +308,9 @@ export function reportCM6Perf() {
     longestLag,
     meanLagsPerMeasure,
     meanKeypressesPerMeasure,
+    meanKeypressPaint,
+    longTasks,
+    release,
   }
 }
 

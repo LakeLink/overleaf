@@ -19,7 +19,7 @@ div(ng-controller="RecurlySubscriptionController")
 						| !{translate("additional_licenses", {additionalLicenses: personalSubscription.recurly.additionalLicenses, totalLicenses: personalSubscription.recurly.totalLicenses}, ['strong', 'strong'])}
 					| &nbsp;
 					a(href, ng-click="switchToChangePlanView()", ng-if="showChangePlanButton") !{translate("change_plan")}.
-				if (personalSubscription.pendingPlan)
+				if (personalSubscription.pendingPlan && personalSubscription.pendingPlan.name != personalSubscription.plan.name)
 					p #{translate("want_change_to_apply_before_plan_end")}
 				else if (personalSubscription.plan.groupPlan)
 					p !{translate("contact_support_to_change_group_subscription", {}, [{ name: "a", attrs: { href: "/contact"}}])}
@@ -30,9 +30,9 @@ div(ng-controller="RecurlySubscriptionController")
 				include ./../_price_exceptions
 				p.pull-right
 				p
-					a(href=personalSubscription.recurly.billingDetailsLink, target="_blank").btn.btn-info #{translate("update_your_billing_details")}
+					a(href=personalSubscription.recurly.billingDetailsLink, target="_blank").btn.btn-secondary-info.btn-secondary #{translate("update_your_billing_details")}
 					| &nbsp;
-					a(href=personalSubscription.recurly.accountManagementLink, target="_blank").btn.btn-info #{translate("view_your_invoices")}
+					a(href=personalSubscription.recurly.accountManagementLink, target="_blank").btn.btn-secondary-info.btn-secondary #{translate("view_your_invoices")}
 					| &nbsp;
 					unless (cancelButtonNewCopy)
 						a(href, ng-click="switchToCancellationView()", ng-hide="recurlyLoadError", event-tracking='subscription-page-cancel-button-click', event-tracking-mb="true", event-tracking-trigger="click").btn.btn-danger !{translate("stop_your_subscription")}
@@ -47,16 +47,16 @@ div(ng-controller="RecurlySubscriptionController")
 				p !{translate("subscription_canceled_and_terminate_on_x", {terminateDate: personalSubscription.recurly.nextPaymentDueAt}, ['strong'])}
 				include ../_premium_features_link
 				p
-					a(href=personalSubscription.recurly.accountManagementLink, target="_blank").btn.btn-info #{translate("view_your_invoices")}
+					a(href=personalSubscription.recurly.accountManagementLink, target="_blank").btn.btn-secondary-info.btn-secondary #{translate("view_your_invoices")}
 					p: form(action="/user/subscription/reactivate",method="post")
 						input(type="hidden", name="_csrf", value=csrfToken)
-						input(type="submit",value="Reactivate your subscription").btn.btn-success
+						input(type="submit",value="Reactivate your subscription").btn.btn-primary
 			when "expired"
 				p !{translate("your_subscription_has_expired")}
 				p
-					a(href=personalSubscription.recurly.accountManagementLink, target="_blank").btn.btn-info #{translate("view_your_invoices")}
+					a(href=personalSubscription.recurly.accountManagementLink, target="_blank").btn.btn-secondary-info.btn-secondary #{translate("view_your_invoices")}
 					| &nbsp;
-					a(href="/user/subscription/plans").btn.btn-success !{translate("create_new_subscription")}
+					a(href="/user/subscription/plans").btn.btn-primary !{translate("create_new_subscription")}
 			default
 				p !{translate("problem_with_subscription_contact_us")}
 
@@ -81,7 +81,7 @@ div(ng-controller="RecurlySubscriptionController")
 				span #{translate('reduce_costs_group_licenses')}
 				br
 				br
-				a.btn.btn-success(
+				a.btn.btn-primary(
 					href="#groups"
 					ng-click="openGroupPlanModal()"
 				) #{translate('change_to_group_plan')}
@@ -96,21 +96,21 @@ div(ng-controller="RecurlySubscriptionController")
 		div(ng-show="showExtendFreeTrial")
 			p !{translate("have_more_days_to_try", {days:14})}
 			p
-				button(type="submit", ng-click="extendTrial()", ng-disabled='inflight').btn.btn-success #{translate("ill_take_it")}
+				button(type="submit", ng-click="extendTrial()", ng-disabled='inflight').btn.btn-primary #{translate("ill_take_it")}
 			p
 				a(href, ng-click="cancelSubscription()", ng-disabled='inflight') #{translate("no_thanks_cancel_now")}
 
-		div(ng-show="showDowngradeToStudent")
+		div(ng-show="showDowngrade")
 			div(ng-controller="ChangePlanFormController")
-				p !{translate("interested_in_cheaper_plan",{price:'{{studentDisplayPrice}}'})}
+				p !{translate("interested_in_cheaper_personal_plan", {price:'{{personalDisplayPrice}}'}, ['strong'] )}
 				p
-					button(type="submit", ng-click="downgradeToStudent()", ng-disabled='inflight').btn.btn-success #{translate("yes_move_me_to_student_plan")}
+					button(type="submit", ng-click="downgradeToPaidPersonal()", ng-disabled='inflight').btn.btn-primary #{translate("yes_move_me_to_personal_plan")}
 				p
 					a(href, ng-click="cancelSubscription()", ng-disabled='inflight')  #{translate("no_thanks_cancel_now")}
 
 		div(ng-show="showBasicCancel")
 			p
-				a(href, ng-click="switchToDefaultView()").btn.btn-info #{translate("i_want_to_stay")}
+				a(href, ng-click="switchToDefaultView()").btn.btn-secondary-info.btn-secondary #{translate("i_want_to_stay")}
 			p
 				a(href, ng-click="cancelSubscription()", ng-disabled='inflight').btn.btn-primary #{translate("cancel_my_account")}
 
@@ -129,7 +129,7 @@ script(type='text/ng-template', id='confirmChangePlanModalTemplate')
 			ng-disabled="inflight"
 			ng-click="cancel()"
 		) #{translate("cancel")}
-		button.btn.btn-success(
+		button.btn.btn-primary(
 			ng-disabled="inflight"
 			ng-click="confirmChangePlan()"
 		)
@@ -148,7 +148,7 @@ script(type='text/ng-template', id='cancelPendingPlanChangeModalTemplate')
 			ng-disabled="inflight"
 			ng-click="cancel()"
 		) #{translate("cancel")}
-		button.btn.btn-success(
+		button.btn.btn-primary(
 			ng-disabled="inflight"
 			ng-click="confirmCancelPendingPlanChange()"
 		)

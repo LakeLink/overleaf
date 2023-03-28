@@ -1,5 +1,7 @@
 extends ../layout
 
+include ./_new_mixins
+
 block vars
 	- var suppressNavbarRight = true
 	- var suppressFooter = true
@@ -42,8 +44,8 @@ block content
 										li #{translate("reference_search")}
 									if plan.features.mendeley || plan.features.zotero
 										li #{translate("reference_sync")}
-									if plan.features.symbolyPalette
-										li #{translate("symboly_palette")}
+									if plan.features.symbolPalette
+										li #{translate("symbol_palette")}
 
 
 							div.price-summary(ng-if="recurlyPrice")
@@ -121,7 +123,7 @@ block content
 										| !{translate("then_x_price_per_year", { price: noDiscountPriceAngularExp } )}
 							hr.thin
 
-							p.price-cancel-anytime.text-center(ng-non-bindable) !{translate("cancel_anytime", { appName:'{{settings.appName}}' })}
+							p.price-cancel-anytime.text-center(ng-non-bindable) #{translate("cancel_anytime")}
 
 				.col-md-5.col-md-push-1
 					.card.card-highlighted.card-border(ng-hide="threeDSecureFlow")
@@ -330,7 +332,7 @@ block content
 											hr.thin
 
 											div.payment-submit
-												button.btn.btn-success.btn-block(
+												button.btn.btn-primary.btn-block(
 													ng-click="submit()"
 													ng-disabled="processing  || !isFormValid(simpleCCForm);"
 												)
@@ -358,3 +360,5 @@ block content
 	)
 		p !{translate("for_visa_mastercard_and_discover", {}, ['strong', 'strong', 'strong'])}
 		p !{translate("for_american_express", {}, ['strong', 'strong', 'strong'])}
+
+	+studentCheckModal

@@ -8,6 +8,7 @@ import Icon from '../../../shared/components/icon'
 import localStorage from '../../../infrastructure/local-storage'
 import withErrorBoundary from '../../../infrastructure/error-boundary'
 import { useProjectContext } from '../../../shared/context/project-context'
+import Tooltip from '../../../shared/components/tooltip'
 
 const OutlinePane = React.memo(function OutlinePane({
   isTexFile,
@@ -16,6 +17,8 @@ const OutlinePane = React.memo(function OutlinePane({
   onToggle,
   eventTracking,
   highlightedLine,
+  show,
+  isPartial = false,
 }) {
   const { t } = useTranslation()
 
@@ -46,6 +49,12 @@ const OutlinePane = React.memo(function OutlinePane({
     }
   }
 
+  // NOTE: This flag is for disabling the rendering of the component. Used while
+  // both an Angular and React-based file outline is present in the code base.
+  if (!show) {
+    return null
+  }
+
   return (
     <div className={headerClasses}>
       <header className="outline-header">
@@ -60,6 +69,20 @@ const OutlinePane = React.memo(function OutlinePane({
             className="outline-caret-icon"
           />
           <h4 className="outline-header-name">{t('file_outline')}</h4>
+          {isPartial && (
+            <Tooltip
+              id="partial-outline"
+              description={t('partial_outline_warning')}
+              overlayProps={{ placement: 'top' }}
+            >
+              <span role="status">
+                <Icon
+                  type="exclamation-triangle"
+                  aria-label={t('partial_outline_warning')}
+                />
+              </span>
+            </Tooltip>
+          )}
         </button>
       </header>
       {expanded && isTexFile ? (
@@ -82,6 +105,8 @@ OutlinePane.propTypes = {
   onToggle: PropTypes.func.isRequired,
   eventTracking: PropTypes.object.isRequired,
   highlightedLine: PropTypes.number,
+  show: PropTypes.bool.isRequired,
+  isPartial: PropTypes.bool,
 }
 
 export default withErrorBoundary(OutlinePane)

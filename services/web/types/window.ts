@@ -1,6 +1,8 @@
 import { ExposedSettings } from './exposed-settings'
 import { OAuthProviders } from './oauth-providers'
+import { OverallThemeMeta } from './project-settings'
 import { User } from './user'
+import 'recurly__recurly-js'
 
 declare global {
   // eslint-disable-next-line no-unused-vars
@@ -27,5 +29,8 @@ declare global {
     }
     isRestrictedTokenMember: boolean
     _reportCM6Perf: () => void
+    _reportAcePerf: () => void
+    MathJax: Record<string, any>
+    overallThemes: OverallThemeMeta[]
   }
 }

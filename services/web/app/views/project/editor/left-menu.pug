@@ -117,15 +117,14 @@ aside#left-menu.full-size(
 								value=language.code
 							)= language.name
 
-			if dictionaryEditorEnabled
-				.form-controls(ng-controller="DictionaryModalController")
-					label #{translate("dictionary")}
-					button.btn.btn-default.btn-xs(ng-click="openModal()") #{translate("edit")}
+			.form-controls(ng-controller="DictionaryModalController")
+				label #{translate("dictionary")}
+				button.btn.btn-secondary.btn-xs(ng-click="openModal()") #{translate("edit")}
 
-					dictionary-modal(
-						handle-hide="handleHide"
-						show="show"
-					)
+				dictionary-modal(
+					handle-hide="handleHide"
+					show="show"
+				)
 
 			.form-controls
 				label(for="autoComplete") #{translate("auto_complete")}
@@ -235,10 +234,14 @@ aside#left-menu.full-size(
 				show="show"
 				track-changes-visible="trackChangesVisible"
 				is-mac="isMac"
+				new-source-editor="editor.newSourceEditor"
 			)
 		if showSupport
-			li
-				a(href='/learn', target="_blank")
+			li(ng-controller="LeftMenuDocumentationController")
+				a(
+					href='/learn', target="_blank"
+					ng-click="sendLeftMenuDocumentationEvent()"
+				)
 					i.fa.fa-book.fa-fw
 					| &nbsp;&nbsp; #{translate('documentation')}
 			li
@@ -270,7 +273,7 @@ script(type='text/ng-template', id='cloneProjectModalTemplate')
 					focus-on="open"
 				)
 	.modal-footer
-		button.btn.btn-default(
+		button.btn.btn-secondary(
 			ng-disabled="state.inflight"
 			ng-click="cancel()"
 		) #{translate("cancel")}
@@ -317,7 +320,7 @@ script(type='text/ng-template', id='wordCountModalTemplate')
 						.pull-right #{translate("math_display")} :
 					.col-xs-6 {{data.mathDisplay}}
 	.modal-footer
-		button.btn.btn-default(
+		button.btn.btn-secondary(
 			ng-disabled="state.inflight"
 			ng-click="cancel()"
 		) #{translate("done")}

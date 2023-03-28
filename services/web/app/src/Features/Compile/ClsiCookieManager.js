@@ -1,5 +1,4 @@
 /* eslint-disable
-    camelcase,
     n/handle-callback-err,
     max-len,
 */
@@ -11,7 +10,7 @@
  * DS207: Consider shorter variations of null checks
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
  */
-let rclient_secondary
+let rclientSecondary
 const { URL, URLSearchParams } = require('url')
 const OError = require('@overleaf/o-error')
 const Settings = require('@overleaf/settings')
@@ -19,7 +18,7 @@ const request = require('request').defaults({ timeout: 30 * 1000 })
 const RedisWrapper = require('../../infrastructure/RedisWrapper')
 const rclient = RedisWrapper.client('clsi_cookie')
 if (Settings.redis.clsi_cookie_secondary != null) {
-  rclient_secondary = RedisWrapper.client('clsi_cookie_secondary')
+  rclientSecondary = RedisWrapper.client('clsi_cookie_secondary')
 }
 const Cookie = require('cookie')
 const logger = require('@overleaf/logger')
@@ -31,63 +30,75 @@ const clsiCookiesEnabled =
 
 module.exports = function (backendGroup) {
   return {
-    buildKey(project_id, user_id) {
+    buildKey(projectId, userId) {
       if (backendGroup != null) {
-        return `clsiserver:${backendGroup}:${project_id}:${user_id}`
+        return `clsiserver:${backendGroup}:${projectId}:${userId}`
       } else {
-        return `clsiserver:${project_id}:${user_id}`
+        return `clsiserver:${projectId}:${userId}`
       }
     },
 
-    _getServerId(project_id, user_id, compileGroup, callback) {
+    _getServerId(
+      projectId,
+      userId,
+      compileGroup,
+      compileBackendClass,
+      callback
+    ) {
       if (callback == null) {
         callback = function () {}
       }
-      return rclient.get(
-        this.buildKey(project_id, user_id),
-        (err, serverId) => {
-          if (err != null) {
-            return callback(err)
-          }
-          if (serverId == null || serverId === '') {
-            return this._populateServerIdViaRequest(
-              project_id,
-              user_id,
-              compileGroup,
-              callback
-            )
-          } else {
-            return callback(null, serverId)
-          }
+      return rclient.get(this.buildKey(projectId, userId), (err, serverId) => {
+        if (err != null) {
+          return callback(err)
         }
-      )
+        if (serverId == null || serverId === '') {
+          return this._populateServerIdViaRequest(
+            projectId,
+            userId,
+            compileGroup,
+            compileBackendClass,
+            callback
+          )
+        } else {
+          return callback(null, serverId)
+        }
+      })
     },
 
-    _populateServerIdViaRequest(project_id, user_id, compileGroup, callback) {
+    _populateServerIdViaRequest(
+      projectId,
+      userId,
+      compileGroup,
+      compileBackendClass,
+      callback
+    ) {
       if (callback == null) {
         callback = function () {}
       }
-      const u = new URL(
-        `${Settings.apis.clsi.url}/project/${project_id}/status`
-      )
-      u.search = new URLSearchParams({ compileGroup }).toString()
+      const u = new URL(`${Settings.apis.clsi.url}/project/${projectId}/status`)
+      u.search = new URLSearchParams({
+        compileGroup,
+        compileBackendClass,
+      }).toString()
       request.post(u.href, (err, res, body) => {
         if (err != null) {
           OError.tag(err, 'error getting initial server id for project', {
-            project_id,
+            project_id: projectId,
           })
           return callback(err)
         }
         this.setServerId(
-          project_id,
-          user_id,
+          projectId,
+          userId,
           compileGroup,
+          compileBackendClass,
           res,
           null,
           function (err, serverId) {
             if (err != null) {
               logger.warn(
-                { err, project_id },
+                { err, projectId },
                 'error setting server id via populate request'
               )
             }
@@ -106,11 +117,11 @@ module.exports = function (backendGroup) {
       return cookies != null ? cookies[Settings.clsiCookie.key] : undefined
     },
 
-    checkIsLoadSheddingEvent(clsiserverid, compileGroup) {
+    checkIsLoadSheddingEvent(clsiserverid, compileGroup, compileBackendClass) {
       request.get(
         {
           url: `${Settings.apis.clsi.url}/instance-state`,
-          qs: { clsiserverid, compileGroup },
+          qs: { clsiserverid, compileGroup, compileBackendClass },
         },
         (err, res, body) => {
           if (err) {
@@ -136,9 +147,10 @@ module.exports = function (backendGroup) {
     },
 
     setServerId(
-      project_id,
-      user_id,
+      projectId,
+      userId,
       compileGroup,
+      compileBackendClass,
       response,
       previous,
       callback
@@ -153,7 +165,7 @@ module.exports = function (backendGroup) {
       if (serverId == null) {
         // We don't get a cookie back if it hasn't changed
         return rclient.expire(
-          this.buildKey(project_id, user_id),
+          this.buildKey(projectId, userId),
           this._getTTLInSeconds(previous),
           err => callback(err, undefined)
         )
@@ -162,45 +174,55 @@ module.exports = function (backendGroup) {
         // Initial assignment of a user+project or after clearing cache.
         Metrics.inc('clsi-lb-assign-initial-backend')
       } else {
-        this.checkIsLoadSheddingEvent(previous, compileGroup)
+        this.checkIsLoadSheddingEvent(
+          previous,
+          compileGroup,
+          compileBackendClass
+        )
       }
-      if (rclient_secondary != null) {
+      if (rclientSecondary != null) {
         this._setServerIdInRedis(
-          rclient_secondary,
-          project_id,
-          user_id,
+          rclientSecondary,
+          projectId,
+          userId,
           serverId,
           () => {}
         )
       }
-      this._setServerIdInRedis(rclient, project_id, user_id, serverId, err =>
+      this._setServerIdInRedis(rclient, projectId, userId, serverId, err =>
         callback(err, serverId)
       )
     },
 
-    _setServerIdInRedis(rclient, project_id, user_id, serverId, callback) {
+    _setServerIdInRedis(rclient, projectId, userId, serverId, callback) {
       if (callback == null) {
         callback = function () {}
       }
       rclient.setex(
-        this.buildKey(project_id, user_id),
+        this.buildKey(projectId, userId),
         this._getTTLInSeconds(serverId),
         serverId,
         callback
       )
     },
 
-    clearServerId(project_id, user_id, callback) {
+    clearServerId(projectId, userId, callback) {
       if (callback == null) {
         callback = function () {}
       }
       if (!clsiCookiesEnabled) {
         return callback()
       }
-      return rclient.del(this.buildKey(project_id, user_id), callback)
+      return rclient.del(this.buildKey(projectId, userId), callback)
     },
 
-    getCookieJar(project_id, user_id, compileGroup, callback) {
+    getCookieJar(
+      projectId,
+      userId,
+      compileGroup,
+      compileBackendClass,
+      callback
+    ) {
       if (callback == null) {
         callback = function () {}
       }
@@ -208,13 +230,14 @@ module.exports = function (backendGroup) {
         return callback(null, request.jar(), undefined)
       }
       return this._getServerId(
-        project_id,
-        user_id,
+        projectId,
+        userId,
         compileGroup,
+        compileBackendClass,
         (err, serverId) => {
           if (err != null) {
             OError.tag(err, 'error getting server id', {
-              project_id,
+              project_id: projectId,
             })
             return callback(err)
           }

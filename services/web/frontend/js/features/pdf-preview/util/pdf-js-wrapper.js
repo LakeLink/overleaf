@@ -54,6 +54,8 @@ export default class PDFJSWrapper {
       enableXfa: false, // default is false (2021-10-12), but set explicitly to be sure
       renderInteractiveForms: false,
       maxCanvasPixels: 8192 * 8192, // default is 4096 * 4096, increased for better resolution at high zoom levels
+      annotationMode: PDFJS.AnnotationMode?.ENABLE, // enable annotations but not forms
+      annotationEditorMode: PDFJS.AnnotationEditorType?.DISABLE, // disable annotation editing
     })
 
     linkService.setViewer(viewer)
@@ -211,9 +213,13 @@ export default class PDFJSWrapper {
       destArray,
     })
 
-    // scroll the page down by an extra few pixels to account for the pdf.js viewer page border
+    // scroll the page left and down by an extra few pixels to account for the pdf.js viewer page border
+    const pageIndex = this.viewer.currentPageNumber - 1
+    const pageView = this.viewer.getPageView(pageIndex)
+    const offset = parseFloat(getComputedStyle(pageView.div).borderWidth)
     this.viewer.container.scrollBy({
-      top: -9,
+      top: -offset,
+      left: -offset,
     })
   }
 

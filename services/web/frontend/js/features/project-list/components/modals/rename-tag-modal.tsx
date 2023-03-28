@@ -85,7 +85,7 @@ export default function RenameTagModal({
             type="text"
             placeholder="Tag Name"
             name="new-tag-name"
-            value={newTagName === undefined ? tag.name : newTagName}
+            value={newTagName === undefined ? tag.name ?? '' : newTagName}
             required
             onChange={e => setNewTagName(e.target.value)}
           />
@@ -105,7 +105,12 @@ export default function RenameTagModal({
             </span>
           </div>
         )}
-        <Button onClick={onClose} disabled={isLoading}>
+        <Button
+          bsStyle={null}
+          className="btn-secondary"
+          onClick={onClose}
+          disabled={isLoading}
+        >
           {t('cancel')}
         </Button>
         <Button

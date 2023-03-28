@@ -140,14 +140,22 @@
         z-index: 1040;
         white-space: nowrap;
         left: 50%;
-        width: 200px;
-        margin-left: -100px;
+        width: @tooltip-max-width;
+        margin-left: -(@tooltip-max-width / 2);
         &.bottom {
           margin-top: 0px;
         }
         &.annual-selected {
-          width: 94px;
-          margin-left: -47px;
+          width: 110px;
+          margin-left: -55px;
+          .tooltip-inner {
+            background-color: @ol-green;
+          }
+          .tooltip-arrow {
+            border-bottom-color: @ol-green;
+          }
+        }
+        &.green-background {
           .tooltip-inner {
             background-color: @ol-green;
           }
@@ -237,7 +245,7 @@
 @media (max-width: @screen-xs-max) {
   .plans ul.nav-pills {
     li {
-      a {
+      button {
         font-size: @font-size-small;
         padding: 8px 10px;
       }
@@ -567,6 +575,70 @@
     .ineligible {
       background-color: @ol-blue-gray-0;
       color: @ol-blue-gray-4;
+    }
+  }
+}
+
+/**
+	Subscription Dash
+*/
+
+#change-plan {
+  .modal-dialog {
+    &:extend(.modal-lg);
+  }
+
+  table {
+    @media only screen and (min-width: @screen-md-min) {
+      th:last-child,
+      td:last-child {
+        width: 1%; // will expand to fit the content
+        text-align: center;
+      }
+    }
+
+    @media only screen and (max-width: @screen-sm-max) {
+      display: block;
+
+      thead {
+        display: none;
+      }
+
+      tbody,
+      td,
+      tr {
+        display: inline-block;
+        padding-top: 0;
+        padding-bottom: 0;
+        text-align: center;
+        width: 100%;
+      }
+
+      td:first-child {
+        padding-top: @padding-md;
+      }
+      td:last-child {
+        padding-top: @padding-sm;
+        padding-bottom: @padding-md;
+      }
+
+      tr:first-child {
+        td:first-child {
+          padding-top: @padding-sm;
+        }
+      }
+
+      tr {
+        border-bottom: 1px solid @table-border-color;
+        td,
+        th {
+          border: 0 !important;
+        }
+      }
+
+      tr:last-child {
+        border-bottom: 0;
+      }
     }
   }
 }

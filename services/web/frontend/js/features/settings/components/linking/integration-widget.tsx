@@ -104,11 +104,11 @@ function ActionButton({
   disabled,
 }: ActionButtonProps) {
   const { t } = useTranslation()
-
   if (!hasFeature) {
     return (
       <Button
-        bsStyle="info"
+        bsStyle={null}
+        className="btn-primary"
         href="/user/subscription/plans"
         onClick={trackUpgradeClick}
       >
@@ -123,9 +123,23 @@ function ActionButton({
     )
   } else {
     return (
-      <Button bsStyle="info" href={linkPath} disabled={disabled}>
-        <span className="text-capitalize">{t('link')}</span>
-      </Button>
+      <>
+        {disabled ? (
+          <button
+            disabled
+            className="btn btn-secondary-info btn-secondary text-capitalize"
+          >
+            {t('link')}
+          </button>
+        ) : (
+          <a
+            className="btn btn-secondary-info btn-secondary text-capitalize"
+            href={linkPath}
+          >
+            {t('link')}
+          </a>
+        )}
+      </>
     )
   }
 }
@@ -166,7 +180,12 @@ function UnlinkConfirmationModal({
       <Modal.Footer>
         <form action={unlinkPath} method="POST" className="form-inline">
           <input type="hidden" name="_csrf" value={getMeta('ol-csrfToken')} />
-          <Button onClick={handleCancel}>{t('cancel')}</Button>
+          <Button
+            className="btn-secondary-info btn-secondary"
+            onClick={handleCancel}
+          >
+            {t('cancel')}
+          </Button>
           <Button type="submit" bsStyle="danger">
             {t('unlink')}
           </Button>

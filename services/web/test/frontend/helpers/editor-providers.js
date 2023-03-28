@@ -12,6 +12,7 @@ import { DetachProvider } from '../../../frontend/js/shared/context/detach-conte
 import { LayoutProvider } from '../../../frontend/js/shared/context/layout-context'
 import { LocalCompileProvider } from '../../../frontend/js/shared/context/local-compile-context'
 import { DetachCompileProvider } from '../../../frontend/js/shared/context/detach-compile-context'
+import { ProjectSettingsProvider } from '../../../frontend/js/features/editor-left-menu/context/project-settings-context'
 
 // these constants can be imported in tests instead of
 // using magic strings
@@ -51,6 +52,7 @@ export function EditorProviders({
     findEntityByPath: () => null,
     getEntityPath: () => '',
     getRootDocDirname: () => '',
+    getPreviewByPath: path => ({ url: path, extension: 'png' }),
   },
   editorManager = {
     getCurrentDocId: () => 'foo',
@@ -104,6 +106,9 @@ export function EditorProviders({
     metadataManager,
   }
 
+  // Add details for useUserContext
+  window.metaAttributesCache.set('ol-user', { ...user, features })
+
   return (
     <SplitTestProvider>
       <IdeProvider ide={window._ide}>
@@ -112,11 +117,15 @@ export function EditorProviders({
             <FileTreeDataProvider>
               <DetachProvider>
                 <EditorProvider settings={{}}>
-                  <LayoutProvider>
-                    <LocalCompileProvider>
-                      <DetachCompileProvider>{children}</DetachCompileProvider>
-                    </LocalCompileProvider>
-                  </LayoutProvider>
+                  <ProjectSettingsProvider>
+                    <LayoutProvider>
+                      <LocalCompileProvider>
+                        <DetachCompileProvider>
+                          {children}
+                        </DetachCompileProvider>
+                      </LocalCompileProvider>
+                    </LayoutProvider>
+                  </ProjectSettingsProvider>
                 </EditorProvider>
               </DetachProvider>
             </FileTreeDataProvider>

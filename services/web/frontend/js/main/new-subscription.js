@@ -7,10 +7,18 @@ import _ from 'lodash'
 /* global recurly */
 import App from '../base'
 import getMeta from '../utils/meta'
+import { assign } from '../shared/components/location'
 
 export default App.controller(
   'NewSubscriptionController',
-  function ($scope, MultiCurrencyPricing, $http, $location, eventTracking) {
+  function (
+    $scope,
+    $modal,
+    MultiCurrencyPricing,
+    $http,
+    $location,
+    eventTracking
+  ) {
     window.couponCode = $location.search().cc || ''
     window.plan_code = $location.search().planCode || ''
     window.ITMCampaign = $location.search().itm_campaign || ''
@@ -30,10 +38,22 @@ export default App.controller(
 
     $scope.recurlyLoadError = false
     $scope.currencyCode = MultiCurrencyPricing.currencyCode
-    $scope.initiallySelectedCurrencyCode = MultiCurrencyPricing.currencyCode // track for payment-page-refreshed
+    $scope.initiallySelectedCurrencyCode = MultiCurrencyPricing.currencyCode
     $scope.allCurrencies = MultiCurrencyPricing.plans
     $scope.availableCurrencies = {}
     $scope.planCode = window.plan_code
+
+    const isStudentCheckModalEnabled =
+      getMeta('ol-splitTestVariants')?.['student-check-modal'] === 'enabled'
+
+    if (isStudentCheckModalEnabled && $scope.planCode.includes('student')) {
+      $modal.open({
+        templateUrl: 'StudentCheckModalTemplate',
+        controller: 'StudentCheckModalController',
+        backdrop: 'static',
+        size: 'dialog-centered',
+      })
+    }
 
     $scope.switchToStudent = function () {
       const currentPlanCode = window.plan_code
@@ -145,6 +165,7 @@ export default App.controller(
         })
         .done()
     }
+
     setupPricing()
 
     pricing.on('change', () => {
@@ -168,7 +189,6 @@ export default App.controller(
         }
       }
 
-      // abridged list for payment-page-refreshed split test
       $scope.limitedCurrencies = {}
       const limitedCurrencyCodes = ['USD', 'EUR', 'GBP']
       if (
@@ -243,30 +263,26 @@ export default App.controller(
       $scope.ui.showCurrencyDropdown = true
     }
 
-    // This check is just so we don't load this on the default checkout variant
-    const newCardInputElement = document.querySelector('#recurly-card-input')
     const elements = recurly.Elements()
-    if (newCardInputElement) {
-      const card = elements.CardElement({
-        displayIcon: true,
-        style: {
-          inputType: 'mobileSelect',
-          fontColor: '#5d6879',
-          placeholder: {},
-          invalid: {
-            fontColor: '#a93529',
-          },
+    const card = elements.CardElement({
+      displayIcon: true,
+      style: {
+        inputType: 'mobileSelect',
+        fontColor: '#5d6879',
+        placeholder: {},
+        invalid: {
+          fontColor: '#a93529',
         },
+      },
+    })
+    card.attach('#recurly-card-input')
+    card.on('change', state => {
+      $scope.$applyAsync(() => {
+        $scope.showCardElementInvalid =
+          !state.focus && !state.empty && !state.valid
+        $scope.cardIsValid = state.valid
       })
-      card.attach('#recurly-card-input')
-      card.on('change', state => {
-        $scope.$applyAsync(() => {
-          $scope.showCardElementInvalid =
-            !state.focus && !state.empty && !state.valid
-          $scope.cardIsValid = state.valid
-        })
-      })
-    }
+    })
 
     $scope.applyVatNumber = () =>
       pricing
@@ -302,11 +318,7 @@ export default App.controller(
       if ($scope.paymentMethod.value === 'paypal') {
         return $scope.data.country !== ''
       } else {
-        if (newCardInputElement) {
-          return form.$valid && $scope.cardIsValid
-        } else {
-          return form.$valid
-        }
+        return form.$valid && $scope.cardIsValid
       }
     }
 
@@ -432,11 +444,7 @@ export default App.controller(
           delete tokenData.company
           delete tokenData.vat_number
         }
-        if (newCardInputElement) {
-          recurly.token(elements, tokenData, completeSubscription)
-        } else {
-          recurly.token(tokenData, completeSubscription)
-        }
+        recurly.token(elements, tokenData, completeSubscription)
       }
     }
 
@@ -755,5 +763,28 @@ export default App.controller(
       { code: 'ZM', name: 'Zambia' },
       { code: 'ZW', name: 'Zimbabwe' },
     ]
+  }
+)
+
+App.controller(
+  'StudentCheckModalController',
+  function ($scope, $modalInstance, eventTracking) {
+    $modalInstance.rendered.then(() => {
+      eventTracking.sendMB('student-check-displayed')
+    })
+
+    $scope.browsePlans = () => {
+      if (document.referrer?.includes('/user/subscription/choose-your-plan')) {
+        // redirect to interstitial page with `itm_referrer` param
+        assign(
+          '/user/subscription/choose-your-plan?itm_referrer=student-status-declined'
+        )
+      } else {
+        // redirect to plans page with `itm_referrer` param
+        assign('/user/subscription/plans?itm_referrer=student-status-declined')
+      }
+    }
+
+    $scope.confirm = () => $modalInstance.dismiss('cancel')
   }
 )

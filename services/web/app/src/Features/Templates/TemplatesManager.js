@@ -1,12 +1,10 @@
 /* eslint-disable
-    camelcase,
     max-len,
 */
 // TODO: This file was created by bulk-decaffeinate.
 // Fix any style issues and re-enable lint.
 /*
  * decaffeinate suggestions:
- * DS102: Remove unnecessary code created because of implicit returns
  * DS207: Consider shorter variations of null checks
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
  */
@@ -24,7 +22,7 @@ const logger = require('@overleaf/logger')
 const request = require('request')
 const fetch = require('node-fetch')
 const settings = require('@overleaf/settings')
-const uuid = require('uuid')
+const crypto = require('crypto')
 const Errors = require('../Errors/Errors')
 const _ = require('underscore')
 
@@ -36,7 +34,7 @@ const TemplatesManager = {
     templateId,
     templateName,
     templateVersionId,
-    user_id,
+    userId,
     imageName,
     _callback
   ) {
@@ -53,13 +51,13 @@ const TemplatesManager = {
       logger.warn({ err }, 'error getting zip from template API')
       return callback(err)
     })
-    return FileWriter.ensureDumpFolderExists(function (err) {
+    FileWriter.ensureDumpFolderExists(function (err) {
       if (err != null) {
         return callback(err)
       }
 
       const projectName = ProjectDetailsHandler.fixProjectName(templateName)
-      const dumpPath = `${settings.path.dumpFolder}/${uuid.v4()}`
+      const dumpPath = `${settings.path.dumpFolder}/${crypto.randomUUID()}`
       const writeStream = fs.createWriteStream(dumpPath)
       const attributes = {
         fromV1TemplateId: templateId,
@@ -73,8 +71,8 @@ const TemplatesManager = {
           )
           return callback(new Error('get zip failed'))
         }
-        return ProjectUploadManager.createProjectFromZipArchiveWithName(
-          user_id,
+        ProjectUploadManager.createProjectFromZipArchiveWithName(
+          userId,
           projectName,
           dumpPath,
           attributes,
@@ -85,7 +83,7 @@ const TemplatesManager = {
               })
               return callback(err)
             }
-            return async.series(
+            async.series(
               [
                 cb => TemplatesManager._setCompiler(project._id, compiler, cb),
                 cb => TemplatesManager._setImage(project._id, imageName, cb),
@@ -110,7 +108,7 @@ const TemplatesManager = {
                   fromV1TemplateId: templateId,
                   fromV1TemplateVersionId: templateVersionId,
                 }
-                return Project.updateOne(
+                Project.updateOne(
                   { _id: project._id },
                   update,
                   {},
@@ -118,7 +116,7 @@ const TemplatesManager = {
                     if (err != null) {
                       return callback(err)
                     }
-                    return callback(null, project)
+                    callback(null, project)
                   }
                 )
               }
@@ -126,41 +124,37 @@ const TemplatesManager = {
           }
         )
       })
-      return zipReq.pipe(writeStream)
+      zipReq.pipe(writeStream)
     })
   },
 
-  _setCompiler(project_id, compiler, callback) {
+  _setCompiler(projectId, compiler, callback) {
     if (compiler == null) {
       return callback()
     }
-    return ProjectOptionsHandler.setCompiler(project_id, compiler, callback)
+    ProjectOptionsHandler.setCompiler(projectId, compiler, callback)
   },
 
-  _setImage(project_id, imageName, callback) {
+  _setImage(projectId, imageName, callback) {
     if (!imageName) {
       imageName = 'wl_texlive:2018.1'
     }
-    return ProjectOptionsHandler.setImageName(project_id, imageName, callback)
+    ProjectOptionsHandler.setImageName(projectId, imageName, callback)
   },
 
-  _setMainFile(project_id, mainFile, callback) {
+  _setMainFile(projectId, mainFile, callback) {
     if (mainFile == null) {
       return callback()
     }
-    return ProjectRootDocManager.setRootDocFromName(
-      project_id,
-      mainFile,
-      callback
-    )
+    ProjectRootDocManager.setRootDocFromName(projectId, mainFile, callback)
   },
 
-  _setBrandVariationId(project_id, brandVariationId, callback) {
+  _setBrandVariationId(projectId, brandVariationId, callback) {
     if (brandVariationId == null) {
       return callback()
     }
-    return ProjectOptionsHandler.setBrandVariationId(
-      project_id,
+    ProjectOptionsHandler.setBrandVariationId(
+      projectId,
       brandVariationId,
       callback
     )

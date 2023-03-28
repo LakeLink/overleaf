@@ -1,28 +1,18 @@
+const Metrics = require('@overleaf/metrics')
 const Settings = require('@overleaf/settings')
 const { MongoClient, ObjectId } = require('mongodb')
 
-const clientPromise = MongoClient.connect(
-  Settings.mongo.url,
-  Settings.mongo.options
-)
+const mongoClient = new MongoClient(Settings.mongo.url)
+const mongoDb = mongoClient.db()
 
-let setupDbPromise
-async function waitForDb() {
-  if (!setupDbPromise) {
-    setupDbPromise = setupDb()
-  }
-  await setupDbPromise
+const db = {
+  notifications: mongoDb.collection('notifications'),
 }
 
-const db = {}
-async function setupDb() {
-  const internalDb = (await clientPromise).db()
-
-  db.notifications = internalDb.collection('notifications')
-}
+Metrics.mongodb.monitor(mongoClient)
 
 module.exports = {
   db,
+  mongoClient,
   ObjectId,
-  waitForDb,
 }

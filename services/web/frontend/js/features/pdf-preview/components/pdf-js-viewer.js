@@ -11,18 +11,16 @@ import PdfPreviewErrorBoundaryFallback from './pdf-preview-error-boundary-fallba
 import { useDetachCompileContext as useCompileContext } from '../../../shared/context/detach-compile-context'
 import { captureException } from '../../../infrastructure/error-reporter'
 import { getPdfCachingMetrics } from '../util/metrics'
+import { userContentDomainAccessCheckFailed } from '../../user-content-domain-access-check'
+import { isURLOnUserContentDomain } from '../util/fetchFromCompileDomain'
+import { isNetworkError } from '../../../utils/isNetworkError'
+import OError from '@overleaf/o-error'
 
 function PdfJsViewer({ url, pdfFile }) {
   const { _id: projectId } = useProjectContext()
 
-  const {
-    setError,
-    firstRenderDone,
-    highlights,
-    position,
-    setPosition,
-    startCompile,
-  } = useCompileContext()
+  const { setError, firstRenderDone, highlights, position, setPosition } =
+    useCompileContext()
 
   // state values persisted in localStorage to restore on load
   const [scale, setScale] = usePersistedState(
@@ -128,17 +126,44 @@ function PdfJsViewer({ url, pdfFile }) {
       setStartFetch(performance.now())
 
       const abortController = new AbortController()
-      const handleFetchError = () => {
+      const handleFetchError = err => {
         if (abortController.signal.aborted) return
         // The error is already logged at the call-site with additional context.
-        setError('rendering-error')
+        if (err instanceof pdfJsWrapper.PDFJS.MissingPDFException) {
+          if (
+            // 404 is unrelated to new domain
+            OError.getFullInfo(err).statusCode !== 404 &&
+            isURLOnUserContentDomain(OError.getFullInfo(err).url)
+          ) {
+            setError('rendering-error-new-domain')
+          } else {
+            setError('rendering-error-expected')
+          }
+        } else {
+          setError('rendering-error')
+        }
       }
       pdfJsWrapper
         .loadDocument({ url, pdfFile, abortController, handleFetchError })
         .catch(error => {
           if (abortController.signal.aborted) return
           console.error(error)
-          setError('rendering-error')
+          if (
+            isURLOnUserContentDomain(url) &&
+            error instanceof pdfJsWrapper.PDFJS.UnexpectedResponseException
+          ) {
+            setError('rendering-error-new-domain')
+          } else if (
+            isURLOnUserContentDomain(url) &&
+            error.name === 'UnknownErrorException' &&
+            (isNetworkError(error) || userContentDomainAccessCheckFailed())
+          ) {
+            // For some reason, pdfJsWrapper.PDFJS.UnknownErrorException is
+            //  not available for an instance check.
+            setError('rendering-error-new-domain')
+          } else {
+            setError('rendering-error')
+          }
         })
       return () => {
         abortController.abort()
@@ -192,23 +217,27 @@ function PdfJsViewer({ url, pdfFile }) {
       const handleTextlayerrendered = textLayer => {
         const pageElement = textLayer.source.textLayerDiv.closest('.page')
 
-        const doubleClickListener = event => {
-          const clickPosition = pdfJsWrapper.clickPosition(
-            event,
-            pageElement,
-            textLayer
-          )
+        if (!pageElement.dataset.listeningForDoubleClick) {
+          pageElement.dataset.listeningForDoubleClick = true
 
-          if (clickPosition) {
-            window.dispatchEvent(
-              new CustomEvent('synctex:sync-to-position', {
-                detail: clickPosition,
-              })
+          const doubleClickListener = event => {
+            const clickPosition = pdfJsWrapper.clickPosition(
+              event,
+              pageElement,
+              textLayer
             )
-          }
-        }
 
-        pageElement.addEventListener('dblclick', doubleClickListener)
+            if (clickPosition) {
+              window.dispatchEvent(
+                new CustomEvent('synctex:sync-to-position', {
+                  detail: clickPosition,
+                })
+              )
+            }
+          }
+
+          pageElement.addEventListener('dblclick', doubleClickListener)
+        }
       }
 
       pdfJsWrapper.eventBus.on('textlayerrendered', handleTextlayerrendered)
@@ -364,24 +393,26 @@ function PdfJsViewer({ url, pdfFile }) {
       if (!initialised) {
         return
       }
-      if ((event.metaKey || event.ctrlKey) && event.key === '=') {
-        event.preventDefault()
-        setZoom('zoom-in')
-      } else if ((event.metaKey || event.ctrlKey) && event.key === '-') {
-        event.preventDefault()
-        setZoom('zoom-out')
-      } else if ((event.metaKey || event.ctrlKey) && event.key === '0') {
-        event.preventDefault()
-        setZoom('fit-width')
-      } else if (
-        (event.metaKey && (event.key === 's' || event.key === 'Enter')) ||
-        (event.ctrlKey && event.key === '.')
-      ) {
-        event.preventDefault()
-        startCompile()
+      if (event.metaKey || event.ctrlKey) {
+        switch (event.key) {
+          case '=':
+            event.preventDefault()
+            setZoom('zoom-in')
+            break
+
+          case '-':
+            event.preventDefault()
+            setZoom('zoom-out')
+            break
+
+          case '0':
+            event.preventDefault()
+            setZoom('fit-width')
+            break
+        }
       }
     },
-    [initialised, setZoom, startCompile]
+    [initialised, setZoom]
   )
 
   /* eslint-disable jsx-a11y/no-noninteractive-tabindex */

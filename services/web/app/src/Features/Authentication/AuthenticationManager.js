@@ -8,14 +8,27 @@ const {
   InvalidPasswordError,
   ParallelLoginError,
   PasswordMustBeDifferentError,
+  PasswordReusedError,
 } = require('./AuthenticationErrors')
 const util = require('util')
 const HaveIBeenPwned = require('./HaveIBeenPwned')
 const UserAuditLogHandler = require('../User/UserAuditLogHandler')
 const logger = require('@overleaf/logger')
+const DiffHelper = require('../Helpers/DiffHelper')
+const Metrics = require('@overleaf/metrics')
 
 const BCRYPT_ROUNDS = Settings.security.bcryptRounds || 12
 const BCRYPT_MINOR_VERSION = Settings.security.bcryptMinorVersion || 'a'
+const MAX_SIMILARITY = 0.7
+
+function _exceedsMaximumLengthRatio(password, maxSimilarity, value) {
+  const passwordLength = password.length
+  const lengthBoundSimilarity = (maxSimilarity / 2) * passwordLength
+  const valueLength = value.length
+  return (
+    passwordLength >= 10 * valueLength && valueLength < lengthBoundSimilarity
+  )
+}
 
 const _checkWriteResult = function (result, callback) {
   // for MongoDB
@@ -37,6 +50,14 @@ function _validatePasswordNotTooLong(password) {
   return null
 }
 
+function _metricsForSuccessfulPasswordMatch(password) {
+  const validationResult = AuthenticationManager.validatePassword(password)
+  const status =
+    validationResult === null ? 'success' : validationResult?.info?.code
+  Metrics.inc('check-password', { status })
+  return null
+}
+
 const AuthenticationManager = {
   _checkUserPassword(query, password, callback) {
     // Using Mongoose for legacy reasons here. The returned User instance
@@ -53,7 +74,10 @@ const AuthenticationManager = {
         if (error) {
           return callback(error)
         }
-        return callback(null, user, match)
+        if (match) {
+          _metricsForSuccessfulPasswordMatch(password)
+        }
+        callback(null, user, match)
       })
     })
   },
@@ -85,7 +109,7 @@ const AuthenticationManager = {
             if (err) {
               return callback(err)
             }
-            if (result.nModified !== 1) {
+            if (result.modifiedCount !== 1) {
               return callback(new ParallelLoginError())
             }
             if (!match) {
@@ -147,6 +171,8 @@ const AuthenticationManager = {
       })
     }
 
+    Metrics.inc('try-validate-password')
+
     let allowAnyChars, min, max
     if (Settings.passwordStrengthOptions) {
       allowAnyChars = Settings.passwordStrengthOptions.allowAnyChars === true
@@ -156,7 +182,7 @@ const AuthenticationManager = {
       }
     }
     allowAnyChars = !!allowAnyChars
-    min = min || 6
+    min = min || 8
     max = max || 72
 
     // we don't support passwords > 72 characters in length, because bcrypt truncates them
@@ -192,14 +218,32 @@ const AuthenticationManager = {
     if (typeof email === 'string' && email !== '') {
       const startOfEmail = email.split('@')[0]
       if (
-        password.indexOf(email) !== -1 ||
-        password.indexOf(startOfEmail) !== -1
+        password.includes(email) ||
+        password.includes(startOfEmail) ||
+        email.includes(password)
       ) {
         return new InvalidPasswordError({
           message: 'password contains part of email address',
           info: { code: 'contains_email' },
         })
       }
+      try {
+        const passwordTooSimilarError =
+          AuthenticationManager._validatePasswordNotTooSimilar(password, email)
+        if (passwordTooSimilarError) {
+          Metrics.inc('password-too-similar-to-email')
+          return new InvalidPasswordError({
+            message: 'password is too similar to email address',
+            info: { code: 'too_similar' },
+          })
+        }
+      } catch (error) {
+        logger.error(
+          { error },
+          'error while checking password similarity to email'
+        )
+      }
+      // TODO: remove this check once the password-too-similar checks are active?
     }
     return null
   },
@@ -256,8 +300,22 @@ const AuthenticationManager = {
         if (match) {
           return callback(new PasswordMustBeDifferentError())
         }
-        this._setUserPasswordInMongo(user, password, callback)
-        HaveIBeenPwned.checkPasswordForReuseInBackground(password)
+
+        HaveIBeenPwned.checkPasswordForReuse(
+          password,
+          (error, isPasswordReused) => {
+            if (error) {
+              logger.err({ error }, 'cannot check password for re-use')
+            }
+
+            if (!error && isPasswordReused) {
+              return callback(new PasswordReusedError())
+            }
+
+            // password is strong enough or the validation with the service did not happen
+            this._setUserPasswordInMongo(user, password, callback)
+          }
+        )
       }
     )
   },
@@ -314,6 +372,35 @@ const AuthenticationManager = {
       }
     }
     return true
+  },
+
+  /**
+   * Check if the password is similar to (parts of) the email address.
+   * For now, this merely sends a metric when the password and
+   * email address are deemed to be too similar to each other.
+   * Later we will reject passwords that fail this check.
+   *
+   * This logic was borrowed from the django project:
+   * https://github.com/django/django/blob/fa3afc5d86f1f040922cca2029d6a34301597a70/django/contrib/auth/password_validation.py#L159-L214
+   */
+  _validatePasswordNotTooSimilar(password, email) {
+    password = password.toLowerCase()
+    email = email.toLowerCase()
+    const stringsToCheck = [email]
+      .concat(email.split(/\W+/))
+      .concat(email.split(/@/))
+    for (const emailPart of stringsToCheck) {
+      if (!_exceedsMaximumLengthRatio(password, MAX_SIMILARITY, emailPart)) {
+        const similarity = DiffHelper.stringSimilarity(password, emailPart)
+        if (similarity > MAX_SIMILARITY) {
+          logger.warn(
+            { email, emailPart, similarity, maxSimilarity: MAX_SIMILARITY },
+            'Password too similar to email'
+          )
+          return new Error('password is too similar to email')
+        }
+      }
+    }
   },
 }
 

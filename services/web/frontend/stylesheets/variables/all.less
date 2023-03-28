@@ -6,6 +6,8 @@
 
 @editor-header-logo-background: url(../../../public/img/ol-brand/overleaf-o-white.svg)
   center / contain no-repeat;
+@editor-header-logo-background-active: url(../../../public/img/ol-brand/overleaf-o-white.svg)
+  center / contain no-repeat;
 @editor-loading-logo-padding-top: 115.44%;
 @editor-loading-logo-background-url: url(../../../public/img/ol-brand/overleaf-o-grey.svg);
 @editor-loading-logo-foreground-url: url(../../../public/img/ol-brand/overleaf-o.svg);
@@ -55,7 +57,7 @@
 //** Unit-less `line-height` for use in components like buttons.
 @line-height-base: 1.5625; // 20/14
 //** Computed "line-height" (`font-size` * `line-height`) for use with `margin`, `padding`, etc.
-@line-height-computed: floor((@font-size-base * @line-height-base)); // ~20px
+@line-height-computed: floor((@font-size-base * @line-height-base)); // ~25px
 
 //** By default, this inherits from the `<body>`.
 @headings-font-family: @font-family-serif;
@@ -91,7 +93,7 @@
 @padding-small-vertical: 5px;
 @padding-small-horizontal: 10px;
 
-@padding-xs-vertical: 1px;
+@padding-xs-vertical: @border-size; // border size is removed in .button-size mixin
 @padding-xs-horizontal: 8px;
 
 @padding-xs: 5px;
@@ -105,11 +107,14 @@
 @line-height-small: 1.5;
 
 @border-radius-base: 3px;
+@border-radius-base-new: 4px;
 @border-radius-large: 5px;
 @border-radius-small: 2px;
+@border-width-sm: 1px;
 @border-width-base: 3px; // only used by plans and cards
-@border-size: 1.5px;
-@border-color-base: @neutral-40;
+@border-size: 1px;
+@border-color-base: @neutral-60;
+@border-color-disabled: @color-disabled;
 
 //** Horizontal line color.
 @hr-border: @neutral-20;
@@ -161,10 +166,6 @@
 @btn-primary-bg: @green;
 @btn-primary-border: transparent;
 
-@btn-success-color: #fff;
-@btn-success-bg: @green;
-@btn-success-border: transparent;
-
 @btn-info-color: #fff;
 @btn-info-bg: @blue;
 @btn-info-border: transparent;
@@ -191,19 +192,20 @@
 //** Text color for `<input>`s
 @input-color: @neutral-90;
 //** `<input>` border color
-@input-border: @neutral-40;
+@input-border: @border-color-base;
 //** `<input>` border radius
 @input-border-radius: 4px;
 //** Border color for inputs on focus
 @input-border-focus: @blue-50;
 //** Bordersize for inputs
 @input-border-size: @border-size;
+@input-padding: @padding-sm;
 
 //** Placeholder text color
 @input-color-placeholder: @neutral-60;
 
 //** Default `.form-control` height
-@input-height-base: @line-height-computed + (@padding-base-vertical * 2) - 1;
+@input-height-base: @line-height-computed + (@padding-base-vertical * 2); // Make inputs at least the height of their button counterpart. buttons and inputs have same border height
 //** Large `.form-control` height
 @input-height-large: (
   ceil(@font-size-large * @line-height-large) + (@padding-large-vertical * 2) +
@@ -457,7 +459,7 @@
 //##
 
 //** Tooltip max width
-@tooltip-max-width: 200px;
+@tooltip-max-width: 220px;
 //** Tooltip text color
 @tooltip-color: #fff;
 //** Tooltip background color
@@ -571,6 +573,10 @@
 @alert-info-text: #fff;
 @alert-info-border: transparent;
 
+@alert-info-alt-bg: @v2-dash-pane-bg;
+@alert-info-alt-text: @v2-dash-pane-subdued-color;
+@alert-info-alt-border: transparent;
+
 @alert-warning-bg: @brand-warning;
 @alert-warning-text: #fff;
 @alert-warning-border: transparent;
@@ -663,6 +669,7 @@
 
 @toolbar-border-color: @neutral-80;
 @toolbar-header-btn-border-color: @toolbar-border-color;
+@toolbar-btn-height: 26px;
 @common-border-color: @gray-lighter;
 @editor-border-color: @neutral-80;
 
@@ -710,9 +717,13 @@
 @btn-border-radius-small: 9999px;
 @btn-border-width: 0;
 @btn-border-bottom-width: 0;
+@btn-primary-hover-bg-color: @green-dark;
+@btn-secondary-hover-bg-color: @neutral-20;
 
 // Cards
-@card-box-shadow: none;
+@card-border-radius: @border-radius-base-new;
+@card-box-shadow: 0px 4px 12px rgba(30, 37, 48, 0.12),
+  0px 2px 4px rgba(30, 37, 48, 0.08);
 
 // Project table
 @structured-list-link-color: @blue;
@@ -807,7 +818,7 @@
 @file-tree-item-selected-color: @file-tree-item-color;
 @file-tree-item-toggle-color: @neutral-40;
 @file-tree-item-icon-color: @neutral-40;
-@file-tree-item-input-color: @neutral-80;
+@file-tree-item-input-color: @input-color;
 @file-tree-item-folder-color: @neutral-40;
 @file-tree-item-hover-bg: @neutral-80;
 @file-tree-item-selected-bg: @green;
@@ -867,7 +878,7 @@
 
 // PDF and logs
 @pdf-top-offset: @toolbar-small-height;
-@pdf-bg: @neutral-20;
+@pdf-bg: @neutral-10;
 @pdfjs-bg: transparent;
 @pdf-page-shadow-color: rgba(0, 0, 0, 0.5);
 @logs-pane-bg: @neutral-80;

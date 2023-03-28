@@ -65,6 +65,8 @@ block content
 						span.sr-only #{translate("close")}
 					.system-message-content(ng-bind-html="htmlContent")
 
+			grammarly-warning(delay=10000)
+
 		include ./editor/main
 
 	script(type="text/ng-template", id="genericMessageModalTemplate")
@@ -115,7 +117,10 @@ block append meta
 	include ./editor/meta
 
 block foot-scripts
+	each file in (useOpenTelemetry ? entrypointScripts("tracing") : [])
+		script(type="text/javascript", nonce=scriptNonce, src=file)
 	script(type="text/javascript", nonce=scriptNonce, src=(wsUrl || '/socket.io') + '/socket.io.js')
-	script(type="text/javascript", nonce=scriptNonce, src=mathJaxPath)
+	if (richTextVariant !== 'cm6')
+		script(type="text/javascript", nonce=scriptNonce, src=mathJaxPath)
 	each file in entrypointScripts("ide")
 		script(type="text/javascript", nonce=scriptNonce, src=file)

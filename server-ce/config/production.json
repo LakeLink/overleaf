@@ -1,0 +1,14 @@
+{
+  "persistor": {
+    "useSubdirectories": true
+  },
+  "basicHttpAuth": {
+    "password": "password"
+  },
+  "useDeleteObjects": "false",
+  "jwtAuth": {
+    "key": "secureKey",
+    "algorithm": "HS256"
+  },
+  "mongo": {}
+}

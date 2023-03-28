@@ -9,8 +9,6 @@ import useWaitForI18n from '../../../shared/hooks/use-wait-for-i18n'
 import CurrentPlanWidget from './current-plan-widget/current-plan-widget'
 import NewProjectButton from './new-project-button'
 import ProjectListTable from './table/project-list-table'
-import SidebarFilters from './sidebar/sidebar-filters'
-import AddAffiliation, { useAddAffiliation } from './sidebar/add-affiliation'
 import SurveyWidget from './survey-widget'
 import WelcomeMessage from './welcome-message'
 import LoadingBranded from '../../../shared/components/loading-branded'
@@ -20,6 +18,7 @@ import SearchForm from './search-form'
 import ProjectsDropdown from './dropdown/projects-dropdown'
 import SortByDropdown from './dropdown/sort-by-dropdown'
 import ProjectTools from './table/project-tools/project-tools'
+import Sidebar from './sidebar/sidebar'
 import LoadMore from './load-more'
 import { useEffect } from 'react'
 
@@ -43,7 +42,6 @@ function ProjectListPageContent() {
     setSearchText,
     selectedProjects,
   } = useProjectListContext()
-  const { show: showAddAffiliationWidget } = useAddAffiliation()
 
   useEffect(() => {
     eventTracking.sendMB('loads_v2_dash', {})
@@ -59,16 +57,7 @@ function ProjectListPageContent() {
       <div className="project-list-wrapper clearfix">
         {totalProjectsCount > 0 ? (
           <>
-            <div className="project-list-sidebar-wrapper-react hidden-xs">
-              <div className="project-list-sidebar-subwrapper">
-                <aside className="project-list-sidebar-react">
-                  <NewProjectButton id="new-project-button-sidebar" />
-                  <SidebarFilters />
-                  {showAddAffiliationWidget && <hr />}
-                  <AddAffiliation />
-                </aside>
-              </div>
-            </div>
+            <Sidebar />
             <div className="project-list-main-react">
               {error ? <DashApiError /> : ''}
               <Row>
@@ -98,7 +87,7 @@ function ProjectListPageContent() {
                   </div>
                 </Col>
               </Row>
-              <div className="project-list-sidebar-survey-wrapper">
+              <div className="project-list-sidebar-survey-wrapper visible-xs">
                 <SurveyWidget />
               </div>
               <div className="visible-xs mt-1">
@@ -115,6 +104,7 @@ function ProjectListPageContent() {
                         <NewProjectButton
                           id="new-project-button-projects-table"
                           className="pull-left me-2"
+                          showAddAffiliationWidget
                         />
                         <SearchForm
                           inputValue={searchText}
@@ -140,8 +130,8 @@ function ProjectListPageContent() {
             {error ? <DashApiError /> : ''}
             <Row className="row-spaced">
               <Col
-                xs={8}
-                xsOffset={2}
+                sm={10}
+                smOffset={1}
                 md={8}
                 mdOffset={2}
                 className="project-list-empty-col"

@@ -1,14 +1,19 @@
 const chai = require('chai')
 const { expect } = chai
 const SandboxedModule = require('sandboxed-module')
+const StreamPromises = require('stream/promises')
 
-const modulePath = '../../src/PersistorFactory.js'
+const MODULE_PATH = '../../src/PersistorFactory.js'
 
 describe('PersistorManager', function () {
   let PersistorFactory, FSPersistor, S3Persistor, Settings, GcsPersistor
 
   beforeEach(function () {
     FSPersistor = class {
+      constructor(settings) {
+        this.settings = settings
+      }
+
       wrappedMethod() {
         return 'FSPersistor'
       }
@@ -33,8 +38,9 @@ describe('PersistorManager', function () {
         info() {},
         err() {},
       },
+      'stream/promises': StreamPromises,
     }
-    PersistorFactory = SandboxedModule.require(modulePath, { requires })
+    PersistorFactory = SandboxedModule.require(MODULE_PATH, { requires })
   })
 
   it('should implement the S3 wrapped method when S3 is configured', function () {
@@ -56,6 +62,20 @@ describe('PersistorManager', function () {
 
     expect(PersistorFactory(Settings)).to.respondTo('wrappedMethod')
     expect(PersistorFactory(Settings).wrappedMethod()).to.equal('FSPersistor')
+  })
+
+  it('should forward useSubdirectories=true to FSPersistor', function () {
+    Settings.backend = 'fs'
+    Settings.useSubdirectories = true
+
+    expect(PersistorFactory(Settings).settings.useSubdirectories).to.be.true
+  })
+
+  it('should forward useSubdirectories=false to FSPersistor', function () {
+    Settings.backend = 'fs'
+    Settings.useSubdirectories = false
+
+    expect(PersistorFactory(Settings).settings.useSubdirectories).to.be.false
   })
 
   it('should throw an error when the backend is not configured', function () {

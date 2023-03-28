@@ -1,5 +1,4 @@
 /* eslint-disable
-    camelcase,
     n/handle-callback-err,
     no-unused-vars,
 */
@@ -7,7 +6,6 @@
 // Fix any style issues and re-enable lint.
 /*
  * decaffeinate suggestions:
- * DS102: Remove unnecessary code created because of implicit returns
  * DS207: Consider shorter variations of null checks
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
  */
@@ -33,7 +31,7 @@ const ProjectUpdateHandler = {
       lastUpdated: lastUpdatedAt || new Date().getTime(),
       lastUpdatedBy,
     }
-    return Project.updateOne(conditions, update, {}, callback)
+    Project.updateOne(conditions, update, {}, callback)
   },
 
   // like markAsUpdated but allows lastUpdatedAt to be reset to earlier time
@@ -53,33 +51,33 @@ const ProjectUpdateHandler = {
       lastUpdated: lastUpdatedAt || new Date().getTime(),
       lastUpdatedBy,
     }
-    return Project.updateOne(conditions, update, {}, callback)
+    Project.updateOne(conditions, update, {}, callback)
   },
 
-  markAsOpened(project_id, callback) {
-    const conditions = { _id: project_id }
+  markAsOpened(projectId, callback) {
+    const conditions = { _id: projectId }
     const update = { lastOpened: Date.now() }
-    return Project.updateOne(conditions, update, {}, function (err) {
+    Project.updateOne(conditions, update, {}, function (err) {
       if (callback != null) {
         return callback()
       }
     })
   },
 
-  markAsInactive(project_id, callback) {
-    const conditions = { _id: project_id }
+  markAsInactive(projectId, callback) {
+    const conditions = { _id: projectId }
     const update = { active: false }
-    return Project.updateOne(conditions, update, {}, function (err) {
+    Project.updateOne(conditions, update, {}, function (err) {
       if (callback != null) {
         return callback()
       }
     })
   },
 
-  markAsActive(project_id, callback) {
-    const conditions = { _id: project_id }
+  markAsActive(projectId, callback) {
+    const conditions = { _id: projectId }
     const update = { active: true }
-    return Project.updateOne(conditions, update, {}, function (err) {
+    Project.updateOne(conditions, update, {}, function (err) {
       if (callback != null) {
         return callback()
       }

@@ -1,5 +1,4 @@
 /* eslint-disable
-    camelcase,
     n/handle-callback-err,
     max-len,
     no-return-assign,
@@ -17,34 +16,40 @@ const async = require('async')
 const User = require('./helpers/User')
 const request = require('./helpers/request')
 
-const assert_has_common_headers = function (response) {
+const assertHasCommonHeaders = function (response) {
   const { headers } = response
-  assert.equal(headers['x-download-options'], 'noopen')
-  assert.equal(headers['x-xss-protection'], '1; mode=block')
-  return assert.equal(headers['referrer-policy'], 'origin-when-cross-origin')
+  assert.include(headers, {
+    'x-download-options': 'noopen',
+    'x-xss-protection': '0',
+    'cross-origin-resource-policy': 'same-origin',
+    'cross-origin-opener-policy': 'same-origin-allow-popups',
+    'x-content-type-options': 'nosniff',
+    'x-permitted-cross-domain-policies': 'none',
+    'referrer-policy': 'origin-when-cross-origin',
+  })
+  assert.isUndefined(headers['cross-origin-embedder-policy'])
 }
 
-const assert_has_cache_headers = function (response) {
-  const { headers } = response
-  assert.equal(headers['surrogate-control'], 'no-store')
-  assert.equal(
-    headers['cache-control'],
-    'no-store, no-cache, must-revalidate, proxy-revalidate'
-  )
-  assert.equal(headers.pragma, 'no-cache')
-  return assert.equal(headers.expires, '0')
+const assertHasCacheHeaders = function (response) {
+  assert.include(response.headers, {
+    'surrogate-control': 'no-store',
+    'cache-control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    pragma: 'no-cache',
+    expires: '0',
+  })
 }
 
-const assert_has_no_cache_headers = function (response) {
-  const { headers } = response
-  assert.isUndefined(headers['surrogate-control'])
-  assert.isUndefined(headers['cache-control'])
-  assert.isUndefined(headers.pragma)
-  return assert.isUndefined(headers.expires)
+const assertHasNoCacheHeaders = function (response) {
+  assert.doesNotHaveAnyKeys(response.headers, [
+    'surrogate-control',
+    'cache-control',
+    'pragma',
+    'expires',
+  ])
 }
-const assert_has_asset_caching_headers = function (response) {
-  const { headers } = response
-  assert.equal(headers['cache-control'], 'public, max-age=31536000')
+
+const assertHasAssetCachingHeaders = function (response) {
+  assert.equal(response.headers['cache-control'], 'public, max-age=31536000')
 }
 
 describe('SecurityHeaders', function () {
@@ -61,21 +66,21 @@ describe('SecurityHeaders', function () {
 
   it('should have all common headers', function (done) {
     return request.get('/', (err, res, body) => {
-      assert_has_common_headers(res)
+      assertHasCommonHeaders(res)
       return done()
     })
   })
 
   it('should not have cache headers on public pages', function (done) {
     return request.get('/', (err, res, body) => {
-      assert_has_no_cache_headers(res)
+      assertHasNoCacheHeaders(res)
       return done()
     })
   })
 
   it('should have caching headers on static assets', function (done) {
     request.get('/favicon.ico', (err, res) => {
-      assert_has_asset_caching_headers(res)
+      assertHasAssetCachingHeaders(res)
       done(err)
     })
   })
@@ -88,8 +93,8 @@ describe('SecurityHeaders', function () {
         cb => this.user.logout(cb),
       ],
       (err, results) => {
-        const main_response = results[1][0]
-        assert_has_cache_headers(main_response)
+        const mainResponse = results[1][0]
+        assertHasCacheHeaders(mainResponse)
         return done()
       }
     )
@@ -102,11 +107,11 @@ describe('SecurityHeaders', function () {
         cb => {
           return this.user.createProject(
             'public-project',
-            (error, project_id) => {
+            (error, projectId) => {
               if (error != null) {
                 return done(error)
               }
-              this.project_id = project_id
+              this.project_id = projectId
               return this.user.makePublic(this.project_id, 'readAndWrite', cb)
             }
           )
@@ -115,7 +120,7 @@ describe('SecurityHeaders', function () {
       ],
       (err, results) => {
         return request.get(`/project/${this.project_id}`, (err, res, body) => {
-          assert_has_cache_headers(res)
+          assertHasCacheHeaders(res)
           return done()
         })
       }
@@ -131,7 +136,7 @@ describe('SecurityHeaders', function () {
       ],
       (err, results) => {
         const res = results[1][0]
-        assert_has_asset_caching_headers(res)
+        assertHasAssetCachingHeaders(res)
         done()
       }
     )

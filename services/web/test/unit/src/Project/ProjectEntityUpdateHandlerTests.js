@@ -76,6 +76,7 @@ describe('ProjectEntityUpdateHandler', function () {
     }
     this.DocumentUpdaterHandler = {
       flushDocToMongo: sinon.stub().yields(),
+      flushProjectToMongo: sinon.stub().yields(),
       updateProjectStructure: sinon.stub().yields(),
       setDocument: sinon.stub(),
       resyncProjectHistory: sinon.stub().yields(),
@@ -128,10 +129,7 @@ describe('ProjectEntityUpdateHandler', function () {
       addFile: sinon.stub().yields(),
       addDoc: sinon.stub(),
       deleteEntity: sinon.stub().yields(),
-      moveEntity: sinon.stub(),
-      promises: {
-        moveEntity: sinon.stub().resolves(),
-      },
+      moveEntity: sinon.stub().yields(),
     }
     this.FileStoreHandler = {
       copyFile: sinon.stub(),
@@ -1632,7 +1630,11 @@ describe('ProjectEntityUpdateHandler', function () {
 
       it('finds the entity', function () {
         this.ProjectLocator.findElementByPath
-          .calledWith({ project_id: projectId, path: this.path })
+          .calledWith({
+            project_id: projectId,
+            path: this.path,
+            exactCaseMatch: true,
+          })
           .should.equal(true)
       })
 
@@ -1782,7 +1784,7 @@ describe('ProjectEntityUpdateHandler', function () {
     })
 
     it('notifies tpds', function () {
-      this.TpdsUpdateSender.promises.moveEntity
+      this.TpdsUpdateSender.moveEntity
         .calledWith({
           projectId,
           projectName: this.project_name,
@@ -1803,8 +1805,7 @@ describe('ProjectEntityUpdateHandler', function () {
           projectHistoryId,
           userId,
           this.changes,
-          this.source,
-          this.callback
+          this.source
         )
         .should.equal(true)
     })
@@ -1846,7 +1847,7 @@ describe('ProjectEntityUpdateHandler', function () {
       })
 
       it('notifies tpds', function () {
-        this.TpdsUpdateSender.promises.moveEntity
+        this.TpdsUpdateSender.moveEntity
           .calledWith({
             projectId,
             projectName: this.project_name,
@@ -1860,6 +1861,12 @@ describe('ProjectEntityUpdateHandler', function () {
           .should.equal(true)
       })
 
+      it('flushes the project in doc updater', function () {
+        this.DocumentUpdaterHandler.flushProjectToMongo.should.have.been.calledWith(
+          projectId
+        )
+      })
+
       it('sends the changes in project structure to the doc updater', function () {
         this.DocumentUpdaterHandler.updateProjectStructure
           .calledWith(
@@ -1867,8 +1874,7 @@ describe('ProjectEntityUpdateHandler', function () {
             projectHistoryId,
             userId,
             this.changes,
-            this.source,
-            this.callback
+            this.source
           )
           .should.equal(true)
       })
@@ -1905,6 +1911,43 @@ describe('ProjectEntityUpdateHandler', function () {
       it('returns an error', function () {
         const errorMatcher = sinon.match.instanceOf(Errors.InvalidNameError)
         this.callback.calledWithMatch(errorMatcher).should.equal(true)
+      })
+    })
+
+    describe('renaming an entity with a non-string value', function () {
+      beforeEach(function () {
+        this.project_name = 'project name'
+        this.startPath = '/folder/a.tex'
+        this.endPath = '/folder/b.tex'
+        this.rev = 2
+        this.changes = { newDocs: ['old-doc'], newFiles: ['old-file'] }
+        this.newDocName = ['hello']
+        this.ProjectEntityMongoUpdateHandler.renameEntity.yields(
+          null,
+          this.project,
+          this.startPath,
+          this.endPath,
+          this.rev,
+          this.changes
+        )
+
+        this.ProjectEntityUpdateHandler.renameEntity(
+          projectId,
+          docId,
+          'doc',
+          this.newDocName,
+          userId,
+          this.source,
+          this.callback
+        )
+      })
+
+      it('returns an error', function () {
+        const errorMatcher = sinon.match.instanceOf(Error)
+        this.callback.calledWithMatch(errorMatcher).should.equal(true)
+        expect(
+          this.ProjectEntityMongoUpdateHandler.renameEntity.called
+        ).to.equal(false)
       })
     })
   })

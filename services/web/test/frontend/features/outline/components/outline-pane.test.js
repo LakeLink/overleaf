@@ -55,6 +55,7 @@ describe('<OutlinePane />', function () {
         jumpToLine={jumpToLine}
         onToggle={onToggle}
         eventTracking={eventTracking}
+        show
       />
     )
 
@@ -70,6 +71,7 @@ describe('<OutlinePane />', function () {
         jumpToLine={jumpToLine}
         onToggle={onToggle}
         eventTracking={eventTracking}
+        show
       />
     )
 
@@ -98,6 +100,7 @@ describe('<OutlinePane />', function () {
         jumpToLine={jumpToLine}
         onToggle={onToggle}
         eventTracking={eventTracking}
+        show
       />
     )
 
@@ -111,5 +114,36 @@ describe('<OutlinePane />', function () {
     expect(global.localStorage.setItem).to.be.calledOnce
     expect(global.localStorage.setItem).to.be.calledWithMatch(/123abc/, 'true')
     expect(onToggle).to.be.calledTwice
+  })
+
+  it('shows warning on partial result', function () {
+    render(
+      <OutlinePane
+        isTexFile
+        outline={[]}
+        jumpToLine={jumpToLine}
+        onToggle={onToggle}
+        eventTracking={eventTracking}
+        show
+        isPartial
+      />
+    )
+    expect(screen.queryByRole('status')).to.exist
+  })
+
+  it('shows no warning on non-partial result', function () {
+    render(
+      <OutlinePane
+        isTexFile
+        outline={[]}
+        jumpToLine={jumpToLine}
+        onToggle={onToggle}
+        eventTracking={eventTracking}
+        show
+        isPartial={false}
+      />
+    )
+
+    expect(screen.queryByRole('status')).to.not.exist
   })
 })

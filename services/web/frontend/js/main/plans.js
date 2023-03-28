@@ -4,6 +4,7 @@
 */
 import App from '../base'
 import getMeta from '../utils/meta'
+
 App.factory('MultiCurrencyPricing', function () {
   const currencyCode = getMeta('ol-recommendedCurrency')
 
@@ -14,219 +15,210 @@ App.factory('MultiCurrencyPricing', function () {
       USD: {
         symbol: '$',
         student: {
-          monthly: '$8',
-          annual: '$80',
+          monthly: '$9',
+          annual: '$89',
         },
         personal: {
-          monthly: '$13',
-          annual: '$120',
+          monthly: '$14',
+          annual: '$129',
         },
         collaborator: {
-          monthly: '$19',
-          annual: '$180',
+          monthly: '$21',
+          annual: '$199',
         },
         professional: {
-          monthly: '$38',
-          annual: '$360',
+          monthly: '$42',
+          annual: '$399',
         },
       },
-
       EUR: {
         symbol: '€',
         student: {
-          monthly: '€7',
-          annual: '€70',
+          monthly: '€8',
+          annual: '€79',
         },
         personal: {
-          monthly: '€12',
-          annual: '€108',
+          monthly: '€13',
+          annual: '€119',
         },
         collaborator: {
-          monthly: '€18',
-          annual: '€168',
+          monthly: '€19',
+          annual: '€179',
         },
         professional: {
-          monthly: '€35',
-          annual: '€336',
+          monthly: '€39',
+          annual: '€369',
         },
       },
-
       GBP: {
         symbol: '£',
         student: {
-          monthly: '£6',
-          annual: '£60',
+          monthly: '£7',
+          annual: '£69',
         },
         personal: {
-          monthly: '£10',
-          annual: '£96',
+          monthly: '£11',
+          annual: '£104',
         },
         collaborator: {
-          monthly: '£15',
-          annual: '£144',
+          monthly: '£17',
+          annual: '£159',
         },
         professional: {
-          monthly: '£30',
-          annual: '£288',
+          monthly: '£34',
+          annual: '£319',
         },
       },
-
       SEK: {
         symbol: 'kr',
         student: {
-          monthly: '60 kr',
-          annual: '600 kr',
+          monthly: '66 kr',
+          annual: '659 kr',
         },
         personal: {
-          monthly: '92 kr',
-          annual: '876 kr',
+          monthly: '104 kr',
+          annual: '969 kr',
         },
         collaborator: {
-          monthly: '138 kr',
-          annual: '1320 kr',
+          monthly: '154 kr',
+          annual: '1449 kr',
         },
         professional: {
-          monthly: '275 kr',
-          annual: '2640 kr',
+          monthly: '299 kr',
+          annual: '2869 kr',
         },
       },
       CAD: {
         symbol: '$',
         student: {
-          monthly: '$9',
-          annual: '$90',
-        },
-        personal: {
-          monthly: '$14',
-          annual: '$132',
-        },
-        collaborator: {
-          monthly: '$22',
-          annual: '$204',
-        },
-        professional: {
-          monthly: '$43',
-          annual: '$408',
-        },
-      },
-
-      NOK: {
-        symbol: 'kr',
-        student: {
-          monthly: '60 kr',
-          annual: '600 kr',
-        },
-        personal: {
-          monthly: '92 kr',
-          annual: '876 kr',
-        },
-        collaborator: {
-          monthly: '138 kr',
-          annual: '1320 kr',
-        },
-        professional: {
-          monthly: '275 kr',
-          annual: '2640 kr',
-        },
-      },
-
-      DKK: {
-        symbol: 'kr',
-        student: {
-          monthly: '50 kr',
-          annual: '500 kr',
-        },
-        personal: {
-          monthly: '75 kr',
-          annual: '720 kr',
-        },
-        collaborator: {
-          monthly: '113 kr',
-          annual: '1080 kr',
-        },
-        professional: {
-          monthly: '225 kr',
-          annual: '2160 kr',
-        },
-      },
-
-      AUD: {
-        symbol: '$',
-        student: {
           monthly: '$10',
-          annual: '$100',
+          annual: '$99',
         },
         personal: {
-          monthly: '$15',
-          annual: '$144',
-        },
-        collaborator: {
-          monthly: '$23',
-          annual: '$216',
-        },
-        professional: {
-          monthly: '$44',
-          annual: '$420',
-        },
-      },
-
-      NZD: {
-        symbol: '$',
-        student: {
-          monthly: '$10',
-          annual: '$100',
-        },
-        personal: {
-          monthly: '$15',
-          annual: '$144',
-        },
-        collaborator: {
-          monthly: '$23',
-          annual: '$216',
-        },
-        professional: {
-          monthly: '$44',
-          annual: '$420',
-        },
-      },
-
-      CHF: {
-        symbol: 'Fr',
-        student: {
-          monthly: 'Fr 8',
-          annual: 'Fr 80',
-        },
-        personal: {
-          monthly: 'Fr 13',
-          annual: 'Fr 120',
-        },
-        collaborator: {
-          monthly: 'Fr 19',
-          annual: 'Fr 180',
-        },
-        professional: {
-          monthly: 'Fr 38',
-          annual: 'Fr 360',
-        },
-      },
-
-      SGD: {
-        symbol: '$',
-        student: {
-          monthly: '$12',
-          annual: '$120',
-        },
-        personal: {
-          monthly: '$17',
-          annual: '$156',
+          monthly: '$16',
+          annual: '$149',
         },
         collaborator: {
           monthly: '$25',
-          annual: '$240',
+          annual: '$229',
         },
         professional: {
-          monthly: '$50',
-          annual: '$480',
+          monthly: '$48',
+          annual: '$449',
+        },
+      },
+      NOK: {
+        symbol: 'kr',
+        student: {
+          monthly: '66 kr',
+          annual: '659 kr',
+        },
+        personal: {
+          monthly: '104 kr',
+          annual: '969 kr',
+        },
+        collaborator: {
+          monthly: '154 kr',
+          annual: '1449 kr',
+        },
+        professional: {
+          monthly: '299 kr',
+          annual: '2869 kr',
+        },
+      },
+      DKK: {
+        symbol: 'kr',
+        student: {
+          monthly: '55 kr',
+          annual: '549 kr',
+        },
+        personal: {
+          monthly: '84 kr',
+          annual: '799 kr',
+        },
+        collaborator: {
+          monthly: '129 kr',
+          annual: '1199 kr',
+        },
+        professional: {
+          monthly: '249 kr',
+          annual: '2379 kr',
+        },
+      },
+      AUD: {
+        symbol: '$',
+        student: {
+          monthly: '$11',
+          annual: '$109',
+        },
+        personal: {
+          monthly: '$17',
+          annual: '$159',
+        },
+        collaborator: {
+          monthly: '$25',
+          annual: '$239',
+        },
+        professional: {
+          monthly: '$49',
+          annual: '$459',
+        },
+      },
+      NZD: {
+        symbol: '$',
+        student: {
+          monthly: '$11',
+          annual: '$109',
+        },
+        personal: {
+          monthly: '$17',
+          annual: '$159',
+        },
+        collaborator: {
+          monthly: '$25',
+          annual: '$239',
+        },
+        professional: {
+          monthly: '$49',
+          annual: '$459',
+        },
+      },
+      CHF: {
+        symbol: 'Fr',
+        student: {
+          monthly: 'Fr 9',
+          annual: 'Fr 89',
+        },
+        personal: {
+          monthly: 'Fr 14',
+          annual: 'Fr 134',
+        },
+        collaborator: {
+          monthly: 'Fr 21',
+          annual: 'Fr 199',
+        },
+        professional: {
+          monthly: 'Fr 42',
+          annual: 'Fr 399',
+        },
+      },
+      SGD: {
+        symbol: '$',
+        student: {
+          monthly: '$13',
+          annual: '$129',
+        },
+        personal: {
+          monthly: '$18',
+          annual: '$169',
+        },
+        collaborator: {
+          monthly: '$28',
+          annual: '$259',
+        },
+        professional: {
+          monthly: '$55',
+          annual: '$519',
         },
       },
     },

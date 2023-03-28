@@ -5,7 +5,7 @@
 // Base styles
 // --------------------------------------------------
 
-.btn {
+.btn when(@is-new-css = false) {
   display: inline-block;
   margin-bottom: 0; // For input.btn
   font-weight: @btn-font-weight;
@@ -52,6 +52,63 @@
     .box-shadow(none);
   }
 }
+.btn when(@is-new-css = true) {
+  display: inline-block;
+  margin-bottom: 0; // For input.btn
+  font-weight: @btn-font-weight;
+  text-align: center;
+  vertical-align: middle;
+  cursor: pointer;
+  border: 0 solid transparent;
+  white-space: nowrap;
+  .button-size(
+    @padding-base-vertical; @padding-base-horizontal; @font-size-base;
+      @line-height-base; @btn-border-radius-base
+  );
+  .user-select(none);
+
+  &,
+  &:active,
+  &.active {
+    &:focus {
+      .tab-focus();
+    }
+  }
+
+  &:hover,
+  &:focus {
+    color: @btn-default-color;
+    text-decoration: none;
+  }
+
+  // &:active,
+  // &.active {
+  // }
+
+  &.disabled,
+  &[disabled],
+  fieldset[disabled] & {
+    &,
+    &:hover,
+    &:focus,
+    &:active,
+    &.active {
+      cursor: not-allowed;
+      opacity: 1; //needed to override deprecated styling in individual classes
+      .box-shadow(none);
+    }
+  }
+
+  &.disabled.btn-info,
+  &.disabled.btn-default,
+  &[disabled].btn-info,
+  &[disabled].btn-default,
+  fieldset[disabled].btn-info,
+  fieldset[disabled].btn-default & {
+    // style only for deprecated classes
+    .opacity(0.65);
+  }
+}
 
 // Alternate buttons
 // --------------------------------------------------
@@ -62,16 +119,20 @@
 .btn-default-outline {
   .button-outline-variant(@btn-default-bg);
 }
-.btn-primary {
+.btn-primary when (@is-new-css = false) {
   .button-variant(@btn-primary-color; @btn-primary-bg; @btn-primary-border);
+}
+.btn-primary when (@is-new-css = true) {
+  .btn-borderless();
 }
 .btn-primary-on-primary-bg {
   .button-variant(@white; @ol-dark-green; @ol-dark-green);
 }
 // Success appears as green
 .btn-success {
-  .button-variant(@btn-success-color; @btn-success-bg; @btn-success-border);
+  .btn-primary;
 }
+
 // Info appears as blue-green
 .btn-info {
   .button-variant(@btn-info-color; @btn-info-bg; @btn-info-border);
@@ -81,8 +142,27 @@
   .button-variant(@btn-warning-color; @btn-warning-bg; @btn-warning-border);
 }
 // Danger and error appear as red
-.btn-danger {
+.btn-danger when(@is-new-css = false) {
   .button-variant(@btn-danger-color; @btn-danger-bg; @btn-danger-border);
+}
+.btn-danger when(@is-new-css = true) {
+  .btn-borderless(@white, @red, @red-60);
+}
+// btn-secondary
+.btn-secondary when(@is-new-css = false) {
+  &:not(.btn-secondary-info) {
+    .btn-default;
+  }
+}
+.btn-secondary when(@is-new-css = true) {
+  .btn-bordered();
+}
+// btn-info for old and btn-secondary for new
+.btn-secondary-info when(@is-new-css = false) {
+  .btn-info;
+}
+.btn-secondary-info when(@is-new-css = true) {
+  .btn-secondary;
 }
 
 .reset-btns {
@@ -107,6 +187,9 @@
   }
   .btn-warning {
     .btn-warning;
+  }
+  .btn-secondary {
+    .btn-secondary;
   }
 }
 
@@ -218,4 +301,20 @@ input[type='button'] {
   &.btn-block {
     width: 100%;
   }
+}
+
+.login-btn when(@is-new-css = true) {
+  .btn;
+  .btn-secondary;
+  position: relative;
+  padding-left: 20px;
+  padding-right: 0;
+}
+
+.login-btn when(@is-new-css = false) {
+  .btn;
+  .btn-default;
+  position: relative;
+  padding-left: 20px;
+  padding-right: 0;
 }

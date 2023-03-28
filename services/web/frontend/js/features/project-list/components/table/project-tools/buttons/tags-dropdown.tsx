@@ -84,7 +84,8 @@ function TagsDropdown() {
     <>
       <ControlledDropdown id="tags">
         <Dropdown.Toggle
-          bsStyle="default"
+          bsStyle={null}
+          className="btn-secondary"
           title={t('tags')}
           aria-label={t('tags')}
         >
@@ -94,7 +95,7 @@ function TagsDropdown() {
           <li className="dropdown-header" role="heading" aria-level={3}>
             {t('add_to_folder')}
           </li>
-          {sortBy(tags, tag => tag.name.toLowerCase()).map(tag => {
+          {sortBy(tags, tag => tag.name?.toLowerCase()).map(tag => {
             return (
               <li key={tag._id}>
                 <Button

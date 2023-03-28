@@ -5,12 +5,13 @@ import PropTypes from 'prop-types'
 import Icon from '../../../shared/components/icon'
 import { transferProjectOwnership } from '../utils/api'
 import AccessibleModal from '../../../shared/components/accessible-modal'
-import { reload } from '../../../shared/components/location'
 import { useProjectContext } from '../../../shared/context/project-context'
+import { useLocation } from '../../../shared/hooks/use-location'
 
 export default function TransferOwnershipModal({ member, cancel }) {
   const [inflight, setInflight] = useState(false)
   const [error, setError] = useState(false)
+  const location = useLocation()
 
   const { _id: projectId, name: projectName } = useProjectContext()
 
@@ -20,7 +21,7 @@ export default function TransferOwnershipModal({ member, cancel }) {
 
     transferProjectOwnership(projectId, member)
       .then(() => {
-        reload()
+        location.reload()
       })
       .catch(() => {
         setError(true)
@@ -61,7 +62,8 @@ export default function TransferOwnershipModal({ member, cancel }) {
         <div className="modal-footer-right">
           <Button
             type="button"
-            bsStyle="default"
+            bsStyle={null}
+            className="btn-secondary"
             onClick={cancel}
             disabled={inflight}
           >
@@ -69,7 +71,7 @@ export default function TransferOwnershipModal({ member, cancel }) {
           </Button>
           <Button
             type="button"
-            bsStyle="success"
+            bsStyle="primary"
             onClick={confirm}
             disabled={inflight}
           >

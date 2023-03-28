@@ -1,18 +1,15 @@
 const { expect } = require('chai')
-const RateLimiter = require('../../../app/src/infrastructure/RateLimiter')
+const PasswordResetRouter = require('../../../app/src/Features/PasswordReset/PasswordResetRouter')
 const UserHelper = require('./helpers/UserHelper')
 
 describe('PasswordUpdate', function () {
   let email, password, response, user, userHelper
   afterEach(async function () {
-    await RateLimiter.promises.clearRateLimit(
-      'password_reset_rate_limit',
-      '127.0.0.1'
-    )
+    await PasswordResetRouter.rateLimiter.delete('127.0.0.1')
   })
   beforeEach(async function () {
     userHelper = new UserHelper()
-    email = userHelper.getDefaultEmail()
+    email = 'somecooluser@example.com'
     password = 'old-password'
     userHelper = await UserHelper.createUser({ email, password })
     userHelper = await UserHelper.loginUser({
@@ -137,6 +134,36 @@ describe('PasswordUpdate', function () {
       it('should return error message', async function () {
         const body = await response.json()
         expect(body.message).to.equal('password is too short')
+      })
+      it('should not update audit log', async function () {
+        const auditLog = userHelper.getAuditLogWithoutNoise()
+        expect(auditLog).to.deep.equal([])
+      })
+    })
+    describe('new password is too similar to email', function () {
+      beforeEach(async function () {
+        response = await userHelper.fetch('/user/password/update', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            currentPassword: password,
+            newPassword1: 'coolusersome123',
+            newPassword2: 'coolusersome123',
+          }),
+        })
+        userHelper = await UserHelper.getUser({ email })
+      })
+      it('should return 400', async function () {
+        expect(response.status).to.equal(400)
+      })
+      it('should return error message', async function () {
+        const body = await response.json()
+        expect(body.message).to.equal(
+          'Password is too similar to email address'
+        )
       })
       it('should not update audit log', async function () {
         const auditLog = userHelper.getAuditLogWithoutNoise()

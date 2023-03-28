@@ -96,13 +96,33 @@ async function changePassword(req, res, next) {
     )
   } catch (error) {
     if (error.name === 'InvalidPasswordError') {
-      return HttpErrorHandler.badRequest(req, res, error.message)
+      if (error?.info?.code === 'contains_email') {
+        return HttpErrorHandler.badRequest(
+          req,
+          res,
+          req.i18n.translate('invalid_password_contains_email')
+        )
+      } else if (error?.info?.code === 'too_similar') {
+        return HttpErrorHandler.badRequest(
+          req,
+          res,
+          req.i18n.translate('invalid_password_too_similar')
+        )
+      } else {
+        return HttpErrorHandler.badRequest(req, res, error.message)
+      }
     } else if (error.name === 'PasswordMustBeDifferentError') {
       return HttpErrorHandler.badRequest(
         req,
         res,
         req.i18n.translate('password_change_password_must_be_different')
       )
+    } else if (error.name === 'PasswordReusedError') {
+      return res.status(400).json({
+        message: {
+          key: 'password-must-be-strong',
+        },
+      })
     } else {
       throw error
     }

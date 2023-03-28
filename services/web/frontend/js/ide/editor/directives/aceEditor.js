@@ -22,6 +22,10 @@ import '../../metadata/services/metadata'
 import '../../graphics/services/graphics'
 import '../../preamble/services/preamble'
 import '../../files/services/files'
+import {
+  initAcePerfListener,
+  tearDownAcePerfListener,
+} from '../ace-performance'
 let syntaxValidationEnabled
 const { EditSession } = ace.require('ace/edit_session')
 const ModeList = ace.require('ace/ext/modelist')
@@ -242,30 +246,8 @@ App.directive(
 
         /* eslint-enable no-unused-vars */
 
-        scope.$watch('onSave', function (callback) {
-          if (callback != null) {
-            Vim.defineEx('write', 'w', callback)
-            editor.commands.addCommand({
-              name: 'save',
-              bindKey: {
-                win: 'Ctrl-S',
-                mac: 'Command-S',
-              },
-              exec: callback,
-              readOnly: true,
-            })
-            // Not technically 'save', but Ctrl-. recompiles in OL v1
-            // so maintain compatibility
-            return editor.commands.addCommand({
-              name: 'recompile_v1',
-              bindKey: {
-                win: 'Ctrl-.',
-                mac: 'Ctrl-.',
-              },
-              exec: callback,
-              readOnly: true,
-            })
-          }
+        Vim.defineEx('write', 'w', function () {
+          window.dispatchEvent(new Event('pdf:recompile'))
         })
         editor.commands.removeCommand('transposeletters')
         editor.commands.removeCommand('showSettingsMenu')
@@ -801,6 +783,8 @@ App.directive(
           // now attach session to editor
           editor.setSession(session)
 
+          initAcePerfListener(editor.textInput.getElement())
+
           const doc = session.getDocument()
           doc.on('change', onChange)
 
@@ -862,6 +846,9 @@ App.directive(
           tearDownSpellCheck()
           tearDownTrackChanges()
           tearDownUndo()
+
+          tearDownAcePerfListener(editor.textInput.getElement())
+
           sharejs_doc.detachFromAce()
           sharejs_doc.off('remoteop.recordRemote')
 

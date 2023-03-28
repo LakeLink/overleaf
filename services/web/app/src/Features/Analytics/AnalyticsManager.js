@@ -3,10 +3,10 @@ const UserAnalyticsIdCache = require('./UserAnalyticsIdCache')
 const Settings = require('@overleaf/settings')
 const Metrics = require('../../infrastructure/Metrics')
 const Queues = require('../../infrastructure/Queues')
-const uuid = require('uuid')
+const crypto = require('crypto')
 const _ = require('lodash')
 const { expressify } = require('../../util/promises')
-const { logger } = require('@overleaf/logger')
+const logger = require('@overleaf/logger')
 const { getAnalyticsIdFromMongoUser } = require('./AnalyticsHelper')
 
 const analyticsEventsQueue = Queues.getQueue('analytics-events')
@@ -132,6 +132,10 @@ function updateEditingSession(userId, projectId, countryCode, segmentation) {
     return
   }
   if (!_isSegmentationValid(segmentation)) {
+    logger.info(
+      { userId, projectId, segmentation },
+      'rejecting analytics editing session due to bad segmentation'
+    )
     return
   }
   Metrics.analyticsQueue.inc({
@@ -165,9 +169,17 @@ function _recordEvent(
   { delay } = {}
 ) {
   if (!_isAttributeValid(event)) {
+    logger.info(
+      { analyticsId, event, segmentation },
+      'rejecting analytics event due to bad event name'
+    )
     return
   }
   if (!_isSegmentationValid(segmentation)) {
+    logger.info(
+      { analyticsId, event, segmentation },
+      'rejecting analytics event due to bad segmentation'
+    )
     return
   }
   Metrics.analyticsQueue.inc({ status: 'adding', event_type: 'event' })
@@ -193,7 +205,18 @@ function _recordEvent(
 }
 
 function _setUserProperty({ analyticsId, propertyName, propertyValue }) {
-  if (!_isAttributeValid(propertyName) || !_isAttributeValid(propertyValue)) {
+  if (!_isAttributeValid(propertyName)) {
+    logger.info(
+      { analyticsId, propertyName, propertyValue },
+      'rejecting analytics user property due to bad name'
+    )
+    return
+  }
+  if (!_isAttributeValueValid(propertyValue)) {
+    logger.info(
+      { analyticsId, propertyName, propertyValue },
+      'rejecting analytics user property due to bad value'
+    )
     return
   }
   Metrics.analyticsQueue.inc({
@@ -246,15 +269,29 @@ function _isAttributeValid(attribute) {
   return !attribute || /^[a-zA-Z0-9-_.:;,/]+$/.test(attribute)
 }
 
+function _isAttributeValueValid(attributeValue) {
+  return _isAttributeValid(attributeValue) || attributeValue instanceof Date
+}
+
+function _isSegmentationValueValid(attributeValue) {
+  // spaces and %-escaped values are allowed for segmentation values
+  return !attributeValue || /^[a-zA-Z0-9-_.:;,/ %]+$/.test(attributeValue)
+}
+
 function _isSegmentationValid(segmentation) {
   if (!segmentation) {
     return true
   }
-  const hasAnyInvalidAttribute = [
-    ...Object.keys(segmentation),
-    ...Object.values(segmentation),
-  ].some(attribute => !_isAttributeValid(attribute))
-  return !hasAnyInvalidAttribute
+
+  const hasAnyInvalidKey = [...Object.keys(segmentation)].some(
+    key => !_isAttributeValid(key)
+  )
+
+  const hasAnyInvalidValue = [...Object.values(segmentation)].some(
+    value => !_isSegmentationValueValid(value)
+  )
+
+  return !hasAnyInvalidKey && !hasAnyInvalidValue
 }
 
 function getIdsFromSession(session) {
@@ -271,7 +308,7 @@ async function analyticsIdMiddleware(req, res, next) {
     session.analyticsId = getAnalyticsIdFromMongoUser(sessionUser)
   } else if (!session.analyticsId) {
     // generate an `analyticsId` if needed
-    session.analyticsId = uuid.v4()
+    session.analyticsId = crypto.randomUUID()
   }
 
   next()

@@ -22,6 +22,7 @@ import './controllers/SavingNotificationController'
 import './controllers/CompileButton'
 import './controllers/SwitchToPDFButton'
 import getMeta from '../../utils/meta'
+import { hasSeenCM6SwitchAwaySurvey } from '../../features/source-editor/utils/switch-away-survey'
 
 let EditorManager
 
@@ -45,6 +46,7 @@ export default EditorManager = (function () {
         wantTrackChanges: false,
         docTooLongErrorShown: false,
         showRichText: this.showRichText(),
+        showVisual: this.showVisual(),
         newSourceEditor: this.newSourceEditor(),
         showSymbolPalette: false,
         toggleSymbolPalette: () => {
@@ -160,10 +162,32 @@ export default EditorManager = (function () {
       if (!this.$scope.editor.sharejs_doc) {
         return null
       }
-      return this.$scope.editor.sharejs_doc.editorType()
+
+      let editorType = this.$scope.editor.sharejs_doc.editorType()
+
+      if (editorType === 'cm6' && this.$scope.editor.showVisual) {
+        editorType = 'cm6-rich-text'
+      }
+
+      return editorType
     }
 
     showRichText() {
+      if (getMeta('ol-richTextVariant') === 'cm6') {
+        return false
+      }
+
+      return (
+        this.localStorage(`editor.mode.${this.$scope.project_id}`) ===
+        'rich-text'
+      )
+    }
+
+    showVisual() {
+      if (getMeta('ol-richTextVariant') !== 'cm6') {
+        return false
+      }
+
       return (
         this.localStorage(`editor.mode.${this.$scope.project_id}`) ===
         'rich-text'
@@ -171,16 +195,37 @@ export default EditorManager = (function () {
     }
 
     newSourceEditor() {
-      // only use the new source editor if the option to switch is available
-      if (!getMeta('ol-showNewSourceEditorOption')) {
+      // the new source editor is not available at the moment in CE
+      if (!getMeta('ol-hasNewSourceEditor')) {
         return false
       }
 
-      const sourceEditor = this.localStorage(
-        `editor.source_editor.${this.$scope.project_id}`
-      )
+      // Use the new source editor if the legacy editor is disabled
+      if (!getMeta('ol-showLegacySourceEditor')) {
+        return true
+      }
 
-      return sourceEditor === 'cm6' || sourceEditor == null
+      const storedPrefIsCM6 = () => {
+        const sourceEditor = this.localStorage(
+          `editor.source_editor.${this.$scope.project_id}`
+        )
+
+        return sourceEditor === 'cm6' || sourceEditor == null
+      }
+
+      const showCM6SwitchAwaySurvey = getMeta('ol-showCM6SwitchAwaySurvey')
+
+      if (!showCM6SwitchAwaySurvey) {
+        return storedPrefIsCM6()
+      }
+
+      if (hasSeenCM6SwitchAwaySurvey()) {
+        return storedPrefIsCM6()
+      } else {
+        // force user to switch to cm6 if they haven't seen either of the
+        // switch-away surveys
+        return true
+      }
     }
 
     autoOpenDoc() {
@@ -231,7 +276,7 @@ export default EditorManager = (function () {
       const done = isNewDoc => {
         const eventName = 'doc:after-opened'
         this.$scope.$broadcast(eventName, { isNewDoc })
-        window.dispatchEvent(new CustomEvent(eventName, { isNewDoc }))
+        window.dispatchEvent(new CustomEvent(eventName, { detail: isNewDoc }))
         if (options.gotoLine != null) {
           // allow Ace to display document before moving, delay until next tick
           // added delay to make this happen later that gotoStoredPosition in
@@ -260,37 +305,39 @@ export default EditorManager = (function () {
         return
       }
 
-      // We're now either opening a new document or reloading a broken one.
-      this.$scope.editor.open_doc_id = doc.id
-      this.$scope.editor.open_doc_name = doc.name
+      this.$scope.$applyAsync(() => {
+        // We're now either opening a new document or reloading a broken one.
+        this.$scope.editor.open_doc_id = doc.id
+        this.$scope.editor.open_doc_name = doc.name
 
-      this.ide.localStorage(`doc.open_id.${this.$scope.project_id}`, doc.id)
-      this.ide.fileTreeManager.selectEntity(doc)
+        this.ide.localStorage(`doc.open_id.${this.$scope.project_id}`, doc.id)
+        this.ide.fileTreeManager.selectEntity(doc)
 
-      this.$scope.editor.opening = true
-      return this._openNewDocument(doc, (error, sharejs_doc) => {
-        if (error && error.message === 'another document was loaded') {
-          sl_console.log(
-            `[openDoc] another document was loaded while ${doc.id} was loading`
-          )
-          return
-        }
-        if (error != null) {
-          this.ide.showGenericMessageModal(
-            'Error opening document',
-            'Sorry, something went wrong opening this document. Please try again.'
-          )
-          return
-        }
+        this.$scope.editor.opening = true
+        return this._openNewDocument(doc, (error, sharejs_doc) => {
+          if (error && error.message === 'another document was loaded') {
+            sl_console.log(
+              `[openDoc] another document was loaded while ${doc.id} was loading`
+            )
+            return
+          }
+          if (error != null) {
+            this.ide.showGenericMessageModal(
+              'Error opening document',
+              'Sorry, something went wrong opening this document. Please try again.'
+            )
+            return
+          }
 
-        this._syncTrackChangesState(sharejs_doc)
+          this._syncTrackChangesState(sharejs_doc)
 
-        this.$scope.$broadcast('doc:opened')
+          this.$scope.$broadcast('doc:opened')
 
-        return this.$scope.$apply(() => {
-          this.$scope.editor.opening = false
-          this.$scope.editor.sharejs_doc = sharejs_doc
-          return done(true)
+          return this.$scope.$applyAsync(() => {
+            this.$scope.editor.opening = false
+            this.$scope.editor.sharejs_doc = sharejs_doc
+            return done(true)
+          })
         })
       })
     }

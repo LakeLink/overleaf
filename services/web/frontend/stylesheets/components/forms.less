@@ -32,6 +32,16 @@ label {
   display: inline-block;
   margin-bottom: 5px;
   font-weight: bold;
+
+  // also update .legend-as-label if changes are made to label
+}
+
+.legend-as-label {
+  // display a legend like a label
+  &:extend(label);
+  font-size: @font-size-base;
+  color: @text-color;
+  border: 0;
 }
 
 // Normalize form controls
@@ -155,8 +165,8 @@ output {
 .form-control when (@is-new-css = true) {
   display: block;
   width: 100%;
-  height: @input-height-base; // Make inputs at least the height of their button counterpart (base line-height + padding + border)
-  padding: @padding-base-vertical @padding-base-horizontal;
+  height: @input-height-base;
+  padding: @padding-base-vertical @input-padding;
   font-size: @font-size-base;
   line-height: @line-height-base;
   color: @input-color;
@@ -529,4 +539,11 @@ input[type='checkbox'],
     top: 0;
     left: (@grid-gutter-width / 2);
   }
+}
+
+.invalid-feedback {
+  display: flex;
+  align-items: baseline;
+  font-size: @font-size-small;
+  .text-emphasis-variant(@state-danger-text);
 }

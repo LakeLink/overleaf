@@ -146,6 +146,26 @@ test_frontend_ct:
 	COMPOSE_PROJECT_NAME=frontend_test_ct_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) run --rm test_frontend_ct
 	COMPOSE_PROJECT_NAME=frontend_test_ct_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
 
+# Note: The below cypress targets are for CI only
+build_test_frontend_ct:
+	COMPOSE_PROJECT_NAME=frontend_test_ct_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) build test_frontend_ct
+	# Note: The 2nd build should use the cache from the 1st build.
+	COMPOSE_PROJECT_NAME=frontend_test_ct_modules_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) build test_frontend_ct
+
+test_frontend_ct_core: export CYPRESS_RESULTS=./cypress/results/core
+test_frontend_ct_core: export CYPRESS_SPEC_PATTERN=./test/frontend/**/*.spec.{js,ts,tsx}
+test_frontend_ct_core:
+	COMPOSE_PROJECT_NAME=frontend_test_ct_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
+	COMPOSE_PROJECT_NAME=frontend_test_ct_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) run --rm test_frontend_ct
+	COMPOSE_PROJECT_NAME=frontend_test_ct_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
+
+test_frontend_ct_modules: export CYPRESS_RESULTS=./cypress/results/modules
+test_frontend_ct_modules: export CYPRESS_SPEC_PATTERN=./modules/**/test/frontend/**/*.spec.{js,ts,tsx}
+test_frontend_ct_modules:
+	COMPOSE_PROJECT_NAME=frontend_test_ct_modules_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
+	COMPOSE_PROJECT_NAME=frontend_test_ct_modules_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) run --rm test_frontend_ct
+	COMPOSE_PROJECT_NAME=frontend_test_ct_modules_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
+
 #
 # Acceptance tests
 #
@@ -432,6 +452,12 @@ lint: lint_locales
 lint_locales:
 	bin/lint_locales
 
+sort_locales:
+	 node scripts/translations/sort.js
+
+cleanup_unused_locales:
+	 node scripts/translations/cleanupUnusedLocales.js
+
 lint: lint_flag_res_send_usage
 lint_flag_res_send_usage:
 	bin/lint_flag_res_send_usage
@@ -468,16 +494,15 @@ IMAGE_CI ?= ci/$(PROJECT_NAME):$(BRANCH_NAME)-$(BUILD_NUMBER)
 IMAGE_REPO ?= gcr.io/overleaf-ops/$(PROJECT_NAME)
 IMAGE_REPO_BRANCH ?= $(IMAGE_REPO):$(BRANCH_NAME)
 IMAGE_REPO_MAIN ?= $(IMAGE_REPO):main
-IMAGE_REPO_MASTER ?= $(IMAGE_REPO):master
 IMAGE_REPO_FINAL ?= $(IMAGE_REPO_BRANCH)-$(BUILD_NUMBER)
 
 export SENTRY_RELEASE ?= ${COMMIT_SHA}
 
 build_deps:
 	docker build --pull \
+		--build-arg BUILDKIT_INLINE_CACHE=1 \
 		--cache-from $(IMAGE_REPO_BRANCH)-deps \
 		--cache-from $(IMAGE_REPO_MAIN)-deps \
-		--cache-from $(IMAGE_REPO_MASTER)-deps \
 		--tag $(IMAGE_REPO_BRANCH)-deps \
 		--target deps \
 		--file Dockerfile \
@@ -486,8 +511,6 @@ build_deps:
 build_dev:
 	docker build \
 		--build-arg SENTRY_RELEASE \
-		--cache-from $(IMAGE_REPO_BRANCH)-deps \
-		--cache-from $(IMAGE_CI)-dev \
 		--tag $(IMAGE_CI) \
 		--tag $(IMAGE_CI)-dev \
 		--target dev \

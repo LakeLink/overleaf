@@ -1,15 +1,7 @@
 /* eslint-disable
-    camelcase,
     n/handle-callback-err,
     max-len,
 */
-// TODO: This file was created by bulk-decaffeinate.
-// Fix any style issues and re-enable lint.
-/*
- * decaffeinate suggestions:
- * DS102: Remove unnecessary code created because of implicit returns
- * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
- */
 let CollaboratorsEmailHandler
 const { Project } = require('../../models/Project')
 const EmailHandler = require('../Email/EmailHandler')
@@ -26,8 +18,8 @@ module.exports = CollaboratorsEmailHandler = {
     )
   },
 
-  notifyUserOfProjectInvite(project_id, email, invite, sendingUser, callback) {
-    return Project.findOne({ _id: project_id })
+  notifyUserOfProjectInvite(projectId, email, invite, sendingUser, callback) {
+    Project.findOne({ _id: projectId })
       .select('name owner_ref')
       .populate('owner_ref')
       .exec(function (err, project) {
@@ -41,7 +33,7 @@ module.exports = CollaboratorsEmailHandler = {
           owner: project.owner_ref,
           sendingUser_id: sendingUser._id,
         }
-        return EmailHandler.sendEmail('projectInvite', emailOptions, callback)
+        EmailHandler.sendEmail('projectInvite', emailOptions, callback)
       })
   },
 }

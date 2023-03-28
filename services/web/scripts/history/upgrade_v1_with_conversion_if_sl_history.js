@@ -20,7 +20,7 @@ const { ReadPreference, ObjectId } = require('mongodb')
 const { db, waitForDb } = require('../../app/src/infrastructure/mongodb')
 const { promiseMapWithLimit } = require('../../app/src/util/promises')
 const { batchedUpdate } = require('../helpers/batchedUpdate')
-const ProjectHistoryController = require('../../modules/admin-panel/app/src/ProjectHistoryController')
+const ProjectHistoryController = require('../../modules/history-migration/app/src/ProjectHistoryController')
 
 console.log({
   DRY_RUN,
@@ -44,7 +44,7 @@ const RESULT = {
 
 let INTERRUPT = false
 
-async function processBatch(_, projects) {
+async function processBatch(projects) {
   if (projects.length && projects[0]._id) {
     RESULT.continueFrom = projects[0]._id
   }

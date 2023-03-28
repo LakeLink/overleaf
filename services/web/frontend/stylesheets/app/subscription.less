@@ -81,7 +81,8 @@
   text-transform: capitalize;
 }
 
-.three-d-secure-container {
+.three-d-secure-container,
+.three-d-secure-container--react {
   > .three-d-secure-recurly-container {
     height: 400px;
 
@@ -178,4 +179,20 @@
 
 .recurly-hosted-field-input when (@is-new-css = true) {
   &:extend(.form-control);
+}
+
+.back-btn {
+  padding: 0 10px 2px 12px;
+  border-radius: 50%;
+  border: none;
+  color: @gray-dark;
+
+  &:hover {
+    background-color: @neutral-20;
+    color: @gray-dark;
+  }
+
+  &:active {
+    background-color: @gray-lighter;
+  }
 }

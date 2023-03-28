@@ -127,9 +127,9 @@ if (isOverleaf)
 		.row-spaced#userProfileInformation(ng-if="hasProjects")
 			div(ng-hide="withAffiliations", ng-cloak)
 				hr
-				.text-centered.user-profile
+				.text-centered.add-affiliation
 					p Are you affiliated with an institution?
 					
-					a.btn.btn-info(
+					a.btn.btn-secondary-info.btn-secondary(
 						href="/user/settings"
 					) Add Affiliation

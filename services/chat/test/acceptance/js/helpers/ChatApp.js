@@ -1,28 +1,15 @@
-const { db, waitForDb } = require('../../../../app/js/mongodb')
-const app = require('../../../../app')
+import { createServer } from '../../../../app/js/server.js'
+import { promisify } from 'util'
+
+export { db } from '../../../../app/js/mongodb.js'
 
 let serverPromise = null
-function startServer(resolve, reject) {
-  waitForDb()
-    .then(() => {
-      app.listen(3010, 'localhost', error => {
-        if (error) {
-          return reject(error)
-        }
-        resolve()
-      })
-    })
-    .catch(reject)
-}
 
-async function ensureRunning() {
+export async function ensureRunning() {
   if (!serverPromise) {
-    serverPromise = new Promise(startServer)
+    const { app } = await createServer()
+    const startServer = promisify(app.listen.bind(app))
+    serverPromise = startServer(3010, 'localhost')
   }
   return serverPromise
-}
-
-module.exports = {
-  db,
-  ensureRunning,
 }

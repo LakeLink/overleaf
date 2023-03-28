@@ -3,10 +3,14 @@ import '../../../features/plans/group-plan-modal'
 import * as eventTracking from '../../../infrastructure/event-tracking'
 import getMeta from '../../../utils/meta'
 
-const PLANS_PAGE_LAYOUT_V2_ANNUAL = 'plans-page-layout-v2-annual'
-
-let currentView = 'monthly'
+let currentView = getMeta('ol-currentView')
 let currentCurrencyCode = getMeta('ol-recommendedCurrency')
+const plansPageLayoutV3Variant =
+  getMeta('ol-splitTestVariants')?.['plans-page-layout-v3'] ?? 'default'
+
+if (window.location.href.includes('validate-pre-rendering=true')) {
+  validatePreRendering()
+}
 
 function selectView(view) {
   document.querySelectorAll('[data-ol-view-tab]').forEach(el => {
@@ -16,33 +20,35 @@ function selectView(view) {
       el.classList.remove('active')
     }
   })
+
   document.querySelectorAll('[data-ol-view]').forEach(el => {
     el.hidden = el.getAttribute('data-ol-view') !== view
   })
+
   updateAnnualSavingBanner(view)
   currentView = view
   updateLinkTargets()
 }
 
 function setUpViewSwitching(liEl) {
-  const plansPageV2SplitTestVariant =
-    getMeta('ol-splitTestVariants')?.[PLANS_PAGE_LAYOUT_V2_ANNUAL] ?? 'default'
-  const view = liEl.getAttribute('data-ol-view-tab')
-  liEl.querySelector('a').addEventListener('click', function (e) {
+  liEl.querySelector('button').addEventListener('click', function (e) {
     e.preventDefault()
+
+    const view = liEl.getAttribute('data-ol-view-tab')
     eventTracking.send('subscription-funnel', 'plans-page', `${view}-prices`)
     eventTracking.sendMB('plans-page-toggle', {
       button: view,
-      PLANS_PAGE_LAYOUT_V2_ANNUAL: plansPageV2SplitTestVariant,
+      'plans-page-layout-v3': plansPageLayoutV3Variant,
     })
     selectView(view)
   })
 }
 
 function setUpCurrencySwitching(linkEl) {
-  const currencyCode = linkEl.getAttribute('data-ol-currencyCode-switch')
   linkEl.addEventListener('click', function (e) {
     e.preventDefault()
+
+    const currencyCode = linkEl.getAttribute('data-ol-currencyCode-switch')
     document.querySelectorAll('[data-ol-currencyCode]').forEach(el => {
       el.hidden = el.getAttribute('data-ol-currencyCode') !== currencyCode
     })
@@ -53,30 +59,34 @@ function setUpCurrencySwitching(linkEl) {
 }
 
 function setUpSubscriptionTracking(linkEl) {
-  const plansPageV2SplitTestVariant =
-    getMeta('ol-splitTestVariants')?.[PLANS_PAGE_LAYOUT_V2_ANNUAL] ?? 'default'
-  const plan =
-    linkEl.getAttribute('data-ol-tracking-plan') ||
-    linkEl.getAttribute('data-ol-start-new-subscription')
-  const location = linkEl.getAttribute('data-ol-location')
-  const period = linkEl.getAttribute('data-ol-item-view') || currentView
-
-  const DEFAULT_EVENT_TRACKING_KEY = 'plans-page-click'
-  const eventTrackingKey =
-    linkEl.getAttribute('data-ol-event-tracking-key') ||
-    DEFAULT_EVENT_TRACKING_KEY
-  const eventTrackingSegmentation = {
-    button: plan,
-    location,
-    period,
-  }
-
-  if (eventTrackingKey === DEFAULT_EVENT_TRACKING_KEY) {
-    eventTrackingSegmentation[PLANS_PAGE_LAYOUT_V2_ANNUAL] =
-      plansPageV2SplitTestVariant
-  }
-
   linkEl.addEventListener('click', function () {
+    const plansPageLayoutV3Variant =
+      getMeta('ol-splitTestVariants')?.['plans-page-layout-v3'] ?? 'default'
+
+    const plan =
+      linkEl.getAttribute('data-ol-tracking-plan') ||
+      linkEl.getAttribute('data-ol-start-new-subscription')
+
+    const location = linkEl.getAttribute('data-ol-location')
+    const period = linkEl.getAttribute('data-ol-item-view') || currentView
+
+    const DEFAULT_EVENT_TRACKING_KEY = 'plans-page-click'
+
+    const eventTrackingKey =
+      linkEl.getAttribute('data-ol-event-tracking-key') ||
+      DEFAULT_EVENT_TRACKING_KEY
+
+    const eventTrackingSegmentation = {
+      button: plan,
+      location,
+      'billing-period': period,
+    }
+
+    if (eventTrackingKey === DEFAULT_EVENT_TRACKING_KEY) {
+      eventTrackingSegmentation['plans-page-layout-v3'] =
+        plansPageLayoutV3Variant
+    }
+
     const customLabel = linkEl.getAttribute('data-ol-tracking-label')
     const computedLabel = currentView === 'annual' ? `${plan}_annual` : plan
     const label = customLabel || computedLabel
@@ -146,6 +156,37 @@ function selectViewFromHash() {
   } catch {
     // do nothing
   }
+}
+
+function validatePreRendering() {
+  document.querySelectorAll('[data-ol-view-tab]').forEach(el => {
+    console.assert(
+      (el.getAttribute('data-ol-view-tab') === currentView) ===
+        el.classList.contains('active'),
+      el
+    )
+  })
+
+  document.querySelectorAll('[data-ol-view]').forEach(el => {
+    console.assert(
+      (el.hidden === el.getAttribute('data-ol-view')) !== currentView,
+      el
+    )
+  })
+
+  const plansPageLayoutV3Variant = getMeta('ol-splitTestVariants')?.[
+    'plans-page-layout-v3'
+  ]
+  if (plansPageLayoutV3Variant !== 'new-plans-page') {
+    const tooltipEl = document.querySelector('[data-ol-annual-saving-tooltip]')
+    console.assert(
+      (currentView === 'annual') ===
+        tooltipEl.classList.contains('annual-selected'),
+      tooltipEl
+    )
+  }
+
+  console.log('validated pre-rendering')
 }
 
 document.querySelectorAll('[data-ol-view-tab]').forEach(setUpViewSwitching)

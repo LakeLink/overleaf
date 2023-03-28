@@ -13,6 +13,7 @@ const ProjectEntityUpdateHandler = require('../Project/ProjectEntityUpdateHandle
 const RestoreManager = require('./RestoreManager')
 const { pipeline } = require('stream')
 const { prepareZipAttachment } = require('../../infrastructure/Response')
+const Features = require('../../infrastructure/Features')
 
 module.exports = HistoryController = {
   selectHistoryApi(req, res, next) {
@@ -52,10 +53,13 @@ module.exports = HistoryController = {
         'X-User-Id': userId,
       },
     })
-    getReq.pipe(res)
-    getReq.on('error', function (err) {
-      logger.warn({ url, err }, 'history API error')
-      next(err)
+    pipeline(getReq, res, function (err) {
+      // If the downstream request is cancelled, we get an
+      // ERR_STREAM_PREMATURE_CLOSE.
+      if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+        logger.warn({ url, err }, 'history API error')
+        next(err)
+      }
     })
   },
 
@@ -344,10 +348,24 @@ module.exports = HistoryController = {
         pass: settings.apis.v1_history.pass,
       },
       json: true,
-      method: 'post',
       url,
     }
-    request(options, function (err, response, body) {
+
+    if (!Features.hasFeature('saas')) {
+      const getReq = request({ ...options, method: 'get' })
+
+      pipeline(getReq, res, function (err) {
+        // If the downstream request is cancelled, we get an
+        // ERR_STREAM_PREMATURE_CLOSE.
+        if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+          logger.error({ url, err }, 'history API error')
+          next(err)
+        }
+      })
+      return
+    }
+
+    request({ ...options, method: 'post' }, function (err, response, body) {
       if (err) {
         OError.tag(err, 'history API error', {
           v1ProjectId,
@@ -419,7 +437,9 @@ module.exports = HistoryController = {
               res.status(response.statusCode)
               prepareZipAttachment(res, `${name}.zip`)
               pipeline(response, res, err => {
-                if (err) {
+                // If the downstream request is cancelled, we get an
+                // ERR_STREAM_PREMATURE_CLOSE.
+                if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
                   logger.warn(
                     { err, v1ProjectId, version, retryAttempt },
                     'history s3 proxying error'

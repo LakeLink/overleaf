@@ -14,6 +14,7 @@ metrics.initialize(process.env.METRICS_APP_NAME || 'web')
 const Settings = require('@overleaf/settings')
 const logger = require('@overleaf/logger')
 const PlansLocator = require('./app/src/Features/Subscription/PlansLocator')
+const SiteAdminHandler = require('./app/src/infrastructure/SiteAdminHandler')
 logger.initialize(process.env.METRICS_APP_NAME || 'web')
 logger.logger.serializers.user =
   require('./app/src/infrastructure/LoggerSerializers').user
@@ -70,13 +71,18 @@ if (!module.parent) {
         // wait until the process is ready before monitoring the event loop
         metrics.event_loop.monitor(logger)
       })
-      QueueWorkers.start()
+      if (process.env.QUEUE_PROCESSING_ENABLED === 'true') {
+        QueueWorkers.start()
+      }
     })
     .catch(err => {
       logger.fatal({ err }, 'Cannot connect to mongo. Exiting.')
       process.exit(1)
     })
 }
+
+// monitor site maintenance file
+SiteAdminHandler.initialise()
 
 // handle SIGTERM for graceful shutdown in kubernetes
 process.on('SIGTERM', function (signal) {
