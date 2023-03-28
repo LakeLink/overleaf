@@ -3,7 +3,7 @@ import { webpackConfig } from './cypress/support/webpack.cypress'
 
 export default defineConfig({
   fixturesFolder: 'cypress/fixtures',
-  video: true,
+  video: !!process.env.CI,
   screenshotsFolder: 'cypress/results',
   videosFolder: 'cypress/results',
   videoUploadOnPasses: false,
@@ -18,7 +18,9 @@ export default defineConfig({
     setupNodeEvents(on, config) {
       //
     },
-    specPattern: './{test,modules/**/test}/frontend/**/*.spec.{js,ts,tsx}',
+    specPattern:
+      process.env.CYPRESS_SPEC_PATTERN ||
+      './{test,modules/**/test}/frontend/**/*.spec.{js,ts,tsx}',
   },
   retries: {
     runMode: 3,

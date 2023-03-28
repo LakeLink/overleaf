@@ -6,7 +6,7 @@ describe('PasswordReset', function () {
   let email, response, user, userHelper, token, emailQuery
   beforeEach(async function () {
     userHelper = new UserHelper()
-    email = userHelper.getDefaultEmail()
+    email = 'somecooluser@example.com'
     emailQuery = `?email=${encodeURIComponent(email)}`
     userHelper = await UserHelper.createUser({ email })
     user = userHelper.user
@@ -200,7 +200,30 @@ describe('PasswordReset', function () {
         expect(response.status).to.equal(400)
         const body = await response.json()
         expect(body).to.deep.equal({
-          message: { text: 'password contains part of email address' },
+          message: { text: 'Password cannot contain parts of email address' },
+        })
+      })
+
+      it('should flag password too similar to email', async function () {
+        const localPart = email.split('@').shift()
+        const localPartReversed = localPart.split('').reverse().join('')
+        // send bad password
+        response = await userHelper.fetch('/user/password/set', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            passwordResetToken: token,
+            password: `${localPartReversed}123`,
+            email,
+          }),
+        })
+        expect(response.status).to.equal(400)
+        const body = await response.json()
+        expect(body).to.deep.equal({
+          message: { text: 'Password is too similar to email address' },
         })
       })
 

@@ -59,14 +59,14 @@ function createSubscription(
         if (error) {
           return callback(error)
         }
-        return SubscriptionUpdater.syncSubscription(
+        SubscriptionUpdater.syncSubscription(
           recurlySubscription,
           user._id,
           function (error) {
             if (error) {
               return callback(error)
             }
-            return callback()
+            callback()
           }
         )
       }
@@ -80,14 +80,14 @@ function updateSubscription(user, planCode, couponCode, callback) {
     function (err, hasSubscription, subscription) {
       if (err) {
         logger.warn(
-          { err, user_id: user._id, hasSubscription },
+          { err, userId: user._id, hasSubscription },
           'there was an error checking user v2 subscription'
         )
       }
       if (!hasSubscription) {
-        return callback()
+        callback()
       } else {
-        return async.series(
+        async.series(
           [
             function (cb) {
               if (!couponCode) {
@@ -183,7 +183,7 @@ function cancelSubscription(user, callback) {
     function (err, hasSubscription, subscription) {
       if (err) {
         logger.warn(
-          { err, user_id: user._id, hasSubscription },
+          { err, userId: user._id, hasSubscription },
           'there was an error checking user v2 subscription'
         )
       }
@@ -220,7 +220,7 @@ function reactivateSubscription(user, callback) {
     function (err, hasSubscription, subscription) {
       if (err) {
         logger.warn(
-          { err, user_id: user._id, hasSubscription },
+          { err, userId: user._id, hasSubscription },
           'there was an error checking user v2 subscription'
         )
       }
@@ -316,7 +316,7 @@ function attemptPaypalInvoiceCollection(recurlyAccountCode, callback) {
 }
 
 function extendTrial(subscription, daysToExend, callback) {
-  return RecurlyWrapper.extendTrial(
+  RecurlyWrapper.extendTrial(
     subscription.recurlySubscription_id,
     daysToExend,
     callback

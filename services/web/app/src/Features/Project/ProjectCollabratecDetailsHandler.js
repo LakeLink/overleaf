@@ -1,5 +1,4 @@
 /* eslint-disable
-    camelcase,
     n/handle-callback-err,
     max-len,
 */
@@ -8,7 +7,6 @@
 /*
  * decaffeinate suggestions:
  * DS101: Remove unnecessary use of Array.from
- * DS102: Remove unnecessary code created because of implicit returns
  * DS207: Consider shorter variations of null checks
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
  */
@@ -18,72 +16,78 @@ const { Project } = require('../../models/Project')
 
 module.exports = ProjectCollabratecDetailsHandler = {
   initializeCollabratecProject(
-    project_id,
-    user_id,
-    collabratec_document_id,
-    collabratec_privategroup_id,
+    projectId,
+    userId,
+    collabratecDocumentId,
+    collabratecPrivategroupId,
     callback
   ) {
     if (callback == null) {
       callback = function () {}
     }
-    return ProjectCollabratecDetailsHandler.setCollabratecUsers(
-      project_id,
-      [{ user_id, collabratec_document_id, collabratec_privategroup_id }],
+    ProjectCollabratecDetailsHandler.setCollabratecUsers(
+      projectId,
+      [
+        {
+          user_id: userId,
+          collabratec_document_id: collabratecDocumentId,
+          collabratec_privategroup_id: collabratecPrivategroupId,
+        },
+      ],
       callback
     )
   },
 
-  isLinkedCollabratecUserProject(project_id, user_id, callback) {
+  isLinkedCollabratecUserProject(projectId, userId, callback) {
     if (callback == null) {
       callback = function () {}
     }
     try {
-      project_id = ObjectId(project_id)
-      user_id = ObjectId(user_id)
+      projectId = ObjectId(projectId)
+      userId = ObjectId(userId)
     } catch (error) {
       const err = error
       return callback(err)
     }
     const query = {
-      _id: project_id,
+      _id: projectId,
       collabratecUsers: {
         $elemMatch: {
-          user_id,
+          user_id: userId,
         },
       },
     }
-    return Project.findOne(query, { _id: 1 }, function (err, project) {
+    Project.findOne(query, { _id: 1 }, function (err, project) {
       if (err != null) {
         callback(err)
       }
-      return callback(null, project != null)
+      callback(null, project != null)
     })
   },
 
   linkCollabratecUserProject(
-    project_id,
-    user_id,
-    collabratec_document_id,
+    projectId,
+    userId,
+    collabratecDocumentId,
     callback
   ) {
     if (callback == null) {
       callback = function () {}
     }
     try {
-      project_id = ObjectId(project_id)
-      user_id = ObjectId(user_id)
+      projectId = ObjectId(projectId)
+      userId = ObjectId(userId)
     } catch (error) {
       const err = error
       return callback(err)
     }
     const query = {
-      _id: project_id,
+      _id: projectId,
       collabratecUsers: {
         $not: {
           $elemMatch: {
-            collabratec_document_id,
-            user_id,
+            collabratec_document_id: collabratecDocumentId,
+            user_id: userId,
           },
         },
       },
@@ -91,75 +95,75 @@ module.exports = ProjectCollabratecDetailsHandler = {
     const update = {
       $push: {
         collabratecUsers: {
-          collabratec_document_id,
-          user_id,
+          collabratec_document_id: collabratecDocumentId,
+          user_id: userId,
         },
       },
     }
-    return Project.updateOne(query, update, callback)
+    Project.updateOne(query, update, callback)
   },
 
-  setCollabratecUsers(project_id, collabratec_users, callback) {
+  setCollabratecUsers(projectId, collabratecUsers, callback) {
     let err
     if (callback == null) {
       callback = function () {}
     }
     try {
-      project_id = ObjectId(project_id)
+      projectId = ObjectId(projectId)
     } catch (error) {
       err = error
       return callback(err)
     }
-    if (!Array.isArray(collabratec_users)) {
+    if (!Array.isArray(collabratecUsers)) {
       callback(new Error('collabratec_users must be array'))
     }
-    for (const collabratec_user of Array.from(collabratec_users)) {
+    for (const collabratecUser of Array.from(collabratecUsers)) {
       try {
-        collabratec_user.user_id = ObjectId(collabratec_user.user_id)
+        collabratecUser.user_id = ObjectId(collabratecUser.user_id)
       } catch (error1) {
         err = error1
         return callback(err)
       }
     }
-    const update = { $set: { collabratecUsers: collabratec_users } }
-    return Project.updateOne({ _id: project_id }, update, callback)
+    const update = { $set: { collabratecUsers } }
+    Project.updateOne({ _id: projectId }, update, callback)
   },
 
-  unlinkCollabratecUserProject(project_id, user_id, callback) {
+  unlinkCollabratecUserProject(projectId, userId, callback) {
     if (callback == null) {
       callback = function () {}
     }
     try {
-      project_id = ObjectId(project_id)
-      user_id = ObjectId(user_id)
+      projectId = ObjectId(projectId)
+      userId = ObjectId(userId)
     } catch (error) {
       const err = error
       return callback(err)
     }
-    const query = { _id: project_id }
+    const query = { _id: projectId }
     const update = {
       $pull: {
         collabratecUsers: {
-          user_id,
+          user_id: userId,
         },
       },
     }
-    return Project.updateOne(query, update, callback)
+    Project.updateOne(query, update, callback)
   },
 
-  updateCollabratecUserIds(old_user_id, new_user_id, callback) {
+  updateCollabratecUserIds(oldUserId, newUserId, callback) {
     if (callback == null) {
       callback = function () {}
     }
     try {
-      old_user_id = ObjectId(old_user_id)
-      new_user_id = ObjectId(new_user_id)
+      oldUserId = ObjectId(oldUserId)
+      newUserId = ObjectId(newUserId)
     } catch (error) {
       const err = error
       return callback(err)
     }
-    const query = { 'collabratecUsers.user_id': old_user_id }
-    const update = { $set: { 'collabratecUsers.$.user_id': new_user_id } }
-    return Project.updateMany(query, update, callback)
+    const query = { 'collabratecUsers.user_id': oldUserId }
+    const update = { $set: { 'collabratecUsers.$.user_id': newUserId } }
+    Project.updateMany(query, update, callback)
   },
 }

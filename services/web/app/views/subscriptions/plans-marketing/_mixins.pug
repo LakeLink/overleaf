@@ -4,16 +4,16 @@ mixin btn_buy_collaborator(location)
 		data-ol-start-new-subscription='collaborator'
 		data-ol-location=location
 	)
-		span(data-ol-view='monthly') #{translate("start_free_trial")}
-		span(hidden data-ol-view='annual') #{translate("buy_now")}
+		span(hidden=(currentView !== 'monthly') data-ol-view='monthly') #{translate("start_free_trial")}
+		span(hidden=(currentView !== 'annual') data-ol-view='annual') #{translate("buy_now")}
 mixin btn_buy_personal(location)
 	a.btn.btn-primary(
 		data-ol-start-new-subscription='paid-personal'
 		data-ol-tracking-plan='personal'
 		data-ol-location=location
 	)
-		span(data-ol-view='monthly') #{translate("start_free_trial")}
-		span(hidden data-ol-view='annual') #{translate("buy_now")}
+		span(hidden=(currentView !== 'monthly') data-ol-view='monthly') #{translate("start_free_trial")}
+		span(hidden=(currentView !== 'annual') data-ol-view='annual') #{translate("buy_now")}
 mixin btn_buy_free(location)
 	a.btn.btn-primary(
 		data-ol-has-custom-href
@@ -28,8 +28,8 @@ mixin btn_buy_professional(location)
 		data-ol-start-new-subscription='professional'
 		data-ol-location=location
 	)
-		span(data-ol-view='monthly') #{translate("start_free_trial")}
-		span(hidden data-ol-view='annual') #{translate("buy_now")}
+		span(hidden=(currentView !== 'monthly') data-ol-view='monthly') #{translate("start_free_trial")}
+		span(hidden=(currentView !== 'annual') data-ol-view='annual') #{translate("buy_now")}
 mixin btn_buy_student(location, plan)
 	if plan == 'annual'
 		a.btn.btn-primary(
@@ -141,15 +141,15 @@ mixin gen_localized_undiscounted_price_for_plan_view(plan)
 
 
 mixin gen_localized_price_for_plan(plan)
-	div(data-ol-view='monthly')
+	div(hidden=(currentView !== 'monthly') data-ol-view='monthly')
 		+gen_localized_price_for_plan_view(plan, 'monthly')
 		span.small /mo
-	div(hidden data-ol-view='annual')
+	div(hidden=(currentView !== 'annual') data-ol-view='annual')
 		+gen_localized_price_for_plan_view(plan, 'annual')
 		span.small /yr
 
 mixin gen_localized_undiscounted_price_for_plan(plan)
-	div(hidden data-ol-view='annual')
+	div(hidden=(currentView !== 'annual') data-ol-view='annual')
 		strike.undiscounted-price.small
 			span.sr-only Price reduced from
 			+gen_localized_undiscounted_price_for_plan_view(plan)
@@ -201,13 +201,9 @@ mixin currency_dropdown
 mixin plan_switch(location)
 	ul.nav.nav-pills(class=(location === 'card' ? "above-cards" : ""))
 		li.active(data-ol-view-tab='monthly')
-			a.btn.btn-default-outline(
-				href="#"
-			) #{translate("monthly")}
+			button.btn-default-outline #{translate("monthly")}
 		li(data-ol-view-tab='annual' class=(location === 'card' ? "annual-saving-tooltip-container" : ""))
-			a.btn.btn-default-outline(
-				href="#"
-			) #{translate("annual")}
+			button.btn-default-outline #{translate("annual")}
 			if (location === 'card')
 				.tooltip.in.bottom.annual-saving-tooltip(
 					role="tooltip"
@@ -215,19 +211,39 @@ mixin plan_switch(location)
 				)
 					.tooltip-arrow
 					.tooltip-inner
-						span(data-ol-view="monthly") #{translate("save_20_percent_by_paying_annually")}
-						span(hidden data-ol-view="annual") #{translate("saving_20_percent")}
-						span(hidden data-ol-view="student") #{translate("save_20_percent_by_paying_annually")}
+						span(hidden=(currentView !== 'monthly') data-ol-view='monthly') #{translate("save_20_percent_by_paying_annually")}
+						span(hidden=(currentView !== 'annual') data-ol-view='annual') #{translate("saving_20_percent")}
+						span(hidden=(currentView !== 'student') data-ol-view='student') #{translate("save_20_percent_by_paying_annually")}
 		li(data-ol-view-tab='student')
-			a.btn.btn-default-outline(
-				href="#"
-			) #{translate("special_price_student")}
+			button.btn-default-outline #{translate("special_price_student")}
+
+mixin plan_switch_annual_default(location)
+	ul.nav.nav-pills(class=(location === 'card' ? "above-cards" : ""))
+		li.active(data-ol-view-tab='annual' class=(location === 'card' ? "annual-saving-tooltip-container" : ""))
+			button.btn-default-outline #{translate("annual")}
+			if (location === 'card')
+				.tooltip.in.bottom.annual-saving-tooltip.annual-selected.green-background(
+					role="tooltip"
+					data-ol-annual-saving-tooltip
+				)
+					.tooltip-arrow
+					.tooltip-inner
+						span(hidden=(currentView !== 'annual') data-ol-view='annual') #{translate("saving_20_percent")}
+						span(hidden=(currentView !== 'monthly') data-ol-view='monthly') #{translate("save_20_percent_by_paying_annually")}
+						span(hidden=(currentView !== 'student') data-ol-view='student') #{translate("save_20_percent_by_paying_annually")}
+		li(data-ol-view-tab='monthly')
+			button.btn-default-outline #{translate("monthly")}
+		li(data-ol-view-tab='student')
+			button.btn-default-outline #{translate("special_price_student")}
 
 mixin allCardsAndControls(controlsRowSpaced, listLocation)
 	- var location = listLocation ? 'card_' + listLocation : 'card'
 	.row.top-switch(class=(controlsRowSpaced ? "row-spaced" : ""))
 		.col-md-6.col-md-offset-3
-			+plan_switch(location)
+			if (plansPageLayoutV3Variant === 'old-plans-page-annual-fixed')
+				+plan_switch_annual_default(location)
+			else
+				+plan_switch(location)
 		.col-md-2.text-right
 			+currency_dropdown
 
@@ -251,10 +267,7 @@ mixin allCardsAndControls(controlsRowSpaced, listLocation)
 								.best-value
 									strong #{translate('best_value')}
 								.card-header
-									if (useNewPlanName)
-										h2 #{translate("standard")}
-									else
-										h2 #{translate("collaborator")}
+									h2 #{translate("standard")}
 								.card-byline
 									h5.tagline #{translate("tagline_collaborator")}
 								.circle
@@ -272,7 +285,7 @@ mixin allCardsAndControls(controlsRowSpaced, listLocation)
 									+price_professional_undiscounted
 								+features_professional(location)
 
-				.card-group.text-centered(hidden data-ol-view='student')
+				.card-group.text-centered(hidden=(currentView !== 'student') data-ol-view='student')
 					.col-md-4
 						.card.card-first
 							.card-header

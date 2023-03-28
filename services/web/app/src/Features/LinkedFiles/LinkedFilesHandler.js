@@ -1,5 +1,4 @@
 /* eslint-disable
-    camelcase,
     n/handle-callback-err,
     max-len,
     no-unused-vars,
@@ -8,7 +7,6 @@
 // Fix any style issues and re-enable lint.
 /*
  * decaffeinate suggestions:
- * DS102: Remove unnecessary code created because of implicit returns
  * DS207: Consider shorter variations of null checks
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
  */
@@ -26,21 +24,21 @@ const {
 } = require('./LinkedFilesErrors')
 
 module.exports = LinkedFilesHandler = {
-  getFileById(project_id, file_id, callback) {
+  getFileById(projectId, fileId, callback) {
     if (callback == null) {
       callback = function () {}
     }
-    return ProjectLocator.findElement(
+    ProjectLocator.findElement(
       {
-        project_id,
-        element_id: file_id,
+        project_id: projectId,
+        element_id: fileId,
         type: 'file',
       },
       function (err, file, path, parentFolder) {
         if (err != null) {
           return callback(err)
         }
-        return callback(null, file, path, parentFolder)
+        callback(null, file, path, parentFolder)
       }
     )
   },
@@ -51,7 +49,7 @@ module.exports = LinkedFilesHandler = {
     }
     const projection = { _id: 1, name: 1 }
     if (data.v1_source_doc_id != null) {
-      return Project.findOne(
+      Project.findOne(
         { 'overleaf.id': data.v1_source_doc_id },
         projection,
         function (err, project) {
@@ -61,11 +59,11 @@ module.exports = LinkedFilesHandler = {
           if (project == null) {
             return callback(new V1ProjectNotFoundError())
           }
-          return callback(null, project)
+          callback(null, project)
         }
       )
     } else if (data.source_project_id != null) {
-      return ProjectGetter.getProject(
+      ProjectGetter.getProject(
         data.source_project_id,
         projection,
         function (err, project) {
@@ -75,89 +73,81 @@ module.exports = LinkedFilesHandler = {
           if (project == null) {
             return callback(new ProjectNotFoundError())
           }
-          return callback(null, project)
+          callback(null, project)
         }
       )
     } else {
-      return callback(new BadDataError('neither v1 nor v2 id present'))
+      callback(new BadDataError('neither v1 nor v2 id present'))
     }
   },
 
   importFromStream(
-    project_id,
+    projectId,
     readStream,
     linkedFileData,
     name,
-    parent_folder_id,
-    user_id,
+    parentFolderId,
+    userId,
     callback
   ) {
     if (callback == null) {
       callback = function () {}
     }
     callback = _.once(callback)
-    return FileWriter.writeStreamToDisk(
-      project_id,
-      readStream,
-      function (err, fsPath) {
-        if (err != null) {
-          return callback(err)
-        }
-        return EditorController.upsertFile(
-          project_id,
-          parent_folder_id,
-          name,
-          fsPath,
-          linkedFileData,
-          'upload',
-          user_id,
-          (err, file) => {
-            if (err != null) {
-              return callback(err)
-            }
-            return callback(null, file)
-          }
-        )
+    FileWriter.writeStreamToDisk(projectId, readStream, function (err, fsPath) {
+      if (err != null) {
+        return callback(err)
       }
-    )
+      EditorController.upsertFile(
+        projectId,
+        parentFolderId,
+        name,
+        fsPath,
+        linkedFileData,
+        'upload',
+        userId,
+        (err, file) => {
+          if (err != null) {
+            return callback(err)
+          }
+          callback(null, file)
+        }
+      )
+    })
   },
 
   importContent(
-    project_id,
+    projectId,
     content,
     linkedFileData,
     name,
-    parent_folder_id,
-    user_id,
+    parentFolderId,
+    userId,
     callback
   ) {
     if (callback == null) {
       callback = function () {}
     }
     callback = _.once(callback)
-    return FileWriter.writeContentToDisk(
-      project_id,
-      content,
-      function (err, fsPath) {
-        if (err != null) {
-          return callback(err)
-        }
-        return EditorController.upsertFile(
-          project_id,
-          parent_folder_id,
-          name,
-          fsPath,
-          linkedFileData,
-          'upload',
-          user_id,
-          (err, file) => {
-            if (err != null) {
-              return callback(err)
-            }
-            return callback(null, file)
-          }
-        )
+    FileWriter.writeContentToDisk(projectId, content, function (err, fsPath) {
+      if (err != null) {
+        return callback(err)
       }
-    )
+      EditorController.upsertFile(
+        projectId,
+        parentFolderId,
+        name,
+        fsPath,
+        linkedFileData,
+        'upload',
+        userId,
+        (err, file) => {
+          if (err != null) {
+            return callback(err)
+          }
+          callback(null, file)
+        }
+      )
+    })
   },
 }

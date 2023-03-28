@@ -42,7 +42,7 @@ const RESULT = {
 
 let INTERRUPT = false
 
-async function processBatch(_, projects) {
+async function processBatch(projects) {
   if (projects.length && projects[0]._id) {
     RESULT.continueFrom = projects[0]._id
   }
@@ -117,15 +117,15 @@ async function doUpgradeForNoneWithoutConversion(project) {
       // Logic originally from ProjectHistoryHandler.ensureHistoryExistsForProject
       // However sends a force resync project to project history instead
       // of a resync request to doc-updater
-      const historyId = await ProjectHistoryHandler.promises.getHistoryId(
+      let historyId = await ProjectHistoryHandler.promises.getHistoryId(
         projectId
       )
-      if (!historyId) {
-        const history = await HistoryManager.promises.initializeProject()
-        if (history && history.overleaf_id) {
+      if (historyId == null) {
+        historyId = await HistoryManager.promises.initializeProject(projectId)
+        if (historyId != null) {
           await ProjectHistoryHandler.promises.setHistoryId(
             projectId,
-            history.overleaf_id
+            historyId
           )
         }
       }

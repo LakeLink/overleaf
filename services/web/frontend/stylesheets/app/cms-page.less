@@ -4,6 +4,29 @@
   including About and Blog
 */
 .cms-page {
+  &.page-style {
+    /*
+    Links and Buttons
+  */
+
+    a {
+      color: @link-color;
+      &:hover {
+        color: @link-hover-color;
+      }
+    }
+    // correct color property set on <a> above:
+    .reset-btns;
+    .alert {
+      .alert;
+    }
+    .alert-info {
+      .btn-info {
+        .btn-alert-info;
+      }
+    }
+  }
+
   padding-bottom: 0;
   img {
     height: auto;
@@ -57,6 +80,7 @@
   */
   blockquote {
     margin: 0;
+    position: relative;
     /*
       type.less sets <p> inline, so that quotation mark is inline
       but sometimes we have multiple <p>,
@@ -85,6 +109,39 @@
     img {
       margin-right: @margin-sm;
       margin-bottom: @margin-sm;
+    }
+  }
+  .quote-picture-bottom {
+    border: none;
+    color: @content-primary;
+    .h1 {
+      margin: 0 0 48px 0;
+    }
+    p:first-child {
+      &:before {
+        color: inherit;
+        font-size: inherit;
+        margin-right: 0;
+        vertical-align: 0;
+        line-height: inherit;
+        position: absolute;
+        top: (@line-height-computed / 2); // match quote padding
+        left: 3px;
+      }
+      &:after {
+        content: close-quote;
+      }
+    }
+    img {
+      height: 64px;
+      width: 64px;
+      margin-right: 16px;
+    }
+    .quote-by-position {
+      color: @content-secondary;
+    }
+    .quote-picture-and-person {
+      display: flex;
     }
   }
 
@@ -246,5 +303,79 @@
   video {
     height: auto;
     max-width: 100%;
+  }
+}
+
+.icon-with-content {
+  display: flex;
+
+  h2,
+  h3,
+  h4 {
+    margin-top: 15px;
+  }
+
+  .icon-container {
+    background-color: @green-10;
+    padding: 7.5px;
+    height: 56px;
+    width: 56px;
+    border-radius: 50%;
+    margin-right: 24px;
+    .icon-inner-container {
+      align-items: center;
+      border: @green-30 3.5px solid;
+      border-radius: 50%;
+      display: flex;
+      justify-content: center;
+      height: 42px;
+      width: 42px;
+    }
+
+    i {
+      color: @green;
+      font-size: 21px;
+    }
+  }
+}
+
+.svg-arrow-icon {
+  position: relative;
+  left: 4px;
+  bottom: 1px;
+}
+
+.vertically-center-col {
+  // remove margin to better vertically align
+  // some elements need to be nested within a container, and others are directly within .no-card/.card
+  .card:first-child,
+  .no-card:first-child {
+    .cms-element-container {
+      > *:first-child {
+        margin-top: 0;
+      }
+    }
+    > *:first-child:not(.cms-element-container) {
+      margin-top: 0;
+    }
+  }
+  .card:last-child,
+  .no-card:last-child {
+    .cms-element-container {
+      > *:last-child {
+        margin-bottom: 0;
+      }
+    }
+    > *:last-child:not(.cms-element-container) {
+      margin-bottom: 0;
+    }
+  }
+
+  @media (min-width: @screen-sm-min) {
+    display: flex;
+
+    div[class*='col-'] {
+      align-self: center;
+    }
   }
 }

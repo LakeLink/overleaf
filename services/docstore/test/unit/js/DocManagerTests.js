@@ -1,5 +1,4 @@
 /* eslint-disable
-    camelcase,
     no-dupe-keys,
     no-return-assign,
     no-unused-vars,
@@ -254,11 +253,7 @@ describe('DocManager', function () {
           inS3: true,
         }
         this.MongoManager.findDoc.yields(null, this.doc)
-        this.DocArchiveManager.unarchiveDoc = (
-          project_id,
-          doc_id,
-          callback
-        ) => {
+        this.DocArchiveManager.unarchiveDoc = (projectId, docId, callback) => {
           this.doc.inS3 = false
           return callback()
         }
@@ -497,8 +492,8 @@ describe('DocManager', function () {
           it('should log a warning', function () {
             expect(this.logger.warn).to.have.been.calledWith(
               sinon.match({
-                project_id: this.project_id,
-                doc_id: this.doc_id,
+                projectId: this.project_id,
+                docId: this.doc_id,
                 err: this.err,
               }),
               'archiving a single doc in the background failed'
@@ -572,7 +567,7 @@ describe('DocManager', function () {
         ranges: this.originalRanges,
       }
 
-      this.MongoManager.upsertIntoDocCollection = sinon.stub().callsArg(3)
+      this.MongoManager.upsertIntoDocCollection = sinon.stub().yields()
       this.MongoManager.setDocVersion = sinon.stub().yields()
       return (this.DocManager._getDoc = sinon.stub())
     })
@@ -605,7 +600,9 @@ describe('DocManager', function () {
 
       it('should upsert the document to the doc collection', function () {
         return this.MongoManager.upsertIntoDocCollection
-          .calledWith(this.project_id, this.doc_id, { lines: this.newDocLines })
+          .calledWith(this.project_id, this.doc_id, this.rev, {
+            lines: this.newDocLines,
+          })
           .should.equal(true)
       })
 
@@ -636,7 +633,9 @@ describe('DocManager', function () {
 
       it('should upsert the ranges', function () {
         return this.MongoManager.upsertIntoDocCollection
-          .calledWith(this.project_id, this.doc_id, { ranges: this.newRanges })
+          .calledWith(this.project_id, this.doc_id, this.rev, {
+            ranges: this.newRanges,
+          })
           .should.equal(true)
       })
 
@@ -801,6 +800,26 @@ describe('DocManager', function () {
       })
     })
 
+    describe('when the version was decremented', function () {
+      beforeEach(function () {
+        this.DocManager._getDoc = sinon.stub().yields(null, this.doc)
+        this.DocManager.updateDoc(
+          this.project_id,
+          this.doc_id,
+          this.newDocLines,
+          this.version - 1,
+          this.originalRanges,
+          this.callback
+        )
+      })
+
+      it('should return an error', function () {
+        this.callback.should.have.been.calledWith(
+          sinon.match.instanceOf(Errors.DocVersionDecrementedError)
+        )
+      })
+    })
+
     describe('when the doc lines have not changed', function () {
       beforeEach(function () {
         this.DocManager._getDoc = sinon.stub().callsArgWith(3, null, this.doc)
@@ -827,7 +846,7 @@ describe('DocManager', function () {
       })
     })
 
-    return describe('when the doc does not exist', function () {
+    describe('when the doc does not exist', function () {
       beforeEach(function () {
         this.DocManager._getDoc = sinon.stub().callsArgWith(3, null, null, null)
         return this.DocManager.updateDoc(
@@ -842,7 +861,7 @@ describe('DocManager', function () {
 
       it('should upsert the document to the doc collection', function () {
         return this.MongoManager.upsertIntoDocCollection
-          .calledWith(this.project_id, this.doc_id, {
+          .calledWith(this.project_id, this.doc_id, undefined, {
             lines: this.newDocLines,
             ranges: this.originalRanges,
           })
@@ -857,6 +876,47 @@ describe('DocManager', function () {
 
       return it('should return the callback with the new rev', function () {
         return this.callback.calledWith(null, true, 1).should.equal(true)
+      })
+    })
+
+    describe('when another update is racing', function () {
+      beforeEach(function (done) {
+        this.DocManager._getDoc = sinon.stub().yields(null, this.doc)
+        this.MongoManager.upsertIntoDocCollection
+          .onFirstCall()
+          .yields(new Errors.DocRevValueError())
+        this.MongoManager.upsertIntoDocCollection.onSecondCall().yields(null)
+        this.RangeManager.shouldUpdateRanges.returns(true)
+        this.callback.callsFake(done)
+        this.DocManager.updateDoc(
+          this.project_id,
+          this.doc_id,
+          this.newDocLines,
+          this.version + 1,
+          this.newRanges,
+          this.callback
+        )
+      })
+
+      it('should upsert the doc twice', function () {
+        this.MongoManager.upsertIntoDocCollection.should.have.been.calledWith(
+          this.project_id,
+          this.doc_id,
+          this.rev,
+          {
+            ranges: this.newRanges,
+            lines: this.newDocLines,
+          }
+        )
+        this.MongoManager.upsertIntoDocCollection.should.have.been.calledTwice
+      })
+
+      it('should update the version once', function () {
+        this.MongoManager.setDocVersion.should.have.been.calledOnce
+      })
+
+      it('should return the callback with the new rev', function () {
+        this.callback.should.have.been.calledWith(null, true, this.rev + 1)
       })
     })
   })

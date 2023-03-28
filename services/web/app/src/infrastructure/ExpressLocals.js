@@ -1,17 +1,16 @@
 const logger = require('@overleaf/logger')
+const Metrics = require('@overleaf/metrics')
 const Settings = require('@overleaf/settings')
 const querystring = require('querystring')
 const _ = require('lodash')
 const { URL } = require('url')
 const Path = require('path')
 const moment = require('moment')
-const pug = require('pug-runtime')
 const request = require('request')
 const Features = require('./Features')
 const SessionManager = require('../Features/Authentication/SessionManager')
 const PackageVersions = require('./PackageVersions')
 const Modules = require('./Modules')
-const SafeHTMLSubstitute = require('../Features/Helpers/SafeHTMLSubstitution')
 const {
   canRedirectToAdminDomain,
   hasAdminAccess,
@@ -19,6 +18,8 @@ const {
 const {
   addOptionalCleanupHandlerAfterDrainingConnections,
 } = require('./GracefulShutdown')
+
+const IEEE_BRAND_ID = Settings.ieeeBrandId
 
 let webpackManifest
 switch (process.env.NODE_ENV) {
@@ -74,8 +75,6 @@ function getWebpackAssets(entrypoint, section) {
   return webpackManifest.entrypoints[entrypoint].assets[section] || []
 }
 
-const I18N_HTML_INJECTIONS = new Set()
-
 module.exports = function (webRouter, privateApiRouter, publicApiRouter) {
   if (process.env.NODE_ENV === 'development') {
     // In the dev-env, delay requests until we fetched the manifest once.
@@ -122,15 +121,24 @@ module.exports = function (webRouter, privateApiRouter, publicApiRouter) {
 
     const cdnAvailable =
       Settings.cdn && Settings.cdn.web && !!Settings.cdn.web.host
-    const cdnBlocked = req.query.nocdn === 'true' || req.session.cdnBlocked
+    const cdnBlocked =
+      req.query.nocdn === 'true' || req.session.cdnBlocked || false
     const userId = SessionManager.getLoggedInUserId(req.session)
     if (cdnBlocked && req.session.cdnBlocked == null) {
       logger.debug(
-        { user_id: userId, ip: req != null ? req.ip : undefined },
+        { userId, ip: req != null ? req.ip : undefined },
         'cdnBlocked for user, not using it and turning it off for future requets'
       )
+      Metrics.inc('no_cdn', 1, {
+        path: userId ? 'logged-in' : 'pre-login',
+        method: 'true',
+      })
       req.session.cdnBlocked = true
     }
+    Metrics.inc('cdn_blocked', 1, {
+      path: userId ? 'logged-in' : 'pre-login',
+      method: String(cdnBlocked),
+    })
     const host = req.headers && req.headers.host
     const isSmoke = host.slice(0, 5).toLowerCase() === 'smoke'
     if (cdnAvailable && !isSmoke && !cdnBlocked) {
@@ -170,14 +178,18 @@ module.exports = function (webRouter, privateApiRouter, publicApiRouter) {
       }
     )}`
 
+    res.locals.mathJax3Path = `/js/libs/mathjax3/es5/tex-svg-full.js?${querystring.stringify(
+      {
+        v: require('mathjax-3/package.json').version,
+      }
+    )}`
+
     res.locals.lib = PackageVersions.lib
 
     res.locals.moment = moment
 
-    const IEEE_BRAND_ID = 15
     res.locals.isIEEE = brandVariation =>
-      (brandVariation != null ? brandVariation.brand_id : undefined) ===
-      IEEE_BRAND_ID
+      brandVariation?.brand_id === IEEE_BRAND_ID
 
     res.locals.getCssThemeModifier = function (userSettings, brandVariation) {
       // Themes only exist in OL v2
@@ -214,33 +226,8 @@ module.exports = function (webRouter, privateApiRouter, publicApiRouter) {
   })
 
   webRouter.use(function (req, res, next) {
-    res.locals.translate = function (key, vars, components) {
-      vars = vars || {}
+    res.locals.translate = req.i18n.translate
 
-      if (Settings.i18n.checkForHTMLInVars) {
-        Object.entries(vars).forEach(([field, value]) => {
-          if (pug.escape(value) !== value) {
-            const violationsKey = key + field
-            // do not flood the logs, log one sample per pod + key + field
-            if (!I18N_HTML_INJECTIONS.has(violationsKey)) {
-              logger.warn(
-                { key, field, value },
-                'html content in translations context vars'
-              )
-              I18N_HTML_INJECTIONS.add(violationsKey)
-            }
-          }
-        })
-      }
-
-      vars.appName = Settings.appName
-      const locale = req.i18n.translate(key, vars)
-      if (components) {
-        return SafeHTMLSubstitute.render(locale, components)
-      } else {
-        return locale
-      }
-    }
     // Don't include the query string parameters, otherwise Google
     // treats ?nocdn=true as the canonical version
     const parsedOriginalUrl = new URL(req.originalUrl, Settings.siteUrl)
@@ -380,6 +367,7 @@ module.exports = function (webRouter, privateApiRouter, publicApiRouter) {
     res.locals.ExposedSettings = {
       isOverleaf: Settings.overleaf != null,
       appName: Settings.appName,
+      adminEmail: Settings.adminEmail,
       dropboxAppName:
         Settings.apis.thirdPartyDataStore?.dropboxAppName || 'Overleaf',
       hasSamlBeta: req.session.samlBeta,

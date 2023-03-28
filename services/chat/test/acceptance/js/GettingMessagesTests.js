@@ -1,8 +1,18 @@
-const { ObjectId } = require('../../../app/js/mongodb')
-const { expect } = require('chai')
+import { ObjectId } from '../../../app/js/mongodb.js'
+import { expect } from 'chai'
 
-const ChatClient = require('./helpers/ChatClient')
-const ChatApp = require('./helpers/ChatApp')
+import * as ChatClient from './helpers/ChatClient.js'
+import * as ChatApp from './helpers/ChatApp.js'
+
+async function getCount() {
+  return await ChatClient.getMetric(line => {
+    return (
+      line.includes('timer_http_request_count') &&
+      line.includes('path="project_{projectId}_messages"') &&
+      line.includes('method="POST"')
+    )
+  })
+}
 
 describe('Getting messages', async function () {
   const userId1 = ObjectId().toString()
@@ -16,6 +26,7 @@ describe('Getting messages', async function () {
   describe('globally', async function () {
     const projectId = ObjectId().toString()
     before(async function () {
+      const previousCount = await getCount()
       const { response } = await ChatClient.sendGlobalMessage(
         projectId,
         userId1,
@@ -28,6 +39,10 @@ describe('Getting messages', async function () {
         content2
       )
       expect(response2.statusCode).to.equal(201)
+      const { response: response3, body } = await ChatClient.checkStatus()
+      expect(response3.statusCode).to.equal(200)
+      expect(body).to.equal('chat is alive')
+      expect(await getCount()).to.equal(previousCount + 2)
     })
 
     it('should contain the messages and populated users when getting the messages', async function () {

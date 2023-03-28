@@ -19,6 +19,7 @@ class User {
       {
         email: options.email || `acceptance-test-${count}@example.com`,
         createdAt: new Date(),
+        confirmedAt: options.confirmedAt,
       },
     ]
     this.email = this.emails[0].email
@@ -157,25 +158,29 @@ class User {
   ensureUserExists(callback) {
     const filter = { email: this.email }
     const options = { upsert: true, new: true, setDefaultsOnInsert: true }
-    UserModel.findOneAndUpdate(filter, {}, options, (error, user) => {
-      if (error != null) {
-        return callback(error)
-      }
-      this.setExtraAttributes(user)
-      AuthenticationManager.setUserPasswordInV2(user, this.password, error => {
+
+    AuthenticationManager.hashPassword(
+      this.password,
+      (error, hashedPassword) => {
         if (error != null) {
-          if (error.name !== 'PasswordMustBeDifferentError') {
-            return callback(error)
-          }
+          return callback(error)
         }
-        this.mongoUpdate({ $set: { emails: this.emails } }, error => {
-          if (error != null) {
-            return callback(error)
+
+        UserModel.findOneAndUpdate(
+          filter,
+          { $set: { hashedPassword, emails: this.emails } },
+          options,
+          (error, user) => {
+            if (error != null) {
+              return callback(error)
+            }
+
+            this.setExtraAttributes(user)
+            callback(null, this.password)
           }
-          callback(null, this.password)
-        })
-      })
-    })
+        )
+      }
+    )
   }
 
   setFeatures(features, callback) {
@@ -619,19 +624,13 @@ class User {
   }
 
   makePublic(projectId, level, callback) {
-    this.request.post(
-      {
-        url: `/project/${projectId}/settings/admin`,
-        json: {
-          publicAccessLevel: level,
-        },
-      },
-      (error, response, body) => {
-        if (error != null) {
-          return callback(error)
-        }
-        callback(null)
-      }
+    // A fudge, to get around the fact that `readOnly` and `readAndWrite` are now disallowed
+    // via the API, but we still need to test the behaviour of projects with these values set.
+    db.projects.updateOne(
+      { _id: ObjectId(projectId) },
+      // NOTE: Yes, there is a typo in the db schema.
+      { $set: { publicAccesLevel: level } },
+      callback
     )
   }
 

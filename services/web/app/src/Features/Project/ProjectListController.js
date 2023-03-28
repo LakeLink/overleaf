@@ -17,9 +17,10 @@ const NotificationsHandler = require('../Notifications/NotificationsHandler')
 const Modules = require('../../infrastructure/Modules')
 const { OError, V1ConnectionError } = require('../Errors/Errors')
 const { User } = require('../../models/User')
-const SplitTestHandler = require('../SplitTests/SplitTestHandler')
 const UserPrimaryEmailCheckHandler = require('../User/UserPrimaryEmailCheckHandler')
 const UserController = require('../User/UserController')
+const LimitationsManager = require('../Subscription/LimitationsManager')
+const NotificationsBuilder = require('../Notifications/NotificationsBuilder')
 
 /** @typedef {import("./types").GetProjectsRequest} GetProjectsRequest */
 /** @typedef {import("./types").GetProjectsResponse} GetProjectsResponse */
@@ -81,7 +82,7 @@ const _buildPortalTemplatesList = affiliations => {
  * @param {import("express").NextFunction} next
  * @returns {Promise<void>}
  */
-async function projectListReactPage(req, res, next) {
+async function projectListPage(req, res, next) {
   // can have two values:
   // - undefined - when there's no "saas" feature or couldn't get subscription data
   // - object - the subscription data object
@@ -123,26 +124,8 @@ async function projectListReactPage(req, res, next) {
       logger.err({ err: error, userId }, 'Failed to load the active survey')
     }
 
-    try {
-      const assignment = await SplitTestHandler.promises.getAssignment(
-        req,
-        res,
-        'primary-email-check'
-      )
-      const primaryEmailCheckActive = assignment.variant === 'active'
-
-      if (
-        user &&
-        primaryEmailCheckActive &&
-        UserPrimaryEmailCheckHandler.requiresPrimaryEmailCheck(user)
-      ) {
-        return res.redirect('/user/emails/primary-email-check')
-      }
-    } catch (error) {
-      logger.warn(
-        { err: error },
-        'failed to get "primary-email-check" split test assignment'
-      )
+    if (user && UserPrimaryEmailCheckHandler.requiresPrimaryEmailCheck(user)) {
+      return res.redirect('/user/emails/primary-email-check')
     }
   }
 
@@ -279,13 +262,60 @@ async function projectListReactPage(req, res, next) {
     delete req.session.saml
   }
 
+  function fakeDelay() {
+    return new Promise(resolve => {
+      setTimeout(() => resolve(undefined), 0)
+    })
+  }
+
   const prefetchedProjectsBlob = await Promise.race([
     projectsBlobPending,
-    Promise.resolve(undefined),
+    fakeDelay(),
   ])
   Metrics.inc('project-list-prefetch-projects', 1, {
     status: prefetchedProjectsBlob ? 'success' : 'too-slow',
   })
+
+  let userIsMemberOfGroupSubscription = false
+  try {
+    const userIsMemberOfGroupSubscriptionPromise =
+      await LimitationsManager.promises.userIsMemberOfGroupSubscription(user)
+
+    userIsMemberOfGroupSubscription =
+      userIsMemberOfGroupSubscriptionPromise.isMember
+  } catch (error) {
+    logger.error(
+      { err: error },
+      'Failed to check whether user is a member of group subscription'
+    )
+  }
+
+  // in v2 add notifications for matching university IPs
+  if (Settings.overleaf != null && req.ip !== user.lastLoginIp) {
+    try {
+      await NotificationsBuilder.promises
+        .ipMatcherAffiliation(user._id)
+        .create(req.ip)
+    } catch (err) {
+      logger.error(
+        { err },
+        'failed to create institutional IP match notification'
+      )
+    }
+  }
+
+  const hasPaidAffiliation = userAffiliations.some(
+    affiliation => affiliation.licence && affiliation.licence !== 'free'
+  )
+
+  const showGroupsAndEnterpriseBanner =
+    Features.hasFeature('saas') &&
+    !userIsMemberOfGroupSubscription &&
+    !hasPaidAffiliation
+
+  const groupsAndEnterpriseBannerVariant =
+    showGroupsAndEnterpriseBanner &&
+    _.sample(['did-you-know', 'on-premise', 'people', 'FOMO'])
 
   res.render('project/list-react', {
     title: 'your_projects',
@@ -301,6 +331,9 @@ async function projectListReactPage(req, res, next) {
     tags,
     portalTemplates,
     prefetchedProjectsBlob,
+    showGroupsAndEnterpriseBanner,
+    groupsAndEnterpriseBannerVariant,
+    projectDashboardReact: true, // used in navbar
   })
 }
 
@@ -575,6 +608,6 @@ function _hasActiveFilter(filters) {
 }
 
 module.exports = {
-  projectListReactPage: expressify(projectListReactPage),
+  projectListPage: expressify(projectListPage),
   getProjectsJson: expressify(getProjectsJson),
 }

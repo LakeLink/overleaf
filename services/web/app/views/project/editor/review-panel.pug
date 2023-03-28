@@ -1,5 +1,5 @@
 #review-panel(
-	ng-class="{ 'rp-collapsed-displaying-entry': reviewPanel.entryHover }"
+	ng-class="{ 'rp-collapsed-displaying-entry': reviewPanel.entryHover, 'rp-offset-widgets': editor.showVisual }"
 )
 	.rp-in-editor-widgets
 		a.rp-track-changes-indicator(
@@ -249,9 +249,8 @@
 	.rp-unsupported-msg-wrapper
 		.rp-unsupported-msg
 			i.fa.fa-5x.fa-exclamation-triangle
-			p.rp-unsupported-msg-title Track Changes support in rich text mode is a work in progress.
-			p You can see tracked insertions and deletions, but you can't see comments and changes in this side bar yet.
-			p We're working hard to add them as soon as they're ready.
+			p.rp-unsupported-msg-title Join our #[a(href="/beta/participate") Beta program] to use Track Changes in Rich Text mode!
+			p You can #[a(href="/beta/participate") sign up] instantly to test and give feedback on our new version that includes comments and track changes!
 
 
 script(type='text/ng-template', id='changeEntryTemplate')
@@ -601,13 +600,13 @@ script(type="text/ng-template", id="trackChangesUpgradeModalTemplate")
 
 		.row.text-center
 			div(ng-show="user.allowedFreeTrial" ng-controller="FreeTrialModalController")
-				a.btn.btn-success(
+				a.btn.btn-primary(
 					href
 					ng-click="startFreeTrial('track-changes')"
 					ng-show="project.owner._id == user.id"
 				) #{translate("try_it_for_free")}
 			div(ng-show="!user.allowedFreeTrial" ng-controller="UpgradeModalController")
-				a.btn.btn-success(
+				a.btn.btn-primary(
 					href
 					ng-click="upgradePlan('project-sharing')"
 					ng-show="project.owner._id == user.id"
@@ -615,7 +614,7 @@ script(type="text/ng-template", id="trackChangesUpgradeModalTemplate")
 			p(ng-show="project.owner._id != user.id"): strong #{translate("please_ask_the_project_owner_to_upgrade_to_track_changes")}
 
 	.modal-footer()
-		button.btn.btn-default(
+		button.btn.btn-secondary(
 			ng-click="cancel()"
 		)
 			span #{translate("close")}
@@ -634,7 +633,7 @@ script(type="text/ng-template", id="bulkActionsModalTemplate")
 		p(ng-if="isAccept") #{translate("bulk_accept_confirm", { nChanges: "{{ nChanges }}"})}
 		p(ng-if="!isAccept") #{translate("bulk_reject_confirm", { nChanges: "{{ nChanges }}"})}
 	.modal-footer()
-		button.btn.btn-default(
+		button.btn.btn-secondary(
 			ng-click="cancel()"
 		)
 			span #{translate("cancel")}

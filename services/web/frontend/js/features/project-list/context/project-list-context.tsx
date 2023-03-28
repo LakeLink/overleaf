@@ -15,6 +15,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 import { Tag } from '../../../../../app/src/Features/Tags/types'
@@ -28,6 +29,11 @@ import getMeta from '../../../utils/meta'
 import useAsync from '../../../shared/hooks/use-async'
 import { getProjects } from '../util/api'
 import sortProjects from '../util/sort-projects'
+import {
+  isArchivedOrTrashed,
+  isDeletableProject,
+  isLeavableProject,
+} from '../util/project'
 
 const MAX_PROJECT_PER_PAGE = 20
 
@@ -61,7 +67,7 @@ const filters: FilterMap = {
 
 export const UNCATEGORIZED_KEY = 'uncategorized'
 
-type ProjectListContextValue = {
+export type ProjectListContextValue = {
   addClonedProjectToViewData: (project: Project) => void
   selectOrUnselectAllProjects: React.Dispatch<React.SetStateAction<boolean>>
   visibleProjects: Project[]
@@ -73,6 +79,7 @@ type ProjectListContextValue = {
   setSort: React.Dispatch<React.SetStateAction<Sort>>
   tags: Tag[]
   untaggedProjectsCount: number
+  projectsPerTag: Record<Tag['_id'], Project[]>
   filter: Filter
   selectFilter: (filter: Filter) => void
   selectedTagId?: string | undefined
@@ -91,6 +98,8 @@ type ProjectListContextValue = {
   loadMoreCount: number
   showAllProjects: () => void
   loadMoreProjects: () => void
+  hasLeavableProjectsSelected: boolean
+  hasDeletableProjectsSelected: boolean
 }
 
 export const ProjectListContext = createContext<
@@ -110,7 +119,7 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
   const [maxVisibleProjects, setMaxVisibleProjects] =
     useState(MAX_PROJECT_PER_PAGE)
   const [hiddenProjectsCount, setHiddenProjectsCount] = useState(0)
-  const [loadMoreCount, setLoadMoreCount] = useState<number>(0)
+  const [loadMoreCount, setLoadMoreCount] = useState(0)
   const [loadProgress, setLoadProgress] = useState(
     prefetchedProjectsBlob ? 100 : 20
   )
@@ -125,10 +134,18 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
     'project-list-filter',
     'all'
   )
+  const prevSortRef = useRef<Sort>(sort)
   const [selectedTagId, setSelectedTagId] = usePersistedState<
     string | undefined
   >('project-list-selected-tag-id', undefined)
-  const [tags, setTags] = useState<Tag[]>(getMeta('ol-tags', []) as Tag[])
+
+  const olTags: Tag[] = getMeta('ol-tags', [])
+
+  const [tags, setTags] = useState<Tag[]>(() =>
+    // `tag.name` data may be null for some old users
+    olTags.map(tag => ({ ...tag, name: tag.name ?? '' }))
+  )
+
   const [searchText, setSearchText] = useState('')
 
   const {
@@ -156,27 +173,14 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
       })
   }, [prefetchedProjectsBlob, runAsync])
 
-  // Search related effects
-  useEffect(() => {
-    if (!searchText.length) {
-      return
-    }
-
-    const filteredProjects = loadedProjects.filter(project =>
-      project.name.toLowerCase().includes(searchText.toLowerCase())
-    )
-
-    setVisibleProjects(filteredProjects)
-  }, [searchText, loadedProjects])
-
-  // Sort related effects
-  useEffect(() => {
-    setLoadedProjects(loadedProjects => sortProjects(loadedProjects, sort))
-  }, [sort])
-
-  // Filters/Tags and load more related effects
   useEffect(() => {
     let filteredProjects = [...loadedProjects]
+
+    if (searchText.length) {
+      filteredProjects = filteredProjects.filter(project =>
+        project.name.toLowerCase().includes(searchText.toLowerCase())
+      )
+    }
 
     if (selectedTagId !== undefined) {
       if (selectedTagId === UNCATEGORIZED_KEY) {
@@ -190,11 +194,10 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
       } else {
         const tag = tags.find(tag => tag._id === selectedTagId)
         if (tag) {
-          filteredProjects = filteredProjects.filter(project =>
-            tag?.project_ids?.includes(project.id)
+          filteredProjects = filteredProjects.filter(
+            p => !isArchivedOrTrashed(p) && tag?.project_ids?.includes(p.id)
           )
         } else {
-          setFilter('all')
           setSelectedTagId(undefined)
         }
       }
@@ -202,7 +205,12 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
       filteredProjects = arrayFilter(filteredProjects, filters[filter])
     }
 
-    // load more
+    if (prevSortRef.current !== sort) {
+      filteredProjects = sortProjects(filteredProjects, sort)
+      const loadedProjectsSorted = sortProjects(loadedProjects, sort)
+      setLoadedProjects(loadedProjectsSorted)
+    }
+
     if (filteredProjects.length > maxVisibleProjects) {
       const visibleFilteredProjects = filteredProjects.slice(
         0,
@@ -226,14 +234,20 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
       setHiddenProjectsCount(0)
     }
   }, [
-    filter,
     loadedProjects,
     maxVisibleProjects,
-    selectedTagId,
-    setFilter,
-    setSelectedTagId,
     tags,
+    filter,
+    setFilter,
+    selectedTagId,
+    setSelectedTagId,
+    searchText,
+    sort,
   ])
+
+  useEffect(() => {
+    prevSortRef.current = sort
+  }, [sort])
 
   const showAllProjects = useCallback(() => {
     setLoadMoreCount(0)
@@ -275,6 +289,15 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
     ).length
   }, [tags, loadedProjects])
 
+  const projectsPerTag = useMemo(() => {
+    return tags.reduce<Record<Tag['_id'], Project[]>>((prev, curTag) => {
+      const tagProjects = loadedProjects.filter(p => {
+        return !isArchivedOrTrashed(p) && curTag.project_ids?.includes(p.id)
+      })
+      return { ...prev, [curTag._id]: tagProjects }
+    }, {})
+  }, [tags, loadedProjects])
+
   const selectFilter = useCallback(
     (filter: Filter) => {
       setFilter(filter)
@@ -287,9 +310,10 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
 
   const selectTag = useCallback(
     (tagId: string) => {
+      setFilter('all')
       setSelectedTagId(tagId)
     },
-    [setSelectedTagId]
+    [setSelectedTagId, setFilter]
   )
 
   const addTag = useCallback((tag: Tag) => {
@@ -375,20 +399,26 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
 
   const updateProjectViewData = useCallback((newProjectData: Project) => {
     setLoadedProjects(loadedProjects => {
-      return loadedProjects.map((p: Project) =>
+      return loadedProjects.map(p =>
         p.id === newProjectData.id ? { ...newProjectData } : p
       )
     })
   }, [])
 
-  const removeProjectFromView = useCallback(
-    (project: Project) => {
-      const projects = loadedProjects.filter(
-        (p: Project) => p.id !== project.id
-      )
-      setLoadedProjects(projects)
-    },
-    [loadedProjects]
+  const removeProjectFromView = useCallback((project: Project) => {
+    setLoadedProjects(loadedProjects => {
+      return loadedProjects.filter(p => p.id !== project.id)
+    })
+  }, [])
+
+  const hasLeavableProjectsSelected = useMemo(
+    () => selectedProjects.some(isLeavableProject),
+    [selectedProjects]
+  )
+
+  const hasDeletableProjectsSelected = useMemo(
+    () => selectedProjects.some(isDeletableProject),
+    [selectedProjects]
   )
 
   const value = useMemo<ProjectListContextValue>(
@@ -399,6 +429,8 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
       deleteTag,
       error,
       filter,
+      hasLeavableProjectsSelected,
+      hasDeletableProjectsSelected,
       hiddenProjectsCount,
       isLoading,
       loadMoreCount,
@@ -421,6 +453,7 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
       totalProjectsCount,
       untaggedProjectsCount,
       updateProjectViewData,
+      projectsPerTag,
       visibleProjects,
     }),
     [
@@ -430,6 +463,8 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
       deleteTag,
       error,
       filter,
+      hasLeavableProjectsSelected,
+      hasDeletableProjectsSelected,
       hiddenProjectsCount,
       isLoading,
       loadMoreCount,
@@ -452,6 +487,7 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
       totalProjectsCount,
       untaggedProjectsCount,
       updateProjectViewData,
+      projectsPerTag,
       visibleProjects,
     ]
   )

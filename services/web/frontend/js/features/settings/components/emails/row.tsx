@@ -12,6 +12,7 @@ import getMeta from '../../../../utils/meta'
 import { ExposedSettings } from '../../../../../../types/exposed-settings'
 import { ssoAvailableForInstitution } from '../../utils/sso'
 import ReconfirmationInfo from './reconfirmation-info'
+import { useLocation } from '../../../../shared/hooks/use-location'
 
 type EmailsRowProps = {
   userEmailData: UserEmailData
@@ -61,13 +62,16 @@ function SSOAffiliationInfo({ userEmailData }: SSOAffiliationInfoProps) {
   const { samlInitPath } = getMeta('ol-ExposedSettings') as ExposedSettings
   const { t } = useTranslation()
   const { state } = useUserEmailsContext()
+  const location = useLocation()
 
   const [linkAccountsButtonDisabled, setLinkAccountsButtonDisabled] =
     useState(false)
 
   function handleLinkAccountsButtonClick() {
     setLinkAccountsButtonDisabled(true)
-    window.location.href = `${samlInitPath}?university_id=${userEmailData.affiliation?.institution?.id}&auto=/user/settings&email=${userEmailData.email}`
+    location.assign(
+      `${samlInitPath}?university_id=${userEmailData.affiliation?.institution?.id}&auto=/user/settings&email=${userEmailData.email}`
+    )
   }
 
   if (
@@ -139,7 +143,7 @@ function SSOAffiliationInfo({ userEmailData }: SSOAffiliationInfoProps) {
           <Col md={3} className="text-md-right">
             <EmailCell>
               <Button
-                bsStyle="info"
+                bsStyle="primary"
                 className="btn-sm btn-link-accounts"
                 disabled={linkAccountsButtonDisabled}
                 onClick={handleLinkAccountsButtonClick}

@@ -1,4 +1,3 @@
-const Features = require('../../infrastructure/Features')
 const _ = require('lodash')
 const { db, ObjectId } = require('../../infrastructure/mongodb')
 const { callbackify } = require('util')
@@ -58,7 +57,7 @@ module.exports = {
 
 async function markAsDeletedByExternalSource(projectId) {
   logger.debug(
-    { project_id: projectId },
+    { projectId },
     'marking project as deleted by external data source'
   )
   await Project.updateOne(
@@ -275,7 +274,7 @@ async function deleteProject(projectId, options = {}) {
     throw err
   }
 
-  logger.debug({ project_id: projectId }, 'successfully deleted project')
+  logger.debug({ projectId }, 'successfully deleted project')
 }
 
 async function undeleteProject(projectId, options = {}) {
@@ -376,12 +375,10 @@ async function expireDeletedProject(projectId) {
 
     await Promise.all([
       DocstoreManager.promises.destroyProject(deletedProject.project._id),
-      Features.hasFeature('history-v1')
-        ? HistoryManager.promises.deleteProject(
-            deletedProject.project._id,
-            historyId
-          )
-        : Promise.resolve(),
+      HistoryManager.promises.deleteProject(
+        deletedProject.project._id,
+        historyId
+      ),
       FilestoreHandler.promises.deleteProject(deletedProject.project._id),
       TpdsUpdateSender.promises.deleteProject({
         projectId: deletedProject.project._id,

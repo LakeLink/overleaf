@@ -1,5 +1,6 @@
 @import './editor/file-tree.less';
 @import './editor/history.less';
+@import './editor/history-react.less';
 @import './editor/toolbar.less';
 @import './editor/left-menu.less';
 @import './editor/pdf.less';
@@ -17,6 +18,7 @@
 @import './editor/outline.less';
 @import './editor/logs.less';
 @import './editor/dictionary.less';
+@import './editor/compile-button.less';
 
 @ui-layout-toggler-def-height: 50px;
 @ui-resizer-size: 7px;
@@ -154,21 +156,6 @@
   overflow: hidden;
   position: relative;
   z-index: 10; // Prevent track changes showing over toolbar
-
-  .btn-recompile-group {
-    margin-right: -5px;
-    border-radius: @btn-border-radius-base 0 0 @btn-border-radius-base;
-    margin-left: 6px;
-    &.btn-recompile-group-has-changes {
-      // prettier-ignore
-      #gradient > .striped(@color: rgba(255, 255, 255, 0.2), @angle: -45deg);
-      background-size: @stripe-width @stripe-width;
-      .animation(pdf-toolbar-stripes 2s linear infinite);
-    }
-    .btn-recompile {
-      border-radius: @btn-border-radius-base 0 0 @btn-border-radius-base;
-    }
-  }
 }
 
 .loading-screen {
@@ -586,7 +573,7 @@ CodeMirror
   top: 8px;
   right: 8px;
   left: 8px;
-  z-index: 10;
+  z-index: 1000;
   display: flex;
   justify-content: space-between;
   padding: 5px 10px;
@@ -798,4 +785,67 @@ CodeMirror
       background-color: @ol-green;
     }
   }
+}
+
+.cm6-switch-away-survey {
+  padding: @padding-sm;
+  box-shadow: 5px 5px 6px rgba(0, 0, 0, 0.3);
+  background-color: @ol-blue;
+  width: 530px;
+  position: absolute;
+  right: @margin-sm;
+  bottom: @margin-xl;
+  z-index: @zindex-popover;
+
+  .btn.close {
+    background-color: transparent;
+    color: #fff;
+    opacity: 1;
+  }
+
+  .warning-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-right: 32px;
+  }
+
+  .warning-text {
+    padding-right: @alert-padding;
+    display: inline-block;
+    font-size: @font-size-small;
+  }
+}
+
+.grammarly-warning {
+  width: 500px;
+
+  &.alert.alert-info {
+    padding: @padding-sm;
+  }
+
+  .btn.close {
+    background-color: transparent;
+    color: @white;
+    opacity: 1;
+  }
+
+  .warning-content {
+    padding-right: @alert-padding;
+    font-size: @font-size-small;
+    margin-right: 32px;
+
+    .warning-link {
+      font-weight: 700;
+      text-decoration: none;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+  }
+}
+
+grammarly-extension[data-grammarly-shadow-root='true'] {
+  z-index: 1;
 }

@@ -353,7 +353,7 @@ const DockerRunner = {
     callback = _.once(callback)
     const { name } = options
 
-    logger.debug({ container_name: name }, 'starting container')
+    logger.debug({ containerName: name }, 'starting container')
     const container = dockerode.getContainer(name)
 
     function createAndStartContainer() {
@@ -390,7 +390,7 @@ const DockerRunner = {
         createAndStartContainer()
       } else if (error != null) {
         logger.err(
-          { container_name: name, error },
+          { containerName: name, error },
           'unable to inspect container to start'
         )
         callback(error)
@@ -480,7 +480,7 @@ const DockerRunner = {
     container.wait((error, res) => {
       if (error != null) {
         clearTimeout(timeoutId)
-        logger.error({ err: error, containerId }, 'error waiting for container')
+        logger.warn({ err: error, containerId }, 'error waiting for container')
         return callback(error)
       }
       if (timedOut) {

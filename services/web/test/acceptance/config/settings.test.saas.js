@@ -17,13 +17,6 @@ const overrides = {
     analytics: {
       url: `http://localhost:23050`,
     },
-    project_history: {
-      sendProjectStructureOps: true,
-      initializeHistoryForNewProjects: true,
-      displayHistoryForNewProjects: true,
-      url: `http://localhost:23054`,
-    },
-
     recurly: {
       url: 'http://localhost:26034',
       subdomain: 'test',
@@ -39,12 +32,6 @@ const overrides = {
 
     v1: {
       url: `http://localhost:25000`,
-      user: 'overleaf',
-      pass: 'password',
-    },
-
-    v1_history: {
-      url: `http://localhost:23100/api`,
       user: 'overleaf',
       pass: 'password',
     },
@@ -69,6 +56,14 @@ const overrides = {
 
   // Disable contentful module.
   contentful: undefined,
+
+  twoFactorAuthentication: {
+    accessTokenEncryptorOptions: {
+      cipherPasswords: {
+        '2023.1-v3': 'this-is-a-weak-secret-for-tests-web-2023.1-v3',
+      },
+    },
+  },
 }
 
 module.exports = baseApp.mergeWith(baseTest.mergeWith(overrides))

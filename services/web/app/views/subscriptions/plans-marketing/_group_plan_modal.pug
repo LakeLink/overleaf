@@ -51,10 +51,7 @@ div.modal.fade(tabindex="-1" role="dialog" data-ol-group-plan-modal)
 												value=plan_code.code
 												data-ol-group-plan-code=plan_code.code
 											)
-											if (useNewPlanName && plan_code.code === 'collaborator')
-												span Standard
-											else
-												span #{plan_code.display}
+											span #{plan_code.display}
 								.form-group
 									label(for='size')
 										| Number of users
@@ -64,7 +61,7 @@ div.modal.fade(tabindex="-1" role="dialog" data-ol-group-plan-modal)
 										event-tracking-mb="true"
 										event-tracking-trigger="click"
 										event-tracking-element="select"
-										event-segmentation='{"plans-page-layout-v2-annual": "' + (newPlansPageVariantV2 ? 'new-plans-page' : 'default') + '"}'
+										event-segmentation='{"plans-page-layout-v3": "' + (plansPageLayoutV3Variant) + '"}'
 									)
 										for size in groupPlanModalOptions.sizes
 											option(
@@ -92,7 +89,7 @@ div.modal.fade(tabindex="-1" role="dialog" data-ol-group-plan-modal)
 										event-tracking-mb="true"
 										event-tracking-trigger="click"
 										event-tracking-element="checkbox"
-										event-segmentation='{"plans-page-layout-v2-annual": "' + (newPlansPageVariantV2 ? 'new-plans-page' : 'default') + '"}'
+										event-segmentation='{"plans-page-layout-v3": "' + (plansPageLayoutV3Variant) + '"}'
 									)
 									span This license is for educational purposes (applies to students or faculty using Overleaf for teaching)
 

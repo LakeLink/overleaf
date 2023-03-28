@@ -18,7 +18,7 @@ const DeleterDataSchema = new Schema({
   deletedProjectReadOnlyToken: { type: String },
   deletedProjectLastUpdatedAt: { type: Date },
   deletedProjectOverleafId: { type: Number },
-  deletedProjectOverleafHistoryId: { type: Number },
+  deletedProjectOverleafHistoryId: { type: Schema.Types.Mixed },
 })
 
 const DeletedProjectSchema = new Schema(
@@ -26,7 +26,7 @@ const DeletedProjectSchema = new Schema(
     deleterData: DeleterDataSchema,
     project: ProjectSchema,
   },
-  { collection: 'deletedProjects' }
+  { collection: 'deletedProjects', minimize: false }
 )
 
 exports.DeletedProject = mongoose.model('DeletedProject', DeletedProjectSchema)

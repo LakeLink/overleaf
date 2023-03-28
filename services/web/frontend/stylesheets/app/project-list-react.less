@@ -1,8 +1,6 @@
 @project-list-sidebar-wrapper-flex: 0 0 15%;
 
 .project-list-react {
-  overflow-x: hidden;
-
   body > .content& {
     padding-top: @header-height;
     padding-bottom: 0;
@@ -33,9 +31,12 @@
   }
 
   .project-list-sidebar-wrapper-react {
+    position: relative;
     background-color: @sidebar-bg;
     flex: @project-list-sidebar-wrapper-flex;
     min-height: calc(~'100vh -' @header-height);
+    max-width: 320px;
+    min-width: 200px;
 
     .project-list-sidebar-subwrapper {
       display: flex;
@@ -43,7 +44,7 @@
       height: 100%;
 
       .project-list-sidebar-react {
-        height: 100%;
+        flex-grow: 1;
         padding-left: 15px;
         padding-right: 15px;
         -ms-overflow-style: -ms-autohiding-scrollbar;
@@ -77,6 +78,8 @@
   }
 
   .project-list-main-react {
+    max-width: 100%;
+    overflow-x: hidden;
     padding: @content-margin-vertical @grid-gutter-width / 2;
   }
 
@@ -302,6 +305,7 @@
 
     .dash-cell-checkbox {
       width: 5%;
+      line-height: 1.55;
 
       input[type='checkbox'] {
         margin-top: 5px;
@@ -539,7 +543,24 @@
   }
 
   .projects-toolbar {
-    flex-wrap: wrap;
+    .dropdown,
+    .dropdown-toggle {
+      max-width: 100%;
+    }
+
+    .dropdown {
+      min-width: 0;
+    }
+
+    .dropdown-toggle {
+      display: inline-flex;
+      align-items: baseline;
+    }
+  }
+
+  .projects-sort-dropdown {
+    flex-shrink: 0;
+    margin-left: auto;
   }
 
   #projects-types-dropdown {
@@ -703,25 +724,23 @@
 }
 
 .project-list-sidebar-survey-wrapper {
-  position: fixed;
+  position: sticky;
   bottom: 0;
-  left: 0;
-  width: 15%;
 
-  .project-list-sidebar-survey-dismiss {
-    position: relative;
-    z-index: 1;
-    float: right;
+  .alert-info-alt {
+    font-size: @font-size-small;
+    margin-bottom: 0;
+
+    a {
+      text-decoration: none;
+    }
   }
 
   @media (max-width: @screen-xs-max) {
-    line-height: @mobile-action-element-height;
     position: static;
-    display: block;
     margin-top: @margin-sm;
-    width: initial;
 
-    .project-list-sidebar-survey {
+    .alert-info-alt {
       font-size: unset;
 
       &:before {
@@ -729,37 +748,12 @@
       }
 
       .project-list-sidebar-survey-link {
-        display: inline-flex;
+        display: block;
         align-items: center;
         min-width: @mobile-action-element-width;
         min-height: @mobile-action-element-height;
+        padding-top: @padding-md;
       }
-    }
-
-    .project-list-sidebar-survey-dismiss {
-      width: @mobile-action-element-width;
-      height: @mobile-action-element-height;
-      border: 0;
-    }
-  }
-}
-
-.projects-action-list {
-  list-style: none;
-
-  li:not(.completed-project-action) {
-    list-style-type: disc;
-  }
-
-  li.completed-project-action {
-    &:before {
-      display: inline-block;
-      content: '\f00c';
-      font-family: FontAwesome;
-      color: @ol-green;
-      width: 1.2em;
-      margin-left: -1.2em;
-      height: 0; // prevent slight vertical layout shift
     }
   }
 }

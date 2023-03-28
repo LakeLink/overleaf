@@ -1,5 +1,4 @@
 /* eslint-disable
-    camelcase,
     max-len,
     no-return-assign,
     no-unused-vars,
@@ -18,7 +17,7 @@ const modulePath = '../../../../app/src/Features/Project/ProjectHistoryHandler'
 const SandboxedModule = require('sandboxed-module')
 
 describe('ProjectHistoryHandler', function () {
-  const project_id = '4eecb1c1bffa66588e0000a1'
+  const projectId = '4eecb1c1bffa66588e0000a1'
   const userId = 1234
 
   beforeEach(function () {
@@ -30,7 +29,7 @@ describe('ProjectHistoryHandler', function () {
         }
 
         constructor(options) {
-          this._id = project_id
+          this._id = projectId
           this.name = 'project_name_here'
           this.rev = 0
         }
@@ -39,6 +38,7 @@ describe('ProjectHistoryHandler', function () {
       return Project
     })()
     this.project = new this.ProjectModel()
+    this.historyId = this.project._id.toString()
 
     this.callback = sinon.stub()
 
@@ -57,10 +57,9 @@ describe('ProjectHistoryHandler', function () {
 
   describe('starting history for an existing project', function () {
     beforeEach(function () {
-      this.newHistoryId = 123456789
       this.HistoryManager.initializeProject = sinon
         .stub()
-        .callsArgWith(0, null, { overleaf_id: this.newHistoryId })
+        .yields(null, this.historyId)
       this.HistoryManager.flushProject = sinon.stub().callsArg(1)
       return (this.ProjectEntityUpdateHandler.resyncProjectHistory = sinon
         .stub()
@@ -71,20 +70,20 @@ describe('ProjectHistoryHandler', function () {
       beforeEach(function () {
         this.ProjectDetailsHandler.getDetails = sinon
           .stub()
-          .withArgs(project_id)
+          .withArgs(projectId)
           .callsArgWith(1, null, this.project)
         this.ProjectModel.updateOne = sinon
           .stub()
-          .callsArgWith(2, null, { n: 1 })
+          .callsArgWith(2, null, { matchedCount: 1 })
         return this.ProjectHistoryHandler.ensureHistoryExistsForProject(
-          project_id,
+          projectId,
           this.callback
         )
       })
 
       it('should get any existing history id for the project', function () {
         return this.ProjectDetailsHandler.getDetails
-          .calledWith(project_id)
+          .calledWith(projectId)
           .should.equal(true)
       })
 
@@ -95,21 +94,21 @@ describe('ProjectHistoryHandler', function () {
       it('should set the new history id on the project', function () {
         return this.ProjectModel.updateOne
           .calledWith(
-            { _id: project_id, 'overleaf.history.id': { $exists: false } },
-            { 'overleaf.history.id': this.newHistoryId }
+            { _id: projectId, 'overleaf.history.id': { $exists: false } },
+            { 'overleaf.history.id': this.historyId }
           )
           .should.equal(true)
       })
 
       it('should resync the project history', function () {
         return this.ProjectEntityUpdateHandler.resyncProjectHistory
-          .calledWith(project_id)
+          .calledWith(projectId)
           .should.equal(true)
       })
 
       it('should flush the project history', function () {
         return this.HistoryManager.flushProject
-          .calledWith(project_id)
+          .calledWith(projectId)
           .should.equal(true)
       })
 
@@ -123,18 +122,18 @@ describe('ProjectHistoryHandler', function () {
         this.project.overleaf = { history: { id: 1234 } }
         this.ProjectDetailsHandler.getDetails = sinon
           .stub()
-          .withArgs(project_id)
+          .withArgs(projectId)
           .callsArgWith(1, null, this.project)
         this.ProjectModel.updateOne = sinon.stub()
         return this.ProjectHistoryHandler.ensureHistoryExistsForProject(
-          project_id,
+          projectId,
           this.callback
         )
       })
 
       it('should get any existing history id for the project', function () {
         return this.ProjectDetailsHandler.getDetails
-          .calledWith(project_id)
+          .calledWith(projectId)
           .should.equal(true)
       })
 

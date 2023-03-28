@@ -1,9 +1,11 @@
 type TemplateLink = {
   name: string
   url: string
+  trackingKey: string
 }
 
 export type ExposedSettings = {
+  adminEmail: string
   appName: string
   cookieDomain: string
   dropboxAppName: string
@@ -35,6 +37,6 @@ export type ExposedSettings = {
   siteUrl: string
   textExtensions: string[]
   validRootDocExtensions: string[]
-  templateLinks: TemplateLink[]
+  templateLinks?: TemplateLink[]
   labsEnabled: boolean
 }

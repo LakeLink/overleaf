@@ -1,6 +1,11 @@
-import { memo, useCallback } from 'react'
+import { ChangeEvent, FC, memo, useCallback } from 'react'
 import useScopeValue from '../../../shared/hooks/use-scope-value'
 import Tooltip from '../../../shared/components/tooltip'
+import { sendMB } from '../../../infrastructure/event-tracking'
+import getMeta from '../../../utils/meta'
+import SplitTestBadge from '../../../shared/components/split-test-badge'
+import isValidTeXFile from '../../../main/is-valid-tex-file'
+import { useTranslation } from 'react-i18next'
 
 function Badge() {
   const content = (
@@ -35,86 +40,150 @@ function Badge() {
   )
 }
 
+const showLegacySourceEditor: boolean = getMeta('ol-showLegacySourceEditor')
+const hasNewSourceEditor: boolean = getMeta('ol-hasNewSourceEditor')
+
 function EditorSwitch() {
   const [newSourceEditor, setNewSourceEditor] = useScopeValue(
     'editor.newSourceEditor'
   )
   const [richText, setRichText] = useScopeValue('editor.showRichText')
 
+  const [visual, setVisual] = useScopeValue('editor.showVisual')
+
+  const [docName] = useScopeValue('editor.open_doc_name')
+  const richTextAvailable = isValidTeXFile(docName)
+  const richTextOrVisual = richText || (richTextAvailable && visual)
+
   const handleChange = useCallback(
     event => {
-      const choice = event.target.value
+      const editorType = event.target.value
 
-      switch (choice) {
+      switch (editorType) {
         case 'ace':
           setRichText(false)
+          setVisual(false)
           setNewSourceEditor(false)
           break
 
         case 'cm6':
           setRichText(false)
+          setVisual(false)
           setNewSourceEditor(true)
           break
 
         case 'rich-text':
-          setRichText(true)
+          if (getMeta('ol-richTextVariant') === 'cm6') {
+            setRichText(false)
+            setVisual(true)
+            setNewSourceEditor(true)
+          } else {
+            setRichText(true)
+            setVisual(false)
+          }
+
           break
       }
+
+      sendMB('editor-switch-change', { editorType })
     },
-    [setRichText, setNewSourceEditor]
+    [setRichText, setVisual, setNewSourceEditor]
   )
 
   return (
     <div className="editor-toggle-switch">
-      <Badge />
+      {showLegacySourceEditor ? <Badge /> : null}
 
       <fieldset className="toggle-switch">
         <legend className="sr-only">Editor mode.</legend>
 
-        <input
-          type="radio"
-          name="editor"
-          value="cm6"
-          id="editor-switch-cm6"
-          className="toggle-switch-input"
-          checked={!richText && !!newSourceEditor}
-          onChange={handleChange}
-        />
-        <label htmlFor="editor-switch-cm6" className="toggle-switch-label">
-          <span>Source</span>
-        </label>
+        {hasNewSourceEditor && (
+          <>
+            <input
+              type="radio"
+              name="editor"
+              value="cm6"
+              id="editor-switch-cm6"
+              className="toggle-switch-input"
+              checked={!richTextOrVisual && !!newSourceEditor}
+              onChange={handleChange}
+            />
+            <label htmlFor="editor-switch-cm6" className="toggle-switch-label">
+              <span>Source</span>
+            </label>
+          </>
+        )}
 
-        <input
-          type="radio"
-          name="editor"
-          value="ace"
-          id="editor-switch-ace"
-          className="toggle-switch-input"
-          checked={!richText && !newSourceEditor}
-          onChange={handleChange}
-        />
-        <label htmlFor="editor-switch-ace" className="toggle-switch-label">
-          <span>Source (legacy)</span>
-        </label>
+        {showLegacySourceEditor ? (
+          <>
+            <input
+              type="radio"
+              name="editor"
+              value="ace"
+              id="editor-switch-ace"
+              className="toggle-switch-input"
+              checked={!richTextOrVisual && !newSourceEditor}
+              onChange={handleChange}
+            />
+            <label htmlFor="editor-switch-ace" className="toggle-switch-label">
+              <span>{hasNewSourceEditor ? 'Source (legacy)' : 'Source'}</span>
+            </label>
+          </>
+        ) : null}
 
-        <input
-          type="radio"
-          name="editor"
-          value="rich-text"
-          id="editor-switch-rich-text"
-          className="toggle-switch-input"
-          checked={!!richText}
-          onChange={handleChange}
+        <RichTextToggle
+          checked={!!richTextOrVisual}
+          disabled={!richTextAvailable}
+          handleChange={handleChange}
         />
-        <label
-          htmlFor="editor-switch-rich-text"
-          className="toggle-switch-label"
-        >
-          <span>Rich Text</span>
-        </label>
       </fieldset>
+
+      {!!richTextOrVisual && (
+        <SplitTestBadge splitTestName="rich-text" displayOnVariants={['cm6']} />
+      )}
     </div>
   )
+}
+
+const RichTextToggle: FC<{
+  checked: boolean
+  disabled: boolean
+  handleChange: (event: ChangeEvent<HTMLInputElement>) => void
+}> = ({ checked, disabled, handleChange }) => {
+  const { t } = useTranslation()
+
+  const toggle = (
+    <span>
+      <input
+        type="radio"
+        name="editor"
+        value="rich-text"
+        id="editor-switch-rich-text"
+        className="toggle-switch-input"
+        checked={checked}
+        onChange={handleChange}
+        disabled={disabled}
+      />
+      <label htmlFor="editor-switch-rich-text" className="toggle-switch-label">
+        <span>Rich Text</span>
+      </label>
+    </span>
+  )
+
+  if (disabled) {
+    return (
+      <Tooltip
+        description={t('rich_text_is_only_available_for_tex_files')}
+        id="rich-text-toggle-tooltip"
+        overlayProps={{ placement: 'bottom' }}
+        tooltipProps={{ className: 'tooltip-wide' }}
+      >
+        {toggle}
+      </Tooltip>
+    )
+  }
+
+  return toggle
 }
 
 export default memo(EditorSwitch)

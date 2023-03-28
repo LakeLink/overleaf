@@ -71,6 +71,9 @@ describe('ProjectController', function () {
     this.EditorController = { renameProject: sinon.stub() }
     this.InactiveProjectManager = { reactivateProjectIfRequired: sinon.stub() }
     this.ProjectUpdateHandler = { markAsOpened: sinon.stub() }
+    this.UserPrimaryEmailCheckHandler = {
+      requiresPrimaryEmailCheck: sinon.stub().returns(false),
+    }
     this.ProjectGetter = {
       findAllUsersProjects: sinon.stub(),
       getProject: sinon.stub(),
@@ -144,6 +147,9 @@ describe('ProjectController', function () {
     this.SurveyHandler = {
       getSurvey: sinon.stub().yields(null, {}),
     }
+    this.ProjectAuditLogHandler = {
+      addEntry: sinon.stub().yields(),
+    }
 
     this.ProjectController = SandboxedModule.require(MODULE_PATH, {
       requires: {
@@ -190,6 +196,9 @@ describe('ProjectController', function () {
         },
         '../Institutions/InstitutionsFeatures': this.InstitutionsFeatures,
         '../Survey/SurveyHandler': this.SurveyHandler,
+        '../User/UserPrimaryEmailCheckHandler':
+          this.UserPrimaryEmailCheckHandler,
+        './ProjectAuditLogHandler': this.ProjectAuditLogHandler,
       },
     })
 
@@ -293,13 +302,30 @@ describe('ProjectController', function () {
     it('should update the public access level', function (done) {
       this.EditorController.setPublicAccessLevel = sinon.stub().callsArg(2)
       this.req.body = {
-        publicAccessLevel: (this.publicAccessLevel = 'readonly'),
+        publicAccessLevel: 'readOnly',
       }
       this.res.sendStatus = code => {
         this.EditorController.setPublicAccessLevel
-          .calledWith(this.project_id, this.publicAccessLevel)
+          .calledWith(this.project_id, 'readOnly')
           .should.equal(true)
         code.should.equal(204)
+        done()
+      }
+      this.ProjectController.updateProjectAdminSettings(this.req, this.res)
+    })
+
+    it('should record the change in the project audit log', function (done) {
+      this.EditorController.setPublicAccessLevel = sinon.stub().callsArg(2)
+      this.req.body = {
+        publicAccessLevel: 'readOnly',
+      }
+      this.res.sendStatus = code => {
+        this.ProjectAuditLogHandler.addEntry
+          .calledWith(this.project_id, 'toggle-access-level', this.user._id, {
+            publicAccessLevel: 'readOnly',
+            status: 'OK',
+          })
+          .should.equal(true)
         done()
       }
       this.ProjectController.updateProjectAdminSettings(this.req, this.res)

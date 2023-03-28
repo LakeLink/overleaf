@@ -1,12 +1,20 @@
 /* global MathJax */
 
 import { mathJaxLoaded } from './util'
+import getMeta from '../../utils/meta'
 
 let configured = false
 
 export function configureMathJax() {
   if (configured) return
+  if (getMeta('ol-mathJax3Path')) return
   if (!mathJaxLoaded()) return
+
+  const inlineMath = [['\\(', '\\)']]
+
+  if (!getMeta('ol-no-single-dollar')) {
+    inlineMath.push(['$', '$'])
+  }
 
   MathJax.Hub.Config({
     messageStyle: 'none',
@@ -30,8 +38,7 @@ export function configureMathJax() {
     skipStartupTypeset: true,
     tex2jax: {
       processEscapes: true,
-      // Dollar delimiters are added by the mathjax directive
-      inlineMath: [['\\(', '\\)']],
+      inlineMath,
       displayMath: [
         ['$$', '$$'],
         ['\\[', '\\]'],

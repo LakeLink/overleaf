@@ -13,9 +13,9 @@
 // send P correct words and Q incorrect words
 // generate incorrect words by qq+random
 
-const async = require('async')
-const request = require('request')
-const fs = require('fs')
+import fs from 'node:fs'
+import async from 'async'
+import request from 'request'
 
 // created with
 // aspell -d en dump master | aspell -l en expand | shuf -n 150000 > words.txt
@@ -54,7 +54,7 @@ const generateIncorrectWords = function (n) {
   return words
 }
 
-const make_request = function (correctWords, incorrectWords, callback) {
+const makeRequest = function (correctWords, incorrectWords, callback) {
   let i, j, w
   let i1
   let j1
@@ -142,7 +142,7 @@ const make_request = function (correctWords, incorrectWords, callback) {
 const q = async.queue(
   (task, callback) =>
     setTimeout(
-      () => make_request(task.correct, task.incorrect, callback),
+      () => makeRequest(task.correct, task.incorrect, callback),
       Math.random() * 100
     ),
 

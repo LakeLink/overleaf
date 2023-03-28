@@ -10,6 +10,7 @@ import { ExposedSettings } from '../../../../../../types/exposed-settings'
 
 import '@uppy/core/dist/style.css'
 import '@uppy/dashboard/dist/style.css'
+import { useLocation } from '../../../../shared/hooks/use-location'
 
 type UploadResponse = {
   project_id: string
@@ -24,6 +25,7 @@ function UploadProjectModal({ onHide }: UploadProjectModalProps) {
   const { maxUploadSize } = getMeta('ol-ExposedSettings') as ExposedSettings
   const [ableToUpload, setAbleToUpload] = useState(true)
   const [correctfileAdded, setCorrectFileAdded] = useState(false)
+  const location = useLocation()
 
   const uppy: Uppy.Uppy<Uppy.StrictTypes> = useUppy(() => {
     return Uppy({
@@ -41,6 +43,7 @@ function UploadProjectModal({ onHide }: UploadProjectModalProps) {
         },
         limit: 1,
         fieldName: 'qqfile', // "qqfile" is needed for our express multer middleware
+        timeout: 120000,
       })
       .on('file-added', () => {
         // this function can be invoked multiple times depending on maxNumberOfFiles
@@ -54,7 +57,7 @@ function UploadProjectModal({ onHide }: UploadProjectModalProps) {
         const { project_id: projectId }: UploadResponse = response.body
 
         if (projectId) {
-          window.location.assign(`/project/${projectId}`)
+          location.assign(`/project/${projectId}`)
         }
       })
       .on('restriction-failed', () => {

@@ -9,14 +9,15 @@ nav.navbar.navbar-default.navbar-main
 					aria-label="Toggle " + translate('navigation')
 				)
 					i.fa.fa-bars(aria-hidden="true")
-			if (usersBestSubscription && usersBestSubscription.type === 'free')
+			- var enableUpgradeButton = projectDashboardReact && usersBestSubscription && usersBestSubscription.type === 'free'
+			if (enableUpgradeButton)
 				a.btn.btn-primary.pull-right.me-2.visible-xs(
 					href="/user/subscription/plans"
 					event-tracking="upgrade-button-click"
 					event-tracking-mb="true"
 					event-tracking-label="upgrade"
 					event-tracking-trigger="click"
-					event-segmentation='{"source": "dashboard-top"}'
+					event-segmentation='{"source": "dashboard-top", "project-dashboard-react": "enabled", "is-dashboard-sidebar-hidden": "true", "is-screen-width-less-than-768px": "true"}'
 				) #{translate("upgrade")}
 			if settings.nav.custom_logo
 				a(href='/', aria-label=settings.appName, style='background-image:url("'+settings.nav.custom_logo+'")').navbar-brand
@@ -29,6 +30,7 @@ nav.navbar.navbar-default.navbar-main
 		- var canDisplayAdminRedirect = canRedirectToAdminDomain()
 		- var canDisplaySplitTestMenu = hasFeature('saas') && (canDisplayAdminMenu || (getSessionUser() && getSessionUser().staffAccess && (getSessionUser().staffAccess.splitTestMetrics || getSessionUser().staffAccess.splitTestManagement)))
 		- var canDisplaySurveyMenu = hasFeature('saas') && canDisplayAdminMenu
+		- var featuresPageVariant = splitTestVariants && splitTestVariants['features-page']
 
 		if (typeof(suppressNavbarRight) == "undefined")
 			.navbar-collapse.collapse(data-ol-navbar-main-collapse)
@@ -57,13 +59,13 @@ nav.navbar.navbar-default.navbar-main
 										a(href=settings.adminUrl) Switch to Admin
 								if canDisplaySplitTestMenu
 									li
-										a(href="/admin/split-test") Manage Split Tests
+										a(href="/admin/split-test") Manage Feature Flags
 								if canDisplaySurveyMenu
 									li
 										a(href="/admin/survey") Manage Surveys
 
 					// loop over header_extras
-					each item in ((splitTestVariants && (splitTestVariants['unified-navigation'] === 'show-unified-navigation')) ? nav.header_extras_unified : nav.header_extras)
+					each item in nav.header_extras
 						-
 							if ((item.only_when_logged_in && getSessionUser())
 											|| (item.only_when_logged_out && (!getSessionUser()))
@@ -94,13 +96,15 @@ nav.navbar.navbar-default.navbar-main
 											else
 												li
 													if child.url
-														a(
-															href=child.url,
-															class=child.class,
-															event-tracking=child.event
-															event-tracking-mb="true"
-															event-tracking-trigger="click"
-														) !{translate(child.text)}
+														if !child.splitTest || child.splitTest && child.splitTest === 'features-page' && child.splitTestVariant === featuresPageVariant
+															a(
+																href=child.url,
+																class=child.class,
+																event-tracking=child.event
+																event-tracking-mb="true"
+																event-tracking-trigger="click"
+																event-segmentation=child.eventSegmentation
+															) !{translate(child.text)}
 													else
 														| !{translate(child.text)}
 							else

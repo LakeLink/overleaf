@@ -1,19 +1,21 @@
+import { cloneElement } from 'react'
 import {
   OverlayTrigger,
   OverlayTriggerProps,
   Tooltip as BSTooltip,
 } from 'react-bootstrap'
+import { callFnsInSequence } from '../../utils/functions'
 
-type OverlayTriggerCustomProps = {
+type OverlayProps = Omit<OverlayTriggerProps, 'overlay'> & {
   shouldUpdatePosition?: boolean // Not officially documented https://stackoverflow.com/a/43138470
-} & OverlayTriggerProps
+}
 
-type TooltipProps = {
-  children: React.ReactNode
+export type TooltipProps = {
   description: React.ReactNode
   id: string
-  overlayProps?: Omit<OverlayTriggerCustomProps, 'overlay'>
+  overlayProps?: OverlayProps
   tooltipProps?: BSTooltip.TooltipProps
+  children: React.ReactElement
 }
 
 function Tooltip({
@@ -23,6 +25,12 @@ function Tooltip({
   tooltipProps,
   overlayProps,
 }: TooltipProps) {
+  const hideTooltip = (e: React.MouseEvent) => {
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.blur()
+    }
+  }
+
   return (
     <OverlayTrigger
       overlay={
@@ -33,7 +41,9 @@ function Tooltip({
       {...overlayProps}
       placement={overlayProps?.placement || 'top'}
     >
-      {children}
+      {cloneElement(children, {
+        onClick: callFnsInSequence(children.props.onClick, hideTooltip),
+      })}
     </OverlayTrigger>
   )
 }

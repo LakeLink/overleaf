@@ -9,6 +9,10 @@
 @gray-lighter: #cfcfcf;
 @gray-lightest: #f0f0f0;
 @white: #ffffff;
+@neutral-20: #e7e9ee;
+@neutral-90: #1b222c;
+@neutral-40: #afb5c0;
+@neutral-10: #f4f5f6;
 
 // Styleguide colors
 @ol-blue-gray-0: #f4f5f8;
@@ -29,14 +33,21 @@
 @ol-dark-red: #a6312b;
 
 @blue: #405ebf;
+@blue-10: #f1f4f9;
+@blue-30: #97b6e5;
 @blueDark: #040d2d;
 @green: #46a546;
+@green-10: #ebf6ea;
+@green-30: #8cca86;
 @red: #a93529;
 @yellow: #a1a729;
 @orange: #f89406;
 @orange-dark: #9e5e04;
 @pink: #c3325f;
 @purple: #7a43b6;
+@red-10: #f9f1f1;
+@red-50: #b83a33;
+@neutral-60: #677283;
 
 @brand-primary: @ol-green;
 @brand-secondary: @ol-dark-green;
@@ -46,10 +57,13 @@
 @brand-danger: @ol-red;
 
 @ol-type-color: @ol-blue-gray-3;
+@content-secondary: @ol-type-color;
 @accent-color-primary: @ol-green;
 @accent-color-secondary: @ol-dark-green;
 
 @editor-header-logo-background: url(../../../public/img/ol-brand/overleaf-o-white.svg)
+  center / contain no-repeat;
+@editor-header-logo-background-active: url(../../../public/img/ol-brand/overleaf-o-white.svg)
   center / contain no-repeat;
 @editor-loading-logo-padding-top: 115.44%;
 @editor-loading-logo-background-url: url(../../../public/img/ol-brand/overleaf-o-grey.svg);
@@ -107,6 +121,7 @@
 @headings-font-weight: 500;
 @headings-line-height: 1.35;
 @headings-color: @gray-dark;
+@content-primary: @headings-color;
 
 //-- Iconography
 //
@@ -150,8 +165,10 @@
 @line-height-small: 1.5;
 
 @border-radius-base: 3px;
+@border-radius-base-new: 4px;
 @border-radius-large: 5px;
 @border-radius-small: 2px;
+@border-width-sm: 1px;
 @border-width-base: 3px;
 @border-color-base: @ol-blue-gray-2;
 
@@ -201,10 +218,6 @@
 @btn-primary-color: #fff;
 @btn-primary-bg: @ol-green;
 @btn-primary-border: transparent;
-
-@btn-success-color: #fff;
-@btn-success-bg: @ol-green;
-@btn-success-border: transparent;
 
 @btn-info-color: #fff;
 @btn-info-bg: @ol-blue;
@@ -526,7 +539,7 @@
 //##
 
 //** Tooltip max width
-@tooltip-max-width: 200px;
+@tooltip-max-width: 220px;
 //** Tooltip text color
 @tooltip-color: #fff;
 //** Tooltip background color
@@ -639,6 +652,10 @@
 @alert-info-bg: @brand-info;
 @alert-info-text: #fff;
 @alert-info-border: transparent;
+
+@alert-info-alt-bg: @v2-dash-pane-bg;
+@alert-info-alt-text: @v2-dash-pane-subdued-color;
+@alert-info-alt-border: transparent;
 
 @alert-warning-bg: @brand-warning;
 @alert-warning-text: #fff;
@@ -866,6 +883,7 @@
 
 @toolbar-border-color: @ol-blue-gray-5;
 @toolbar-header-btn-border-color: @toolbar-border-color;
+@toolbar-btn-height: 26px;
 @common-border-color: @gray-lighter;
 @editor-border-color: @ol-blue-gray-5;
 
@@ -915,7 +933,9 @@
 @btn-border-bottom-width: 0;
 
 // Cards
-@card-box-shadow: none;
+@card-border-radius: @border-radius-base-new;
+@card-box-shadow: 0px 4px 12px rgba(30, 37, 48, 0.12),
+  0px 2px 4px rgba(30, 37, 48, 0.08);
 
 // Project table
 @structured-list-link-color: @ol-blue;

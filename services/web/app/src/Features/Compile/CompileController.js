@@ -9,7 +9,7 @@ const logger = require('@overleaf/logger')
 const request = require('request')
 const Settings = require('@overleaf/settings')
 const SessionManager = require('../Authentication/SessionManager')
-const RateLimiter = require('../../infrastructure/RateLimiter')
+const { RateLimiter } = require('../../infrastructure/RateLimiter')
 const ClsiCookieManager = require('./ClsiCookieManager')(
   Settings.apis.clsi?.backendGroupName
 )
@@ -19,6 +19,11 @@ const SplitTestHandler = require('../SplitTests/SplitTestHandler')
 const { callbackify } = require('../../util/promises')
 
 const COMPILE_TIMEOUT_MS = 10 * 60 * 1000
+
+const pdfDownloadRateLimiter = new RateLimiter('full-pdf-download', {
+  points: 1000,
+  duration: 60 * 60,
+})
 
 function getImageNameForProject(projectId, callback) {
   ProjectGetter.getProject(projectId, { imageName: 1 }, (err, project) => {
@@ -38,12 +43,7 @@ async function getPdfCachingMinChunkSize(req, res) {
   return parseInt(variant, 10)
 }
 
-const getPdfCachingOptions = callbackify(async function (req, res) {
-  if (!req.query.enable_pdf_caching) {
-    // The frontend does not want to do pdf caching.
-    return { enablePdfCaching: false }
-  }
-
+const getSplitTestOptions = callbackify(async function (req, res) {
   // Use the query flags from the editor request for overriding the split test.
   let query = {}
   try {
@@ -51,6 +51,42 @@ const getPdfCachingOptions = callbackify(async function (req, res) {
     query = Object.fromEntries(u.searchParams.entries())
   } catch (e) {}
   const editorReq = { ...req, query }
+
+  const { variant: domainVariant } =
+    await SplitTestHandler.promises.getAssignment(
+      editorReq,
+      res,
+      'pdf-download-domain'
+    )
+  const { variant: forceNewDomainVariant } =
+    await SplitTestHandler.promises.getAssignment(
+      editorReq,
+      res,
+      'force-new-compile-domain'
+    )
+  const pdfDownloadDomain =
+    (domainVariant === 'user' || forceNewDomainVariant === 'enabled') &&
+    Settings.compilesUserContentDomain
+      ? Settings.compilesUserContentDomain
+      : Settings.pdfDownloadDomain
+
+  const { variant: hybridDomainVariant } =
+    await SplitTestHandler.promises.getAssignment(
+      editorReq,
+      res,
+      'pdf-download-domain-hybrid'
+    )
+  const enableHybridPdfDownload = hybridDomainVariant === 'enabled'
+
+  if (!req.query.enable_pdf_caching) {
+    // The frontend does not want to do pdf caching.
+    return {
+      pdfDownloadDomain,
+      enableHybridPdfDownload,
+      enablePdfCaching: false,
+      forceNewDomainVariant,
+    }
+  }
 
   // Double check with the latest split test assignment.
   // We may need to turn off the feature on a short notice, without requiring
@@ -63,12 +99,20 @@ const getPdfCachingOptions = callbackify(async function (req, res) {
   const enablePdfCaching = variant === 'enabled'
   if (!enablePdfCaching) {
     // Skip the lookup of the chunk size when caching is not enabled.
-    return { enablePdfCaching: false }
+    return {
+      pdfDownloadDomain,
+      enableHybridPdfDownload,
+      enablePdfCaching: false,
+      forceNewDomainVariant,
+    }
   }
   const pdfCachingMinChunkSize = await getPdfCachingMinChunkSize(editorReq, res)
   return {
+    pdfDownloadDomain,
+    enableHybridPdfDownload,
     enablePdfCaching,
     pdfCachingMinChunkSize,
+    forceNewDomainVariant,
   }
 })
 
@@ -108,9 +152,15 @@ module.exports = CompileController = {
       options.incrementalCompilesEnabled = true
     }
 
-    getPdfCachingOptions(req, res, (err, pdfCachingOptions) => {
+    getSplitTestOptions(req, res, (err, splitTestOptions) => {
       if (err) return next(err)
-      const { enablePdfCaching, pdfCachingMinChunkSize } = pdfCachingOptions
+      let {
+        enablePdfCaching,
+        pdfCachingMinChunkSize,
+        pdfDownloadDomain,
+        enableHybridPdfDownload,
+        forceNewDomainVariant,
+      } = splitTestOptions
       options.enablePdfCaching = enablePdfCaching
       if (enablePdfCaching) {
         options.pdfCachingMinChunkSize = pdfCachingMinChunkSize
@@ -136,12 +186,18 @@ module.exports = CompileController = {
             return next(error)
           }
           Metrics.inc('compile-status', 1, { status })
-          let pdfDownloadDomain = Settings.pdfDownloadDomain
           if (pdfDownloadDomain && outputUrlPrefix) {
             pdfDownloadDomain += outputUrlPrefix
           }
 
-          if (limits) {
+          if (
+            limits &&
+            SplitTestHandler.getPercentile(
+              AnalyticsManager.getIdsFromSession(req.session).analyticsId,
+              'compile-result-backend',
+              'release'
+            ) === 1
+          ) {
             // For a compile request to be sent to clsi we need limits.
             // If we get here without having the limits object populated, it is
             //  a reasonable assumption to make that nothing was compiled.
@@ -171,6 +227,8 @@ module.exports = CompileController = {
             timings,
             pdfDownloadDomain,
             pdfCachingMinChunkSize,
+            enableHybridPdfDownload,
+            forceNewDomainVariant,
           })
         }
       )
@@ -256,13 +314,18 @@ module.exports = CompileController = {
       if (isPdfjsPartialDownload) {
         callback(null, true)
       } else {
-        const rateLimitOpts = {
-          endpointName: 'full-pdf-download',
-          throttle: 1000,
-          subjectName: req.ip,
-          timeInterval: 60 * 60,
-        }
-        RateLimiter.addCount(rateLimitOpts, callback)
+        pdfDownloadRateLimiter
+          .consume(req.ip)
+          .then(() => {
+            callback(null, true)
+          })
+          .catch(err => {
+            if (err instanceof Error) {
+              callback(err)
+            } else {
+              callback(null, false)
+            }
+          })
       }
     }
 
@@ -593,6 +656,7 @@ function _getPersistenceOptions(
       projectId,
       userId,
       compileGroup,
+      compileBackendClass,
       (err, jar) => {
         callback(err, { jar, qs: { compileGroup, compileBackendClass } })
       }

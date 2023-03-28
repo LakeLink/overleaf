@@ -4,6 +4,7 @@ const moment = require('moment')
 const { User } = require('../../models/User')
 const { DeletedUser } = require('../../models/DeletedUser')
 const { UserAuditLogEntry } = require('../../models/UserAuditLogEntry')
+const { Feedback } = require('../../models/Feedback')
 const NewsletterManager = require('../Newsletter/NewsletterManager')
 const ProjectDeleter = require('../Project/ProjectDeleter')
 const SubscriptionHandler = require('../Subscription/SubscriptionHandler')
@@ -12,6 +13,7 @@ const SubscriptionLocator = require('../Subscription/SubscriptionLocator')
 const UserMembershipsHandler = require('../UserMembership/UserMembershipsHandler')
 const UserSessionsManager = require('./UserSessionsManager')
 const InstitutionsAPI = require('../Institutions/InstitutionsAPI')
+const Modules = require('../../infrastructure/Modules')
 const Errors = require('../Errors/Errors')
 
 module.exports = {
@@ -42,6 +44,7 @@ async function deleteUser(userId, options = {}) {
 
     await ensureCanDeleteUser(user)
     await _cleanupUser(user)
+    await Modules.promises.hooks.fire('deleteUser', userId)
     await _createDeletedUser(user, options)
     await ProjectDeleter.promises.deleteUsersProjects(user._id)
     await deleteMongoUser(user._id)
@@ -63,9 +66,12 @@ async function deleteMongoUser(userId) {
 }
 
 async function expireDeletedUser(userId) {
+  await Modules.promises.hooks.fire('expireDeletedUser', userId)
   const deletedUser = await DeletedUser.findOne({
     'deleterData.deletedUserId': userId,
   }).exec()
+
+  await Feedback.deleteMany({ userId }).exec()
 
   deletedUser.user = undefined
   deletedUser.deleterData.deleterIpAddress = undefined

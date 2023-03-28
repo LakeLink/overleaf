@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useResizeObserver } from '../hooks/use-resize-observer'
+import { useResizeObserver } from '../../../shared/hooks/use-resize-observer'
 import { useTranslation } from 'react-i18next'
 import classNames from 'classnames'
 import { Button } from 'react-bootstrap'
@@ -40,8 +40,8 @@ export default function PdfLogEntryRawContent({
         >
           <Button
             bsSize="xs"
-            bsStyle="default"
-            className="log-entry-btn-expand-collapse"
+            bsStyle={null}
+            className="log-entry-btn-expand-collapse btn-secondary"
             onClick={() => setExpanded(value => !value)}
           >
             {expanded ? (

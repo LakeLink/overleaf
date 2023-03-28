@@ -1,5 +1,4 @@
 /* eslint-disable
-    camelcase,
     no-proto,
     no-unused-vars,
 */
@@ -59,10 +58,11 @@ module.exports = DiffGenerator = {
       // is the case with this op, and shift p back appropriately to match
       // ShareJS if so.
       ;({ p } = op)
-      const max_p = content.length - op.i.length
-      if (p > max_p) {
-        logger.warn({ max_p, p }, 'truncating position to content length')
-        p = max_p
+      const maxP = content.length - op.i.length
+      if (p > maxP) {
+        logger.warn({ maxP, p }, 'truncating position to content length')
+        p = maxP
+        op.p = p // fix out of range offsets to avoid invalid history exports in ZipManager
       }
 
       const textToBeRemoved = content.slice(p, p + op.i.length)
@@ -74,6 +74,9 @@ module.exports = DiffGenerator = {
 
       return content.slice(0, p) + content.slice(p + op.i.length)
     } else if (op.d != null) {
+      if (op.p > content.length) {
+        op.p = content.length // fix out of range offsets to avoid invalid history exports in ZipManager
+      }
       return content.slice(0, op.p) + op.d + content.slice(op.p)
     } else {
       return content
