@@ -375,6 +375,7 @@ const AuthenticationController = {
                 client_id: process.env.OAUTH_CLIENT_ID,
                 response_type: "code",
                 redirect_uri: (process.env.SHARELATEX_SITE_URL + "/oauth/callback"),
+                scope: process.env.OAUTH_SCOPE,
             }));
     },
 
