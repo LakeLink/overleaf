@@ -28,9 +28,6 @@ const { expressify, promisify } = require('@overleaf/promise-utils')
 const { handleAuthenticateErrors } = require('./AuthenticationErrors')
 const EmailHelper = require('../Helpers/EmailHelper')
 
-// Patched: add axios
-const axios = require('axios').default
-
 function send401WithChallenge(res) {
   res.setHeader('WWW-Authenticate', 'OverleafLogin')
   res.sendStatus(401)
@@ -382,7 +379,7 @@ const AuthenticationController = {
     oauth2Callback(req, res, next) {
         const code = req.query.code;
 
-//construct axios body
+//construct oauth2 body
         const params = new URLSearchParams()
         params.append('grant_type', "authorization_code")
         params.append('client_id', process.env.OAUTH_CLIENT_ID)
@@ -390,7 +387,28 @@ const AuthenticationController = {
         params.append("code", code)
         params.append('redirect_uri', (process.env.SHARELATEX_SITE_URL + "/oauth/callback"))
 
-
+        fetch(process.env.OAUTH_ACCESS_URL, {
+          method: 'POST',
+          body: params
+        }).then(async r => {
+          authorization_bearer = "Bearer " + access_res.data.access_token
+          const u = new URL(process.env.OAUTH_USER_URL)
+          const params = new URLSearchParams(await r.json())
+          u.search = params.toString()
+          return fetch(u)
+        }).then(r => {
+          if (info_res.data.err) {
+            res.json({message: info_res.data.err});
+          } else {
+            AuthenticationManager.createUserIfNotExist(info_res.data, (error, user) => {
+              if (error) {
+                res.json({message: error});
+              } else {
+                AuthenticationController.finishLogin(user, req, res, next);
+              }
+            })
+          }
+        });
         // json_body = {
         //     "grant_type": "authorization_code",
         //     client_id: process.env.OAUTH_CLIENT_ID,
@@ -398,42 +416,6 @@ const AuthenticationController = {
         //     "code": code,
         //     redirect_uri: (process.env.SHARELATEX_SITE_URL + "/oauth/callback"),
         // }
-
-        axios.post(process.env.OAUTH_ACCESS_URL, params, {
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-
-            }
-        }).then(access_res => {
-
-            // console.log("respond is  " + JSON.stringify(access_res.data))
-            // console.log("authorization_bearer_is " + authorization_bearer)
-            authorization_bearer = "Bearer " + access_res.data.access_token
-
-            let axios_get_config = {
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Authorization": authorization_bearer,
-                },
-                params: access_res.data
-            }
-
-            axios.get(process.env.OAUTH_USER_URL, axios_get_config).then(info_res => {
-                // console.log("oauth_user: ", JSON.stringify(info_res.data));
-                if (info_res.data.err) {
-                    res.json({message: info_res.data.err});
-                } else {
-                    AuthenticationManager.createUserIfNotExist(info_res.data, (error, user) => {
-                        if (error) {
-                            res.json({message: error});
-                        } else {
-                            // console.log("real_user: ", user);
-                            AuthenticationController.finishLogin(user, req, res, next);
-                        }
-                    });
-                }
-            });
-        });
     },
   //Patch end
 
