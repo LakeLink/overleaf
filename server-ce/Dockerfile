@@ -25,9 +25,6 @@ RUN echo "monorepo-server-ce,$MONOREPO_REVISION" > /var/www/revisions.txt
 ENV CYPRESS_INSTALL_BINARY=0
 RUN node genScript install | bash
 
-# Patched: oauth2 dependency - axios
-RUN npm install axios
-
 # Compile
 # --------------------
 RUN node genScript compile | bash
