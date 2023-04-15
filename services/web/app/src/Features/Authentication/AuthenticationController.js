@@ -377,6 +377,7 @@ const AuthenticationController = {
     },
 
     oauth2Callback(req, res, next) {
+        const fetch = require('node-fetch');
         const code = req.query.code;
 
 //construct oauth2 body
