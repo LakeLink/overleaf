@@ -400,8 +400,8 @@ const AuthenticationController = {
           return fetch(u)
         }).then(async r => {
           const data = await r.json()
-          if (data.err) {
-            res.json({message: data.err});
+          if (data.error) {
+            res.json({message: data.error});
           } else {
             AuthenticationManager.createUserIfNotExist(data, (error, user) => {
               if (error) {
