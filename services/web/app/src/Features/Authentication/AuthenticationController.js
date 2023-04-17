@@ -392,16 +392,18 @@ const AuthenticationController = {
           method: 'POST',
           body: params
         }).then(async r => {
-          authorization_bearer = "Bearer " + access_res.data.access_token
+          const data = await r.json()
+          authorization_bearer = "Bearer " + data.access_token
           const u = new URL(process.env.OAUTH_USER_URL)
-          const params = new URLSearchParams(await r.json())
+          const params = new URLSearchParams(data)
           u.search = params.toString()
           return fetch(u)
-        }).then(r => {
-          if (info_res.data.err) {
-            res.json({message: info_res.data.err});
+        }).then(async r => {
+          const data = await r.json()
+          if (data.err) {
+            res.json({message: data.err});
           } else {
-            AuthenticationManager.createUserIfNotExist(info_res.data, (error, user) => {
+            AuthenticationManager.createUserIfNotExist(data, (error, user) => {
               if (error) {
                 res.json({message: error});
               } else {
