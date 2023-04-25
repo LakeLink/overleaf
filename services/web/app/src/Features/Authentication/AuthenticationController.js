@@ -393,11 +393,12 @@ const AuthenticationController = {
           body: params
         }).then(async r => {
           const data = await r.json()
-          authorization_bearer = "Bearer " + data.access_token
-          const u = new URL(process.env.OAUTH_USER_URL)
-          const params = new URLSearchParams(data)
-          u.search = params.toString()
-          return fetch(u)
+          return fetch(process.env.OAUTH_USER_URL, {
+            method: 'POST',
+            headers: {
+              'Authorization': "Bearer " + data.access_token
+            }
+          })
         }).then(async r => {
           const data = await r.json()
           if (data.error) {
