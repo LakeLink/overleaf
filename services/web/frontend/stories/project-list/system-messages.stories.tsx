@@ -1,4 +1,4 @@
-import SystemMessages from '../../js/features/project-list/components/notifications/system-messages'
+import SystemMessages from '@/shared/components/system-messages'
 import useFetchMock from '../hooks/use-fetch-mock'
 import { FetchMockStatic } from 'fetch-mock'
 
@@ -18,7 +18,6 @@ export const SystemMessage = (args: any) => {
       },
     ])
   })
-  window.metaAttributesCache = new Map()
 
   return <SystemMessages {...args} />
 }
@@ -28,7 +27,6 @@ export const TranslationMessage = (args: any) => {
     fetchMock.get(/\/system\/messages/, [])
   })
 
-  window.metaAttributesCache = new Map()
   window.metaAttributesCache.set('ol-suggestedLanguage', {
     url: '/dev/null',
     lngName: 'German',
@@ -41,4 +39,7 @@ export const TranslationMessage = (args: any) => {
 export default {
   title: 'Project List / System Messages',
   component: SystemMessages,
+  parameters: {
+    bootstrap5: true,
+  },
 }

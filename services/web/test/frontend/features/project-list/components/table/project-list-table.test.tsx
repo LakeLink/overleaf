@@ -9,14 +9,12 @@ const userId = '624333f147cfd8002622a1d3'
 
 describe('<ProjectListTable />', function () {
   beforeEach(function () {
-    window.metaAttributesCache = new Map()
     window.metaAttributesCache.set('ol-tags', [])
-    window.user_id = userId
+    window.metaAttributesCache.set('ol-user_id', userId)
     fetchMock.reset()
   })
 
   afterEach(function () {
-    window.user_id = undefined
     fetchMock.reset()
   })
 
@@ -31,7 +29,7 @@ describe('<ProjectListTable />', function () {
     const columns = screen.getAllByRole('columnheader')
     columns.forEach(col => {
       if (col.getAttribute('aria-label') === 'Last Modified') {
-        expect(col.getAttribute('aria-sort')).to.equal('Descending')
+        expect(col.getAttribute('aria-sort')).to.equal('descending')
         foundSortedColumn = true
       } else {
         expect(col.getAttribute('aria-sort')).to.be.null
@@ -46,14 +44,14 @@ describe('<ProjectListTable />', function () {
       name: /last modified/i,
     })
     const lastModifiedCol = lastModifiedBtn.closest('th')
-    expect(lastModifiedCol?.getAttribute('aria-sort')).to.equal('Descending')
+    expect(lastModifiedCol?.getAttribute('aria-sort')).to.equal('descending')
     const ownerBtn = screen.getByRole('button', { name: /owner/i })
     const ownerCol = ownerBtn.closest('th')
     expect(ownerCol?.getAttribute('aria-sort')).to.be.null
     fireEvent.click(ownerBtn)
-    expect(ownerCol?.getAttribute('aria-sort')).to.equal('Descending')
+    expect(ownerCol?.getAttribute('aria-sort')).to.equal('descending')
     fireEvent.click(ownerBtn)
-    expect(ownerCol?.getAttribute('aria-sort')).to.equal('Ascending')
+    expect(ownerCol?.getAttribute('aria-sort')).to.equal('ascending')
   })
 
   it('renders buttons for sorting all sortable columns', function () {
@@ -110,13 +108,25 @@ describe('<ProjectListTable />', function () {
 
     // Action Column
     // temporary count tests until we add filtering for archived/trashed
-    const copyButtons = screen.getAllByLabelText('Copy')
+    const copyButtons = screen.getAllByRole('button', {
+      name: 'Copy',
+    })
     expect(copyButtons.length).to.equal(currentProjects.length)
-    const downloadButtons = screen.getAllByLabelText('Download')
+    const downloadButtons = screen.getAllByRole('button', {
+      name: 'Download .zip file',
+    })
     expect(downloadButtons.length).to.equal(currentProjects.length)
-    const archiveButtons = screen.getAllByLabelText('Archive')
+    const downloadPDFButtons = screen.getAllByRole('button', {
+      name: 'Download PDF',
+    })
+    expect(downloadPDFButtons.length).to.equal(currentProjects.length)
+    const archiveButtons = screen.getAllByRole('button', {
+      name: 'Archive',
+    })
     expect(archiveButtons.length).to.equal(currentProjects.length)
-    const trashButtons = screen.getAllByLabelText('Trash')
+    const trashButtons = screen.getAllByRole('button', {
+      name: 'Trash',
+    })
     expect(trashButtons.length).to.equal(currentProjects.length)
 
     // TODO to be implemented when the component renders trashed & archived projects

@@ -47,11 +47,33 @@ module.exports = Client = {
       if (error != null) {
         return callback(error)
       }
-      const secret = Settings.security.sessionSecret
-      const cookieKey = 's:' + signature.sign(sessionId, secret)
-      Client.cookie = `${Settings.cookieName}=${cookieKey}`
+      Client.cookieSignedWith = {}
+      // prepare cookie strings for all supported session secrets
+      for (const secretName of [
+        'sessionSecret',
+        'sessionSecretFallback',
+        'sessionSecretUpcoming',
+      ]) {
+        const secret = Settings.security[secretName]
+        const cookieKey = 's:' + signature.sign(sessionId, secret)
+        Client.cookieSignedWith[secretName] =
+          `${Settings.cookieName}=${cookieKey}`
+      }
+      // default to the current session secret
+      Client.cookie = Client.cookieSignedWith.sessionSecret
       return callback()
     })
+  },
+
+  setAnonSession(projectId, anonymousAccessToken, callback) {
+    Client.setSession(
+      {
+        anonTokenAccess: {
+          [projectId]: anonymousAccessToken,
+        },
+      },
+      callback
+    )
   },
 
   unsetSession(callback) {
@@ -62,14 +84,29 @@ module.exports = Client = {
     return callback()
   },
 
-  connect(cookie) {
-    const client = io.connect('http://localhost:3026', {
+  connect(projectId, callback) {
+    const client = io.connect('http://127.0.0.1:3026', {
       'force new connection': true,
+      query: new URLSearchParams({ projectId }).toString(),
     })
-    client.on(
-      'connectionAccepted',
-      (_, publicId) => (client.publicId = publicId)
-    )
+    let disconnected = false
+    client.on('disconnect', () => {
+      disconnected = true
+    })
+    client.on('connectionRejected', err => {
+      // Wait for disconnect ahead of continuing with the test sequence.
+      setTimeout(() => {
+        if (!disconnected) {
+          throw new Error('should disconnect after connectionRejected')
+        }
+        callback(err)
+      }, 10)
+    })
+    client.on('joinProjectResponse', resp => {
+      const { publicId, project, permissionsLevel, protocolVersion } = resp
+      client.publicId = publicId
+      callback(null, project, permissionsLevel, protocolVersion)
+    })
     return client
   },
 
@@ -79,7 +116,7 @@ module.exports = Client = {
     }
     return request.get(
       {
-        url: 'http://localhost:3026/clients',
+        url: 'http://127.0.0.1:3026/clients',
         json: true,
       },
       (error, response, data) => callback(error, data)
@@ -92,17 +129,23 @@ module.exports = Client = {
     }
     return request.get(
       {
-        url: `http://localhost:3026/clients/${clientId}`,
+        url: `http://127.0.0.1:3026/clients/${clientId}`,
         json: true,
       },
-      (error, response, data) => callback(error, data)
+      (error, response, data) => {
+        if (response?.statusCode === 404) {
+          callback(new Error('not found'))
+        } else {
+          callback(error, data)
+        }
+      }
     )
   },
 
   disconnectClient(clientId, callback) {
     request.post(
       {
-        url: `http://localhost:3026/client/${clientId}/disconnect`,
+        url: `http://127.0.0.1:3026/client/${clientId}/disconnect`,
       },
       (error, response, data) => callback(error, data)
     )

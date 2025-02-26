@@ -1,18 +1,16 @@
-import { Button } from 'react-bootstrap'
 import { Trans, useTranslation } from 'react-i18next'
 import { MemberGroupSubscription } from '../../../../../../types/subscription/dashboard/subscription'
 import { useSubscriptionDashboardContext } from '../../context/subscription-dashboard-context'
 import { LEAVE_GROUP_MODAL_ID } from './leave-group-modal'
-import PremiumFeaturesLink from './premium-features-link'
+import getMeta from '../../../../utils/meta'
+import OLButton from '@/features/ui/components/ol/ol-button'
 
 type GroupSubscriptionMembershipProps = {
   subscription: MemberGroupSubscription
-  isLast: boolean
 }
 
 export default function GroupSubscriptionMembership({
   subscription,
-  isLast,
 }: GroupSubscriptionMembershipProps) {
   const { t } = useTranslation()
   const { handleOpenModal, setLeavingGroupId } =
@@ -22,6 +20,9 @@ export default function GroupSubscriptionMembership({
     handleOpenModal(LEAVE_GROUP_MODAL_ID)
     setLeavingGroupId(subscription._id)
   }
+
+  // Hide leave group button for managed users
+  const hideLeaveButton = getMeta('ol-cannot-leave-group-subscription')
 
   return (
     <div>
@@ -34,6 +35,8 @@ export default function GroupSubscriptionMembership({
             groupName: subscription.teamName || '',
             adminEmail: subscription.admin_id.email,
           }}
+          shouldUnescape
+          tOptions={{ interpolation: { escapeValue: true } }}
         />
       </p>
       {subscription.teamNotice && (
@@ -42,12 +45,18 @@ export default function GroupSubscriptionMembership({
           <em>{subscription.teamNotice}</em>
         </p>
       )}
-      {isLast && <PremiumFeaturesLink />}
-      <span>
-        <Button bsStyle="danger" onClick={leaveGroup}>
-          {t('leave_group')}
-        </Button>
-      </span>
+      {hideLeaveButton ? (
+        <span>
+          {' '}
+          {t('need_to_leave')} {t('contact_group_admin')}{' '}
+        </span>
+      ) : (
+        <span>
+          <OLButton variant="danger" onClick={leaveGroup}>
+            {t('leave_group')}
+          </OLButton>
+        </span>
+      )}
       <hr />
     </div>
   )

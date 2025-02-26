@@ -14,22 +14,19 @@ module.exports = {
     const userId = user._id
     logger.debug({ projectId, userId }, 'sending join project request to web')
     const url = `${settings.apis.web.url}/project/${projectId}/join`
-    const headers = {}
-    if (user.anonymousAccessToken) {
-      headers['x-sl-anonymous-access-token'] = user.anonymousAccessToken
-    }
     request.post(
       {
         url,
-        qs: { user_id: userId },
         auth: {
           user: settings.apis.web.user,
           pass: settings.apis.web.pass,
           sendImmediately: true,
         },
-        json: true,
+        json: {
+          userId,
+          anonymousAccessToken: user.anonymousAccessToken,
+        },
         jar: false,
-        headers,
       },
       function (error, response, data) {
         if (error) {
@@ -40,12 +37,12 @@ module.exports = {
           if (!(data && data.project)) {
             return callback(new CorruptedJoinProjectResponseError())
           }
-          callback(
-            null,
-            data.project,
-            data.privilegeLevel,
-            data.isRestrictedUser
-          )
+          const userMetadata = {
+            isRestrictedUser: data.isRestrictedUser,
+            isTokenMember: data.isTokenMember,
+            isInvitedMember: data.isInvitedMember,
+          }
+          callback(null, data.project, data.privilegeLevel, userMetadata)
         } else if (response.statusCode === 429) {
           callback(
             new CodedError(

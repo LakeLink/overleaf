@@ -6,6 +6,9 @@ import devConfig from '../../webpack.config.dev'
 
 const buildConfig = () => {
   const webpackConfig = merge(devConfig, {
+    output: {
+      workerPublicPath: '/__cypress/src/',
+    },
     devServer: {
       static: path.join(__dirname, '../../public'),
       port: 3200,
@@ -31,14 +34,17 @@ const buildConfig = () => {
   // add entrypoint under '/' for latex-linter worker
   addWorker(
     'latex-linter-worker',
-    '../../modules/source-editor/frontend/js/languages/latex/linter/latex-linter.worker.js'
+    '../../frontend/js/features/source-editor/languages/latex/linter/latex-linter.worker'
+  )
+
+  // add entrypoint under '/' for hunspell worker
+  addWorker(
+    'hunspell-worker',
+    '../../frontend/js/features/source-editor/hunspell/hunspell.worker'
   )
 
   // add entrypoints under '/' for pdfjs workers
-  const pdfjsVersions = ['pdfjs-dist213', 'pdfjs-dist31']
-  for (const name of pdfjsVersions) {
-    addWorker(name, `${name}/legacy/build/pdf.worker.js`)
-  }
+  addWorker('pdfjs-dist', 'pdfjs-dist/build/pdf.worker.mjs')
 
   return webpackConfig
 }

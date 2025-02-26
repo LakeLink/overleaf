@@ -1,11 +1,11 @@
 const SandboxedModule = require('sandboxed-module')
 const sinon = require('sinon')
 const { assert, expect } = require('chai')
-const modulePath = require('path').join(
+const modulePath = require('node:path').join(
   __dirname,
   '../../../app/js/HttpController'
 )
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 const Errors = require('../../../app/js/Errors')
 
 describe('HttpController', function () {
@@ -158,12 +158,12 @@ describe('HttpController', function () {
         this.req.params = { project_id: this.projectId }
         this.docs = [
           {
-            _id: ObjectId(),
+            _id: new ObjectId(),
             lines: ['mock', 'lines', 'one'],
             rev: 2,
           },
           {
-            _id: ObjectId(),
+            _id: new ObjectId(),
             lines: ['mock', 'lines', 'two'],
             rev: 4,
           },
@@ -203,12 +203,12 @@ describe('HttpController', function () {
         this.req.params = { project_id: this.projectId }
         this.docs = [
           {
-            _id: ObjectId(),
+            _id: new ObjectId(),
             lines: null,
             rev: 2,
           },
           {
-            _id: ObjectId(),
+            _id: new ObjectId(),
             lines: ['mock', 'lines', 'two'],
             rev: 4,
           },
@@ -242,13 +242,13 @@ describe('HttpController', function () {
         this.req.params = { project_id: this.projectId }
         this.docs = [
           {
-            _id: ObjectId(),
+            _id: new ObjectId(),
             lines: ['mock', 'lines', 'one'],
             rev: 2,
           },
           null,
           {
-            _id: ObjectId(),
+            _id: new ObjectId(),
             lines: ['mock', 'lines', 'two'],
             rev: 4,
           },
@@ -296,11 +296,11 @@ describe('HttpController', function () {
         this.req.params = { project_id: this.projectId }
         this.docs = [
           {
-            _id: ObjectId(),
+            _id: new ObjectId(),
             ranges: { mock_ranges: 'one' },
           },
           {
-            _id: ObjectId(),
+            _id: new ObjectId(),
             ranges: { mock_ranges: 'two' },
           },
         ]

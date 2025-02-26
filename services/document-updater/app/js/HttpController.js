@@ -6,29 +6,9 @@ const Errors = require('./Errors')
 const logger = require('@overleaf/logger')
 const Settings = require('@overleaf/settings')
 const Metrics = require('./Metrics')
-const ProjectFlusher = require('./ProjectFlusher')
 const DeleteQueueManager = require('./DeleteQueueManager')
 const { getTotalSizeOfLines } = require('./Limits')
 const async = require('async')
-
-module.exports = {
-  getDoc,
-  peekDoc,
-  getProjectDocsAndFlushIfOld,
-  clearProjectState,
-  setDoc,
-  flushDocIfLoaded,
-  deleteDoc,
-  flushProject,
-  deleteProject,
-  deleteMultipleProjects,
-  acceptChanges,
-  deleteComment,
-  updateProject,
-  resyncProjectHistory,
-  flushAllProjects,
-  flushQueuedProjects,
-}
 
 function getDoc(req, res, next) {
   let fromVersion
@@ -63,7 +43,31 @@ function getDoc(req, res, next) {
         ops,
         ranges,
         pathname,
+        ttlInS: RedisManager.DOC_OPS_TTL,
       })
+    }
+  )
+}
+
+function getComment(req, res, next) {
+  const docId = req.params.doc_id
+  const projectId = req.params.project_id
+  const commentId = req.params.comment_id
+
+  logger.debug({ projectId, docId, commentId }, 'getting comment via http')
+
+  DocumentManager.getCommentWithLock(
+    projectId,
+    docId,
+    commentId,
+    (error, comment) => {
+      if (error) {
+        return next(error)
+      }
+      if (comment == null) {
+        return next(new Errors.NotFoundError('comment not found'))
+      }
+      res.json(comment)
     }
   )
 }
@@ -163,12 +167,42 @@ function setDoc(req, res, next) {
     source,
     userId,
     undoing,
+    true,
     (error, result) => {
       timer.done()
       if (error) {
         return next(error)
       }
       logger.debug({ projectId, docId }, 'set doc via http')
+      res.json(result)
+    }
+  )
+}
+
+function appendToDoc(req, res, next) {
+  const docId = req.params.doc_id
+  const projectId = req.params.project_id
+  const { lines, source, user_id: userId } = req.body
+  const timer = new Metrics.Timer('http.appendToDoc')
+  DocumentManager.appendToDocWithLock(
+    projectId,
+    docId,
+    lines,
+    source,
+    userId,
+    (error, result) => {
+      timer.done()
+      if (error instanceof Errors.FileTooLargeError) {
+        logger.warn('refusing to append to file, it would become too large')
+        return res.sendStatus(422)
+      }
+      if (error) {
+        return next(error)
+      }
+      logger.debug(
+        { projectId, docId, lines, source, userId },
+        'appending to doc via http'
+      )
       res.json(result)
     }
   )
@@ -301,22 +335,77 @@ function acceptChanges(req, res, next) {
   })
 }
 
+function resolveComment(req, res, next) {
+  const {
+    project_id: projectId,
+    doc_id: docId,
+    comment_id: commentId,
+  } = req.params
+  const userId = req.body.user_id
+  logger.debug({ projectId, docId, commentId }, 'resolving comment via http')
+  DocumentManager.updateCommentStateWithLock(
+    projectId,
+    docId,
+    commentId,
+    userId,
+    true,
+    error => {
+      if (error) {
+        return next(error)
+      }
+      logger.debug({ projectId, docId, commentId }, 'resolved comment via http')
+      res.sendStatus(204) // No Content
+    }
+  )
+}
+
+function reopenComment(req, res, next) {
+  const {
+    project_id: projectId,
+    doc_id: docId,
+    comment_id: commentId,
+  } = req.params
+  const userId = req.body.user_id
+  logger.debug({ projectId, docId, commentId }, 'reopening comment via http')
+  DocumentManager.updateCommentStateWithLock(
+    projectId,
+    docId,
+    commentId,
+    userId,
+    false,
+    error => {
+      if (error) {
+        return next(error)
+      }
+      logger.debug({ projectId, docId, commentId }, 'reopened comment via http')
+      res.sendStatus(204) // No Content
+    }
+  )
+}
+
 function deleteComment(req, res, next) {
   const {
     project_id: projectId,
     doc_id: docId,
     comment_id: commentId,
   } = req.params
+  const userId = req.body.user_id
   logger.debug({ projectId, docId, commentId }, 'deleting comment via http')
   const timer = new Metrics.Timer('http.deleteComment')
-  DocumentManager.deleteCommentWithLock(projectId, docId, commentId, error => {
-    timer.done()
-    if (error) {
-      return next(error)
+  DocumentManager.deleteCommentWithLock(
+    projectId,
+    docId,
+    commentId,
+    userId,
+    error => {
+      timer.done()
+      if (error) {
+        return next(error)
+      }
+      logger.debug({ projectId, docId, commentId }, 'deleted comment via http')
+      res.sendStatus(204) // No Content
     }
-    logger.debug({ projectId, docId, commentId }, 'deleted comment via http')
-    res.sendStatus(204) // No Content
-  })
+  )
 }
 
 function updateProject(req, res, next) {
@@ -344,17 +433,33 @@ function updateProject(req, res, next) {
 
 function resyncProjectHistory(req, res, next) {
   const projectId = req.params.project_id
-  const { projectHistoryId, docs, files } = req.body
+  const {
+    projectHistoryId,
+    docs,
+    files,
+    historyRangesMigration,
+    resyncProjectStructureOnly,
+  } = req.body
 
   logger.debug(
     { projectId, docs, files },
     'queuing project history resync via http'
   )
+
+  const opts = {}
+  if (historyRangesMigration) {
+    opts.historyRangesMigration = historyRangesMigration
+  }
+  if (resyncProjectStructureOnly) {
+    opts.resyncProjectStructureOnly = resyncProjectStructureOnly
+  }
+
   HistoryManager.resyncProjectHistory(
     projectId,
     projectHistoryId,
     docs,
     files,
+    opts,
     error => {
       if (error) {
         return next(error)
@@ -363,23 +468,6 @@ function resyncProjectHistory(req, res, next) {
       res.sendStatus(204)
     }
   )
-}
-
-function flushAllProjects(req, res, next) {
-  res.setTimeout(5 * 60 * 1000)
-  const options = {
-    limit: req.query.limit || 1000,
-    concurrency: req.query.concurrency || 5,
-    dryRun: req.query.dryRun || false,
-  }
-  ProjectFlusher.flushAllProjects(options, (err, projectIds) => {
-    if (err) {
-      logger.err({ err }, 'error bulk flushing projects')
-      res.sendStatus(500)
-    } else {
-      res.send(projectIds)
-    }
-  })
 }
 
 function flushQueuedProjects(req, res, next) {
@@ -398,4 +486,57 @@ function flushQueuedProjects(req, res, next) {
       res.send({ flushed })
     }
   })
+}
+
+/**
+ * Block a project from getting loaded in docupdater
+ *
+ * The project is blocked only if it's not already loaded in docupdater. The
+ * response indicates whether the project has been blocked or not.
+ */
+function blockProject(req, res, next) {
+  const projectId = req.params.project_id
+  RedisManager.blockProject(projectId, (err, blocked) => {
+    if (err) {
+      return next(err)
+    }
+    res.json({ blocked })
+  })
+}
+
+/**
+ * Unblock a project
+ */
+function unblockProject(req, res, next) {
+  const projectId = req.params.project_id
+  RedisManager.unblockProject(projectId, (err, wasBlocked) => {
+    if (err) {
+      return next(err)
+    }
+    res.json({ wasBlocked })
+  })
+}
+
+module.exports = {
+  getDoc,
+  peekDoc,
+  getProjectDocsAndFlushIfOld,
+  clearProjectState,
+  appendToDoc,
+  setDoc,
+  flushDocIfLoaded,
+  deleteDoc,
+  flushProject,
+  deleteProject,
+  deleteMultipleProjects,
+  acceptChanges,
+  resolveComment,
+  reopenComment,
+  deleteComment,
+  updateProject,
+  resyncProjectHistory,
+  flushQueuedProjects,
+  blockProject,
+  unblockProject,
+  getComment,
 }

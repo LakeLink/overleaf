@@ -1,23 +1,21 @@
-import { OverallTheme } from '../modules/source-editor/frontend/js/extensions/theme'
+import { Brand } from './helpers/brand'
+import { OverallTheme } from '@/shared/utils/styles'
 
 export type AllowedImageName = {
   imageDesc: string
   imageName: string
 }
 
+export type DocId = Brand<string, 'DocId'>
 export type MainDocument = {
   doc: {
     name: string
-    id: string
-    type: string
-    selected: boolean
+    id: DocId
   }
   path: string
 }
 
 export type ProjectCompiler = 'pdflatex' | 'latex' | 'xelatex' | 'lualatex'
-
-export type Keybindings = 'default' | 'vim' | 'emacs'
 
 export type OverallThemeMeta = {
   name: string
@@ -25,9 +23,9 @@ export type OverallThemeMeta = {
   val: OverallTheme
 }
 
-export type PdfViewer = 'pdfjs' | 'native'
-
 export type SpellCheckLanguage = {
   name: string
   code: string
+  dic?: string
+  server?: false
 }

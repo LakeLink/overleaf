@@ -1,19 +1,17 @@
 import { expect } from 'chai'
 import { render, screen, fireEvent } from '@testing-library/react'
 import fetchMock from 'fetch-mock'
-import SystemMessages from '../../../../../frontend/js/features/project-list/components/notifications/system-messages'
+import SystemMessages from '@/shared/components/system-messages'
 
 describe('<SystemMessages />', function () {
   beforeEach(function () {
     fetchMock.reset()
     localStorage.clear()
-    window.metaAttributesCache = new Map()
   })
 
   afterEach(function () {
     fetchMock.reset()
     localStorage.clear()
-    window.metaAttributesCache = new Map()
   })
 
   it('renders non-dismissable system message', async function () {
@@ -58,7 +56,6 @@ describe('<SystemMessages />', function () {
     }
     const currentUrl = '/project'
     fetchMock.get(/\/system\/messages/, [])
-    window.metaAttributesCache = new Map()
     window.metaAttributesCache.set('ol-suggestedLanguage', data)
     window.metaAttributesCache.set('ol-currentUrl', currentUrl)
     render(<SystemMessages />)

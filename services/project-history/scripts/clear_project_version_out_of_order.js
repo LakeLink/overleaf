@@ -2,7 +2,7 @@
 
 // To run in dev:
 //
-// docker-compose run --rm project-history scripts/clear_deleted.js
+// docker compose run --rm project-history scripts/clear_deleted.js
 //
 // In production:
 //
@@ -39,7 +39,7 @@ function checkAndClear(project, callback) {
 
   function checkNotV1Project(cb) {
     db.projects.findOne(
-      { _id: ObjectId(projectId) },
+      { _id: new ObjectId(projectId) },
       { projection: { overleaf: true } },
       (err, result) => {
         console.log(
@@ -106,7 +106,7 @@ function checkAndClear(project, callback) {
       console.log('2. deleting overleaf.history.id in mongo project', projectId)
       // Accessing mongo projects collection directly - BE CAREFUL!
       db.projects.updateOne(
-        { _id: ObjectId(projectId) },
+        { _id: new ObjectId(projectId) },
         { $rename: { 'overleaf.history.id': 'overleaf.history.deleted_id' } },
         (err, result) => {
           console.log(' - got result from remove', err, result)
@@ -232,7 +232,7 @@ async function main() {
     'number of queues with project structure version out of order on incoming updates=',
     results.length
   )
-  // now clear the sharelatex projects
+  // now clear the projects
   async.eachSeries(results.slice(0, limit), checkAndClear, err => {
     console.log('Final error status', err)
     console.log(

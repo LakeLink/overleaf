@@ -12,7 +12,7 @@ describe('UserController', function () {
     this.user = {
       _id: this.user_id,
       email: 'email@overleaf.com',
-      save: sinon.stub().callsArgWith(0),
+      save: sinon.stub().resolves(),
       ace: {},
     }
 
@@ -34,52 +34,68 @@ describe('UserController', function () {
       ip: '0:0:0:0',
       query: {},
       headers: {},
+      logger: {
+        addFields: sinon.stub(),
+      },
     }
 
-    this.UserDeleter = { deleteUser: sinon.stub().yields() }
+    this.UserDeleter = { promises: { deleteUser: sinon.stub().resolves() } }
+
     this.UserGetter = {
-      getUser: sinon.stub().callsArgWith(1, null, this.user),
       promises: { getUser: sinon.stub().resolves(this.user) },
     }
-    this.User = { findById: sinon.stub().callsArgWith(1, null, this.user) }
+
+    this.User = {
+      findById: sinon
+        .stub()
+        .returns({ exec: sinon.stub().resolves(this.user) }),
+    }
+
     this.NewsLetterManager = {
-      subscribe: sinon.stub().yields(),
-      unsubscribe: sinon.stub().yields(),
+      promises: {
+        subscribe: sinon.stub().resolves(),
+        unsubscribe: sinon.stub().resolves(),
+      },
     }
-    this.AuthenticationController = {
-      establishUserSession: sinon.stub().callsArg(2),
-    }
+
     this.SessionManager = {
       getLoggedInUserId: sinon.stub().returns(this.user._id),
       getSessionUser: sinon.stub().returns(this.req.session.user),
       setInSessionUser: sinon.stub(),
     }
+
     this.AuthenticationManager = {
-      authenticate: sinon.stub(),
-      validatePassword: sinon.stub(),
       promises: {
         authenticate: sinon.stub(),
         setUserPassword: sinon.stub(),
       },
+      getMessageForInvalidPasswordError: sinon
+        .stub()
+        .returns({ type: 'error', key: 'some-key' }),
     }
+
     this.UserUpdater = {
-      changeEmailAddress: sinon.stub(),
       promises: {
+        changeEmailAddress: sinon.stub().resolves(),
         confirmEmail: sinon.stub().resolves(),
         addAffiliationForNewUser: sinon.stub().resolves(),
       },
     }
-    this.settings = { siteUrl: 'sharelatex.example.com' }
-    this.UserHandler = { populateTeamInvites: sinon.stub().callsArgWith(1) }
+
+    this.settings = { siteUrl: 'overleaf.example.com' }
+
+    this.UserHandler = {
+      promises: { populateTeamInvites: sinon.stub().resolves() },
+    }
+
     this.UserSessionsManager = {
-      trackSession: sinon.stub(),
-      untrackSession: sinon.stub(),
-      revokeAllUserSessions: sinon.stub().callsArgWith(2, null),
       promises: {
         getAllUserSessions: sinon.stub().resolves(),
-        revokeAllUserSessions: sinon.stub().resolves(),
+        removeSessionsFromRedis: sinon.stub().resolves(),
+        untrackSession: sinon.stub().resolves(),
       },
     }
+
     this.HttpErrorHandler = {
       badRequest: sinon.stub(),
       conflict: sinon.stub(),
@@ -94,7 +110,36 @@ describe('UserController', function () {
       .withArgs('https://evil.com')
       .returns(undefined)
     this.UrlHelper.getSafeRedirectPath.returnsArg(0)
-    this.acceptsJson = sinon.stub().returns(false)
+
+    this.Features = {
+      hasFeature: sinon.stub(),
+    }
+
+    this.UserAuditLogHandler = {
+      promises: {
+        addEntry: sinon.stub().resolves(),
+      },
+    }
+
+    this.RequestContentTypeDetection = {
+      acceptsJson: sinon.stub().returns(false),
+    }
+
+    this.EmailHandler = {
+      promises: { sendEmail: sinon.stub().resolves() },
+    }
+
+    this.OneTimeTokenHandler = {
+      promises: { expireAllTokensForUser: sinon.stub().resolves() },
+    }
+
+    this.Modules = {
+      promises: {
+        hooks: {
+          fire: sinon.stub().resolves(),
+        },
+      },
+    }
 
     this.UserController = SandboxedModule.require(modulePath, {
       requires: {
@@ -102,37 +147,24 @@ describe('UserController', function () {
         './UserGetter': this.UserGetter,
         './UserDeleter': this.UserDeleter,
         './UserUpdater': this.UserUpdater,
-        '../../models/User': {
-          User: this.User,
-        },
+        '../../models/User': { User: this.User },
         '../Newsletter/NewsletterManager': this.NewsLetterManager,
         '../Authentication/AuthenticationController':
           this.AuthenticationController,
         '../Authentication/SessionManager': this.SessionManager,
         '../Authentication/AuthenticationManager': this.AuthenticationManager,
-        '../../infrastructure/Features': (this.Features = {
-          hasFeature: sinon.stub(),
-        }),
-        './UserAuditLogHandler': (this.UserAuditLogHandler = {
-          promises: {
-            addEntry: sinon.stub().resolves(),
-          },
-        }),
+        '../../infrastructure/Features': this.Features,
+        './UserAuditLogHandler': this.UserAuditLogHandler,
         './UserHandler': this.UserHandler,
         './UserSessionsManager': this.UserSessionsManager,
         '../Errors/HttpErrorHandler': this.HttpErrorHandler,
         '@overleaf/settings': this.settings,
-        '@overleaf/metrics': {
-          inc() {},
-        },
         '@overleaf/o-error': OError,
-        '../Email/EmailHandler': (this.EmailHandler = {
-          sendEmail: sinon.stub(),
-          promises: { sendEmail: sinon.stub().resolves() },
-        }),
-        '../../infrastructure/RequestContentTypeDetection': {
-          acceptsJson: this.acceptsJson,
-        },
+        '../Email/EmailHandler': this.EmailHandler,
+        '../Security/OneTimeTokenHandler': this.OneTimeTokenHandler,
+        '../../infrastructure/RequestContentTypeDetection':
+          this.RequestContentTypeDetection,
+        '../../infrastructure/Modules': this.Modules,
       },
     })
 
@@ -150,14 +182,14 @@ describe('UserController', function () {
   describe('tryDeleteUser', function () {
     beforeEach(function () {
       this.req.body.password = 'wat'
-      this.req.logout = sinon.stub()
-      this.req.session.destroy = sinon.stub().callsArgWith(0, null)
+      this.req.logout = sinon.stub().yields()
+      this.req.session.destroy = sinon.stub().yields()
       this.SessionManager.getLoggedInUserId = sinon
         .stub()
         .returns(this.user._id)
-      this.AuthenticationManager.authenticate = sinon
-        .stub()
-        .callsArgWith(2, null, this.user)
+      this.AuthenticationManager.promises.authenticate.resolves({
+        user: this.user,
+      })
     })
 
     it('should send 200', function (done) {
@@ -170,10 +202,12 @@ describe('UserController', function () {
 
     it('should try to authenticate user', function (done) {
       this.res.sendStatus = code => {
-        this.AuthenticationManager.authenticate.callCount.should.equal(1)
-        this.AuthenticationManager.authenticate
-          .calledWith({ _id: this.user._id }, this.req.body.password)
-          .should.equal(true)
+        this.AuthenticationManager.promises.authenticate.should.have.been
+          .calledOnce
+        this.AuthenticationManager.promises.authenticate.should.have.been.calledWith(
+          { _id: this.user._id },
+          this.req.body.password
+        )
         done()
       }
       this.UserController.tryDeleteUser(this.req, this.res, this.next)
@@ -181,8 +215,21 @@ describe('UserController', function () {
 
     it('should delete the user', function (done) {
       this.res.sendStatus = code => {
-        this.UserDeleter.deleteUser.callCount.should.equal(1)
-        this.UserDeleter.deleteUser.calledWith(this.user._id).should.equal(true)
+        this.UserDeleter.promises.deleteUser.should.have.been.calledOnce
+        this.UserDeleter.promises.deleteUser.should.have.been.calledWith(
+          this.user._id
+        )
+        done()
+      }
+      this.UserController.tryDeleteUser(this.req, this.res, this.next)
+    })
+
+    it('should call hook to try to delete v1 account', function (done) {
+      this.res.sendStatus = code => {
+        expect(this.Modules.promises.hooks.fire).to.have.been.calledWith(
+          'tryDeleteV1Account',
+          this.user
+        )
         done()
       }
       this.UserController.tryDeleteUser(this.req, this.res, this.next)
@@ -204,9 +251,9 @@ describe('UserController', function () {
 
     describe('when authenticate produces an error', function () {
       beforeEach(function () {
-        this.AuthenticationManager.authenticate = sinon
-          .stub()
-          .callsArgWith(2, new Error('woops'))
+        this.AuthenticationManager.promises.authenticate.rejects(
+          new Error('woops')
+        )
       })
 
       it('should call next with an error', function (done) {
@@ -221,9 +268,9 @@ describe('UserController', function () {
 
     describe('when authenticate does not produce a user', function () {
       beforeEach(function () {
-        this.AuthenticationManager.authenticate = sinon
-          .stub()
-          .callsArgWith(2, null, null)
+        this.AuthenticationManager.promises.authenticate.resolves({
+          user: null,
+        })
       })
 
       it('should return 403', function (done) {
@@ -237,7 +284,7 @@ describe('UserController', function () {
 
     describe('when deleteUser produces an error', function () {
       beforeEach(function () {
-        this.UserDeleter.deleteUser = sinon.stub().yields(new Error('woops'))
+        this.UserDeleter.promises.deleteUser.rejects(new Error('woops'))
       })
 
       it('should call next with an error', function (done) {
@@ -252,9 +299,9 @@ describe('UserController', function () {
 
     describe('when deleteUser produces a known error', function () {
       beforeEach(function () {
-        this.UserDeleter.deleteUser = sinon
-          .stub()
-          .yields(new Errors.SubscriptionAdminDeletionError())
+        this.UserDeleter.promises.deleteUser.rejects(
+          new Errors.SubscriptionAdminDeletionError()
+        )
       })
 
       it('should return a HTTP Unprocessable Entity error', function (done) {
@@ -295,9 +342,9 @@ describe('UserController', function () {
     it('should send the user to subscribe', function (done) {
       this.res.json = data => {
         expect(data.message).to.equal('thanks_settings_updated')
-        this.NewsLetterManager.subscribe
-          .calledWith(this.user)
-          .should.equal(true)
+        this.NewsLetterManager.promises.subscribe.should.have.been.calledWith(
+          this.user
+        )
         done()
       }
       this.UserController.subscribe(this.req, this.res)
@@ -308,12 +355,12 @@ describe('UserController', function () {
     it('should send the user to unsubscribe', function (done) {
       this.res.json = data => {
         expect(data.message).to.equal('thanks_settings_updated')
-        this.NewsLetterManager.unsubscribe
-          .calledWith(this.user)
-          .should.equal(true)
+        this.NewsLetterManager.promises.unsubscribe.should.have.been.calledWith(
+          this.user
+        )
         done()
       }
-      this.UserController.unsubscribe(this.req, this.res)
+      this.UserController.unsubscribe(this.req, this.res, this.next)
     })
   })
 
@@ -330,7 +377,7 @@ describe('UserController', function () {
         this.user.save.called.should.equal(true)
         done()
       }
-      this.UserController.updateUserSettings(this.req, this.res)
+      this.UserController.updateUserSettings(this.req, this.res, this.next)
     })
 
     it('should set the first name', function (done) {
@@ -378,6 +425,33 @@ describe('UserController', function () {
       this.UserController.updateUserSettings(this.req, this.res)
     })
 
+    it('should set referencesSearchMode to advanced', function (done) {
+      this.req.body = { referencesSearchMode: 'advanced' }
+      this.res.sendStatus = code => {
+        this.user.ace.referencesSearchMode.should.equal('advanced')
+        done()
+      }
+      this.UserController.updateUserSettings(this.req, this.res)
+    })
+
+    it('should set referencesSearchMode to simple', function (done) {
+      this.req.body = { referencesSearchMode: 'simple' }
+      this.res.sendStatus = code => {
+        this.user.ace.referencesSearchMode.should.equal('simple')
+        done()
+      }
+      this.UserController.updateUserSettings(this.req, this.res)
+    })
+
+    it('should not allow arbitrary referencesSearchMode', function (done) {
+      this.req.body = { referencesSearchMode: 'foobar' }
+      this.res.sendStatus = code => {
+        this.user.ace.referencesSearchMode.should.equal('advanced')
+        done()
+      }
+      this.UserController.updateUserSettings(this.req, this.res)
+    })
+
     it('should send an error if the email is 0 len', function (done) {
       this.req.body.email = ''
       this.res.sendStatus = function (code) {
@@ -398,12 +472,13 @@ describe('UserController', function () {
 
     it('should call the user updater with the new email and user _id', function (done) {
       this.req.body.email = this.newEmail.toUpperCase()
-      this.UserUpdater.changeEmailAddress.callsArgWith(3)
       this.res.sendStatus = code => {
         code.should.equal(200)
-        this.UserUpdater.changeEmailAddress
-          .calledWith(this.user_id, this.newEmail, this.auditLog)
-          .should.equal(true)
+        this.UserUpdater.promises.changeEmailAddress.should.have.been.calledWith(
+          this.user_id,
+          this.newEmail,
+          this.auditLog
+        )
         done()
       }
       this.UserController.updateUserSettings(this.req, this.res)
@@ -411,14 +486,15 @@ describe('UserController', function () {
 
     it('should update the email on the session', function (done) {
       this.req.body.email = this.newEmail.toUpperCase()
-      this.UserUpdater.changeEmailAddress.callsArgWith(3)
       let callcount = 0
-      this.User.findById = (id, cb) => {
-        if (++callcount === 2) {
-          this.user.email = this.newEmail
-        }
-        cb(null, this.user)
-      }
+      this.User.findById = id => ({
+        exec: async () => {
+          if (++callcount === 2) {
+            this.user.email = this.newEmail
+          }
+          return this.user
+        },
+      })
       this.res.sendStatus = code => {
         code.should.equal(200)
         this.SessionManager.setInSessionUser
@@ -435,12 +511,11 @@ describe('UserController', function () {
 
     it('should call populateTeamInvites', function (done) {
       this.req.body.email = this.newEmail.toUpperCase()
-      this.UserUpdater.changeEmailAddress.callsArgWith(3)
       this.res.sendStatus = code => {
         code.should.equal(200)
-        this.UserHandler.populateTeamInvites
-          .calledWith(this.user)
-          .should.equal(true)
+        this.UserHandler.promises.populateTeamInvites.should.have.been.calledWith(
+          this.user
+        )
         done()
       }
       this.UserController.updateUserSettings(this.req, this.res)
@@ -449,7 +524,7 @@ describe('UserController', function () {
     describe('when changeEmailAddress yields an error', function () {
       it('should pass on an error and not send a success status', function (done) {
         this.req.body.email = this.newEmail.toUpperCase()
-        this.UserUpdater.changeEmailAddress.callsArgWith(3, new OError())
+        this.UserUpdater.promises.changeEmailAddress.rejects(new OError())
         this.HttpErrorHandler.legacyInternal = sinon.spy(
           (req, res, message, error) => {
             expect(req).to.exist
@@ -470,8 +545,7 @@ describe('UserController', function () {
           done()
         })
         this.req.body.email = this.newEmail.toUpperCase()
-        this.UserUpdater.changeEmailAddress.callsArgWith(
-          3,
+        this.UserUpdater.promises.changeEmailAddress.rejects(
           new Errors.EmailExistsError()
         )
         this.UserController.updateUserSettings(this.req, this.res)
@@ -480,7 +554,6 @@ describe('UserController', function () {
 
     describe('when using an external auth source', function () {
       beforeEach(function () {
-        this.UserUpdater.changeEmailAddress.callsArgWith(2)
         this.newEmail = 'someone23@example.com'
         this.req.externalAuthenticationSystemUsed = sinon.stub().returns(true)
       })
@@ -489,7 +562,7 @@ describe('UserController', function () {
         this.req.body.email = this.newEmail
         this.res.sendStatus = code => {
           code.should.equal(200)
-          this.UserUpdater.changeEmailAddress
+          this.UserUpdater.promises.changeEmailAddress
             .calledWith(this.user_id, this.newEmail)
             .should.equal(false)
           done()
@@ -501,7 +574,7 @@ describe('UserController', function () {
 
   describe('logout', function () {
     beforeEach(function () {
-      this.acceptsJson.returns(false)
+      this.RequestContentTypeDetection.acceptsJson.returns(false)
     })
 
     it('should destroy the session', function (done) {
@@ -519,10 +592,12 @@ describe('UserController', function () {
       this.req.session.destroy = sinon.stub().callsArgWith(0)
       this.res.redirect = url => {
         url.should.equal('/login')
-        this.UserSessionsManager.untrackSession.callCount.should.equal(1)
-        this.UserSessionsManager.untrackSession
-          .calledWith(sinon.match(this.req.user), this.req.sessionID)
-          .should.equal(true)
+        this.UserSessionsManager.promises.untrackSession.should.have.been
+          .calledOnce
+        this.UserSessionsManager.promises.untrackSession.should.have.been.calledWith(
+          sinon.match(this.req.user),
+          this.req.sessionID
+        )
         done()
       }
 
@@ -530,7 +605,7 @@ describe('UserController', function () {
     })
 
     it('should redirect after logout', function (done) {
-      this.req.body.redirect = '/institutional-login'
+      this.req.body.redirect = '/sso-login'
       this.req.session.destroy = sinon.stub().callsArgWith(0)
       this.res.redirect = url => {
         url.should.equal(this.req.body.redirect)
@@ -559,7 +634,7 @@ describe('UserController', function () {
     })
 
     it('should send json with redir property for json request', function (done) {
-      this.acceptsJson.returns(true)
+      this.RequestContentTypeDetection.acceptsJson.returns(true)
       this.req.session.destroy = sinon.stub().callsArgWith(0)
       this.res.status = code => {
         code.should.equal(200)
@@ -575,11 +650,10 @@ describe('UserController', function () {
 
   describe('clearSessions', function () {
     describe('success', function () {
-      it('should call revokeAllUserSessions', function (done) {
+      it('should call removeSessionsFromRedis', function (done) {
         this.res.sendStatus.callsFake(() => {
-          this.UserSessionsManager.promises.revokeAllUserSessions.callCount.should.equal(
-            1
-          )
+          this.UserSessionsManager.promises.removeSessionsFromRedis.should.have
+            .been.calledOnce
           done()
         })
         this.UserController.clearSessions(this.req, this.res)
@@ -635,9 +709,9 @@ describe('UserController', function () {
         })
       })
 
-      describe('when revokeAllUserSessions produces an error', function () {
+      describe('when removeSessionsFromRedis produces an error', function () {
         it('should call next with an error', function (done) {
-          this.UserSessionsManager.promises.revokeAllUserSessions.rejects(
+          this.UserSessionsManager.promises.removeSessionsFromRedis.rejects(
             new Error('woops')
           )
           this.UserController.clearSessions(this.req, this.res, error => {
@@ -673,7 +747,9 @@ describe('UserController', function () {
   describe('changePassword', function () {
     describe('success', function () {
       beforeEach(function () {
-        this.AuthenticationManager.promises.authenticate.resolves(this.user)
+        this.AuthenticationManager.promises.authenticate.resolves({
+          user: this.user,
+        })
         this.AuthenticationManager.promises.setUserPassword.resolves()
         this.req.body = {
           newPassword1: 'newpass',
@@ -714,9 +790,20 @@ describe('UserController', function () {
             actionDescribed: `your password has been changed on your account ${this.user.email}`,
             action: 'password changed',
           }
-          const emailCall = this.EmailHandler.sendEmail.lastCall
+          const emailCall = this.EmailHandler.promises.sendEmail.lastCall
           expect(emailCall.args[0]).to.equal('securityAlert')
           expect(emailCall.args[1]).to.deep.equal(expectedArg)
+          done()
+        })
+        this.UserController.changePassword(this.req, this.res)
+      })
+
+      it('should expire password reset tokens', function (done) {
+        this.res.json.callsFake(() => {
+          this.OneTimeTokenHandler.promises.expireAllTokensForUser.should.have.been.calledWith(
+            this.user._id,
+            'password'
+          )
           done()
         })
         this.UserController.changePassword(this.req, this.res)
@@ -725,7 +812,7 @@ describe('UserController', function () {
 
     describe('errors', function () {
       it('should check the old password is the current one at the moment', function (done) {
-        this.AuthenticationManager.promises.authenticate.resolves()
+        this.AuthenticationManager.promises.authenticate.resolves({})
         this.req.body = { currentPassword: 'oldpasshere' }
         this.HttpErrorHandler.badRequest.callsFake(() => {
           expect(this.HttpErrorHandler.badRequest).to.have.been.calledWith(
@@ -746,7 +833,9 @@ describe('UserController', function () {
       })
 
       it('it should not set the new password if they do not match', function (done) {
-        this.AuthenticationManager.promises.authenticate.resolves({})
+        this.AuthenticationManager.promises.authenticate.resolves({
+          user: this.user,
+        })
         this.req.body = {
           newPassword1: '1',
           newPassword2: '2',
@@ -771,18 +860,23 @@ describe('UserController', function () {
         //   .returns({ message: 'validation-error' })
         const err = new Error('bad')
         err.name = 'InvalidPasswordError'
+        const message = {
+          type: 'error',
+          key: 'some-message-key',
+        }
+        this.AuthenticationManager.getMessageForInvalidPasswordError.returns(
+          message
+        )
         this.AuthenticationManager.promises.setUserPassword.rejects(err)
-        this.AuthenticationManager.promises.authenticate.resolves({})
+        this.AuthenticationManager.promises.authenticate.resolves({
+          user: this.user,
+        })
         this.req.body = {
           newPassword1: 'newpass',
           newPassword2: 'newpass',
         }
-        this.HttpErrorHandler.badRequest.callsFake(() => {
-          expect(this.HttpErrorHandler.badRequest).to.have.been.calledWith(
-            this.req,
-            this.res,
-            err.message
-          )
+        this.res.json.callsFake(result => {
+          expect(result.message).to.deep.equal(message)
           this.AuthenticationManager.promises.setUserPassword.callCount.should.equal(
             1
           )
@@ -794,7 +888,9 @@ describe('UserController', function () {
       describe('UserAuditLogHandler error', function () {
         it('should return error and not update password', function (done) {
           this.UserAuditLogHandler.promises.addEntry.rejects(new Error('oops'))
-          this.AuthenticationManager.promises.authenticate.resolves(this.user)
+          this.AuthenticationManager.promises.authenticate.resolves({
+            user: this.user,
+          })
           this.AuthenticationManager.promises.setUserPassword.resolves()
           this.req.body = {
             newPassword1: 'newpass',
@@ -814,14 +910,17 @@ describe('UserController', function () {
       describe('EmailHandler error', function () {
         const anError = new Error('oops')
         beforeEach(function () {
-          this.AuthenticationManager.promises.authenticate.resolves(this.user)
+          this.AuthenticationManager.promises.authenticate.resolves({
+            user: this.user,
+          })
           this.AuthenticationManager.promises.setUserPassword.resolves()
           this.req.body = {
             newPassword1: 'newpass',
             newPassword2: 'newpass',
           }
-          this.EmailHandler.sendEmail.yields(anError)
+          this.EmailHandler.promises.sendEmail.rejects(anError)
         })
+
         it('should not return error but should log it', function (done) {
           this.res.json.callsFake(result => {
             expect(result.message.type).to.equal('success')
@@ -844,41 +943,47 @@ describe('UserController', function () {
   describe('ensureAffiliationMiddleware', function () {
     describe('without affiliations feature', function () {
       beforeEach(async function () {
-        await this.UserController.promises.ensureAffiliationMiddleware(
+        await this.UserController.ensureAffiliationMiddleware(
           this.req,
           this.res,
           this.next
         )
       })
+
       it('should not run affiliation check', function () {
         expect(this.UserGetter.promises.getUser).to.not.have.been.called
         expect(this.UserUpdater.promises.confirmEmail).to.not.have.been.called
         expect(this.UserUpdater.promises.addAffiliationForNewUser).to.not.have
           .been.called
       })
+
       it('should not return an error', function () {
         expect(this.next).to.be.calledWith()
       })
     })
+
     describe('without ensureAffiliation query parameter', function () {
       beforeEach(async function () {
         this.Features.hasFeature.withArgs('affiliations').returns(true)
-        await this.UserController.promises.ensureAffiliationMiddleware(
+        await this.UserController.ensureAffiliationMiddleware(
           this.req,
           this.res,
           this.next
         )
       })
+
       it('should not run middleware', function () {
         expect(this.UserGetter.promises.getUser).to.not.have.been.called
         expect(this.UserUpdater.promises.confirmEmail).to.not.have.been.called
         expect(this.UserUpdater.promises.addAffiliationForNewUser).to.not.have
           .been.called
       })
+
       it('should not return an error', function () {
         expect(this.next).to.be.calledWith()
       })
     })
+
     describe('no flagged email', function () {
       beforeEach(async function () {
         const email = 'unit-test@overleaf.com'
@@ -890,25 +995,29 @@ describe('UserController', function () {
         ]
         this.Features.hasFeature.withArgs('affiliations').returns(true)
         this.req.query.ensureAffiliation = true
-        await this.UserController.promises.ensureAffiliationMiddleware(
+        await this.UserController.ensureAffiliationMiddleware(
           this.req,
           this.res,
           this.next
         )
       })
+
       it('should get the user', function () {
         expect(this.UserGetter.promises.getUser).to.have.been.calledWith(
           this.user._id
         )
       })
+
       it('should not try to add affiliation or update user', function () {
         expect(this.UserUpdater.promises.addAffiliationForNewUser).to.not.have
           .been.called
       })
+
       it('should not return an error', function () {
         expect(this.next).to.be.calledWith()
       })
     })
+
     describe('flagged non-SSO email', function () {
       let emailFlagged
       beforeEach(async function () {
@@ -922,12 +1031,20 @@ describe('UserController', function () {
         ]
         this.Features.hasFeature.withArgs('affiliations').returns(true)
         this.req.query.ensureAffiliation = true
-        await this.UserController.promises.ensureAffiliationMiddleware(
+        this.req.assertPermission = sinon.stub()
+        await this.UserController.ensureAffiliationMiddleware(
           this.req,
           this.res,
           this.next
         )
       })
+
+      it('should check the user has permission', function () {
+        expect(this.req.assertPermission).to.have.been.calledWith(
+          'add-affiliation'
+        )
+      })
+
       it('should unflag the emails but not confirm', function () {
         expect(
           this.UserUpdater.promises.addAffiliationForNewUser
@@ -936,10 +1053,12 @@ describe('UserController', function () {
           this.UserUpdater.promises.confirmEmail
         ).to.not.have.been.calledWith(this.user._id, emailFlagged)
       })
+
       it('should not return an error', function () {
         expect(this.next).to.be.calledWith()
       })
     })
+
     describe('flagged SSO email', function () {
       let emailFlagged
       beforeEach(async function () {
@@ -954,12 +1073,20 @@ describe('UserController', function () {
         ]
         this.Features.hasFeature.withArgs('affiliations').returns(true)
         this.req.query.ensureAffiliation = true
-        await this.UserController.promises.ensureAffiliationMiddleware(
+        this.req.assertPermission = sinon.stub()
+        await this.UserController.ensureAffiliationMiddleware(
           this.req,
           this.res,
           this.next
         )
       })
+
+      it('should check the user has permission', function () {
+        expect(this.req.assertPermission).to.have.been.calledWith(
+          'add-affiliation'
+        )
+      })
+
       it('should add affiliation to v1, unflag and confirm on v2', function () {
         expect(this.UserUpdater.promises.addAffiliationForNewUser).to.have.not
           .been.called
@@ -968,10 +1095,12 @@ describe('UserController', function () {
           emailFlagged
         )
       })
+
       it('should not return an error', function () {
         expect(this.next).to.be.calledWith()
       })
     })
+
     describe('when v1 returns an error', function () {
       let emailFlagged
       beforeEach(async function () {
@@ -986,12 +1115,37 @@ describe('UserController', function () {
         ]
         this.Features.hasFeature.withArgs('affiliations').returns(true)
         this.req.query.ensureAffiliation = true
-        await this.UserController.promises.ensureAffiliationMiddleware(
+        this.req.assertPermission = sinon.stub()
+        await this.UserController.ensureAffiliationMiddleware(
           this.req,
           this.res,
           this.next
         )
       })
+
+      it('should check the user has permission', function () {
+        expect(this.req.assertPermission).to.have.been.calledWith(
+          'add-affiliation'
+        )
+      })
+
+      it('should return the error', function () {
+        expect(this.next).to.be.calledWith(sinon.match.instanceOf(Error))
+      })
+    })
+
+    describe('when user is not found', function () {
+      beforeEach(async function () {
+        this.UserGetter.promises.getUser.rejects(new Error('not found'))
+        this.Features.hasFeature.withArgs('affiliations').returns(true)
+        this.req.query.ensureAffiliation = true
+        await this.UserController.ensureAffiliationMiddleware(
+          this.req,
+          this.res,
+          this.next
+        )
+      })
+
       it('should return the error', function () {
         expect(this.next).to.be.calledWith(sinon.match.instanceOf(Error))
       })

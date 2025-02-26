@@ -1,5 +1,4 @@
 const app = require('../../../../app')
-require('@overleaf/logger').logger.level('error')
 const settings = require('@overleaf/settings')
 
 module.exports = {
@@ -14,7 +13,7 @@ module.exports = {
     }
     this.initing = true
     this.callbacks.push(callback)
-    app.listen(settings.internal.docstore.port, 'localhost', error => {
+    app.listen(settings.internal.docstore.port, '127.0.0.1', error => {
       if (error != null) {
         throw error
       }

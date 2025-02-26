@@ -1,12 +1,19 @@
 import { sortBy } from 'lodash'
 import { memo, useCallback } from 'react'
-import { Button, Dropdown } from 'react-bootstrap'
 import { useTranslation } from 'react-i18next'
-import ControlledDropdown from '../../../../../../shared/components/controlled-dropdown'
-import Icon from '../../../../../../shared/components/icon'
+import MaterialIcon from '../../../../../../shared/components/material-icon'
 import { useProjectListContext } from '../../../../context/project-list-context'
 import useTag from '../../../../hooks/use-tag'
 import { addProjectsToTag, removeProjectsFromTag } from '../../../../util/api'
+import { getTagColor } from '../../../../util/tag'
+import {
+  Dropdown,
+  DropdownDivider,
+  DropdownHeader,
+  DropdownItem,
+  DropdownMenu,
+  DropdownToggle,
+} from '@/features/ui/components/bootstrap-5/dropdown-menu'
 
 function TagsDropdown() {
   const {
@@ -68,72 +75,66 @@ function TagsDropdown() {
     [selectedProjects]
   )
 
-  const containsSomeSelectedProjects = useCallback(
-    tag => {
-      for (const project of selectedProjects) {
-        if (tag.project_ids?.includes(project.id)) {
-          return true
-        }
-      }
-      return false
-    },
-    [selectedProjects]
-  )
-
   return (
     <>
-      <ControlledDropdown id="tags">
-        <Dropdown.Toggle
-          bsStyle={null}
-          className="btn-secondary"
-          title={t('tags')}
+      <Dropdown align="end" autoClose="outside">
+        <DropdownToggle
+          id="project-tools-more-dropdown"
+          variant="secondary"
           aria-label={t('tags')}
         >
-          <Icon type="folder-open" />
-        </Dropdown.Toggle>
-        <Dropdown.Menu className="dropdown-menu-right">
-          <li className="dropdown-header" role="heading" aria-level={3}>
-            {t('add_to_folder')}
-          </li>
-          {sortBy(tags, tag => tag.name?.toLowerCase()).map(tag => {
-            return (
-              <li key={tag._id}>
-                <Button
-                  className="tag-dropdown-button"
-                  onClick={e =>
-                    containsAllSelectedProjects(tag)
-                      ? handleRemoveTagFromSelectedProjects(e, tag._id)
-                      : handleAddTagToSelectedProjects(e, tag._id)
-                  }
-                  aria-label={t('add_or_remove_project_from_tag', {
-                    tagName: tag.name,
-                  })}
-                >
-                  <Icon
-                    type={
-                      containsAllSelectedProjects(tag)
-                        ? 'check-square-o'
-                        : containsSomeSelectedProjects(tag)
-                        ? 'minus-square-o'
-                        : 'square-o'
-                    }
-                  />{' '}
-                  {tag.name}
-                </Button>
-              </li>
-            )
-          })}
-          <li className="divider" />
-          <li>
-            <Button
-              className="tag-dropdown-button"
+          <MaterialIcon type="label" className="align-text-top" />
+        </DropdownToggle>
+        <DropdownMenu
+          flip={false}
+          data-testid="project-tools-more-dropdown-menu"
+        >
+          <DropdownHeader>{t('add_to_tag')}</DropdownHeader>
+          {sortBy(tags, tag => tag.name?.toLowerCase()).map((tag, index) => (
+            <li role="none" key={tag._id}>
+              <DropdownItem
+                onClick={e =>
+                  containsAllSelectedProjects(tag)
+                    ? handleRemoveTagFromSelectedProjects(e, tag._id)
+                    : handleAddTagToSelectedProjects(e, tag._id)
+                }
+                aria-label={t('add_or_remove_project_from_tag', {
+                  tagName: tag.name,
+                })}
+                as="button"
+                tabIndex={-1}
+                leadingIcon={
+                  containsAllSelectedProjects(tag) ? (
+                    'check'
+                  ) : (
+                    <DropdownItem.EmptyLeadingIcon />
+                  )
+                }
+              >
+                <div className="badge-tag-content">
+                  <span className="badge-prepend">
+                    <i
+                      className="badge-tag-circle align-self-center ms-0"
+                      style={{ backgroundColor: getTagColor(tag) }}
+                    />
+                  </span>
+                  <span className="text-truncate">{tag.name}</span>
+                </div>
+              </DropdownItem>
+            </li>
+          ))}
+          <DropdownDivider />
+          <li role="none">
+            <DropdownItem
               onClick={handleOpenCreateTagModal}
+              as="button"
+              tabIndex={-1}
             >
-              {t('create_new_folder')}
-            </Button>
+              {t('create_new_tag')}
+            </DropdownItem>
           </li>
-        </Dropdown.Menu>
-      </ControlledDropdown>
+        </DropdownMenu>
+      </Dropdown>
       <CreateTagModal id="toolbar-create-tag-modal" />
     </>
   )

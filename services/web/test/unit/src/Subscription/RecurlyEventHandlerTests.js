@@ -1,4 +1,5 @@
 const SandboxedModule = require('sandboxed-module')
+const { ObjectId } = require('mongodb-legacy')
 const sinon = require('sinon')
 const modulePath =
   '../../../../app/src/Features/Subscription/RecurlyEventHandler'
@@ -12,6 +13,7 @@ describe('RecurlyEventHandler', function () {
         account_code: this.userId,
       },
       subscription: {
+        uuid: '8435ad98c1ce45da99b07f6a6a2e780f',
         plan: {
           plan_code: 'collaborator-annual',
         },
@@ -26,12 +28,20 @@ describe('RecurlyEventHandler', function () {
 
     this.RecurlyEventHandler = SandboxedModule.require(modulePath, {
       requires: {
+        'mongodb-legacy': { ObjectId },
         './SubscriptionEmailHandler': (this.SubscriptionEmailHandler = {
           sendTrialOnboardingEmail: sinon.stub(),
         }),
         '../Analytics/AnalyticsManager': (this.AnalyticsManager = {
-          recordEventForUser: sinon.stub(),
-          setUserPropertyForUser: sinon.stub(),
+          recordEventForUserInBackground: sinon.stub(),
+          setUserPropertyForUserInBackground: sinon.stub(),
+        }),
+        '../SplitTests/SplitTestHandler': (this.SplitTestHandler = {
+          promises: {
+            getAssignmentForUser: sinon.stub().resolves({
+              variant: 'default',
+            }),
+          },
         }),
       },
     })
@@ -43,29 +53,31 @@ describe('RecurlyEventHandler', function () {
       this.eventData
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.recordEventForUser,
+      this.AnalyticsManager.recordEventForUserInBackground,
       this.userId,
       'subscription-started',
       {
         plan_code: this.planCode,
         quantity: 1,
         is_trial: true,
+        has_ai_add_on: false,
+        subscriptionId: this.eventData.subscription.uuid,
       }
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.setUserPropertyForUser,
+      this.AnalyticsManager.setUserPropertyForUserInBackground,
       this.userId,
       'subscription-plan-code',
       this.planCode
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.setUserPropertyForUser,
+      this.AnalyticsManager.setUserPropertyForUserInBackground,
       this.userId,
       'subscription-state',
       'active'
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.setUserPropertyForUser,
+      this.AnalyticsManager.setUserPropertyForUserInBackground,
       this.userId,
       'subscription-is-trial',
       true
@@ -95,23 +107,25 @@ describe('RecurlyEventHandler', function () {
       this.eventData
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.recordEventForUser,
+      this.AnalyticsManager.recordEventForUserInBackground,
       this.userId,
       'subscription-started',
       {
         plan_code: this.planCode,
         quantity: 3,
         is_trial: false,
+        has_ai_add_on: false,
+        subscriptionId: this.eventData.subscription.uuid,
       }
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.setUserPropertyForUser,
+      this.AnalyticsManager.setUserPropertyForUserInBackground,
       this.userId,
       'subscription-state',
       'active'
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.setUserPropertyForUser,
+      this.AnalyticsManager.setUserPropertyForUserInBackground,
       this.userId,
       'subscription-is-trial',
       false
@@ -126,59 +140,63 @@ describe('RecurlyEventHandler', function () {
       this.eventData
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.recordEventForUser,
+      this.AnalyticsManager.recordEventForUserInBackground,
       this.userId,
       'subscription-updated',
       {
         plan_code: this.planCode,
         quantity: 1,
         is_trial: true,
+        has_ai_add_on: false,
+        subscriptionId: this.eventData.subscription.uuid,
       }
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.setUserPropertyForUser,
+      this.AnalyticsManager.setUserPropertyForUserInBackground,
       this.userId,
       'subscription-plan-code',
       this.planCode
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.setUserPropertyForUser,
+      this.AnalyticsManager.setUserPropertyForUserInBackground,
       this.userId,
       'subscription-state',
       'active'
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.setUserPropertyForUser,
+      this.AnalyticsManager.setUserPropertyForUserInBackground,
       this.userId,
       'subscription-is-trial',
       true
     )
   })
 
-  it('with canceled_subscription_notification', function () {
+  it('with canceled_subscription_notification', async function () {
     this.eventData.subscription.state = 'cancelled'
-    this.RecurlyEventHandler.sendRecurlyAnalyticsEvent(
+    await this.RecurlyEventHandler.sendRecurlyAnalyticsEvent(
       'canceled_subscription_notification',
       this.eventData
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.recordEventForUser,
+      this.AnalyticsManager.recordEventForUserInBackground,
       this.userId,
       'subscription-cancelled',
       {
         plan_code: this.planCode,
         quantity: 1,
         is_trial: true,
+        has_ai_add_on: false,
+        subscriptionId: this.eventData.subscription.uuid,
       }
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.setUserPropertyForUser,
+      this.AnalyticsManager.setUserPropertyForUserInBackground,
       this.userId,
       'subscription-state',
       'cancelled'
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.setUserPropertyForUser,
+      this.AnalyticsManager.setUserPropertyForUserInBackground,
       this.userId,
       'subscription-is-trial',
       true
@@ -192,29 +210,31 @@ describe('RecurlyEventHandler', function () {
       this.eventData
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.recordEventForUser,
+      this.AnalyticsManager.recordEventForUserInBackground,
       this.userId,
       'subscription-expired',
       {
         plan_code: this.planCode,
         quantity: 1,
         is_trial: true,
+        has_ai_add_on: false,
+        subscriptionId: this.eventData.subscription.uuid,
       }
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.setUserPropertyForUser,
+      this.AnalyticsManager.setUserPropertyForUserInBackground,
       this.userId,
       'subscription-plan-code',
       this.planCode
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.setUserPropertyForUser,
+      this.AnalyticsManager.setUserPropertyForUserInBackground,
       this.userId,
       'subscription-state',
       'expired'
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.setUserPropertyForUser,
+      this.AnalyticsManager.setUserPropertyForUserInBackground,
       this.userId,
       'subscription-is-trial',
       true
@@ -227,13 +247,15 @@ describe('RecurlyEventHandler', function () {
       this.eventData
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.recordEventForUser,
+      this.AnalyticsManager.recordEventForUserInBackground,
       this.userId,
       'subscription-renewed',
       {
         plan_code: this.planCode,
         quantity: 1,
         is_trial: true,
+        has_ai_add_on: false,
+        subscriptionId: this.eventData.subscription.uuid,
       }
     )
   })
@@ -244,33 +266,54 @@ describe('RecurlyEventHandler', function () {
       this.eventData
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.recordEventForUser,
+      this.AnalyticsManager.recordEventForUserInBackground,
       this.userId,
       'subscription-reactivated',
       {
         plan_code: this.planCode,
         quantity: 1,
+        has_ai_add_on: false,
+        subscriptionId: this.eventData.subscription.uuid,
       }
     )
   })
 
   it('with paid_charge_invoice_notification', function () {
+    const invoice = {
+      invoice_number: 1234,
+      currency: 'USD',
+      state: 'paid',
+      total_in_cents: 720,
+      tax_in_cents: 12,
+      address: {
+        country: 'Liurnia',
+      },
+      collection_method: 'automatic',
+      subscription_ids: ['abcd1234', 'defa3214'],
+    }
     this.RecurlyEventHandler.sendRecurlyAnalyticsEvent(
       'paid_charge_invoice_notification',
       {
         account: {
           account_code: this.userId,
         },
-        invoice: {
-          state: 'paid',
-          total_in_cents: 720,
-        },
+        invoice,
       }
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.recordEventForUser,
+      this.AnalyticsManager.recordEventForUserInBackground,
       this.userId,
-      'subscription-invoice-collected'
+      'subscription-invoice-collected',
+      {
+        invoiceNumber: invoice.invoice_number,
+        currency: invoice.currency,
+        totalInCents: invoice.total_in_cents,
+        taxInCents: invoice.tax_in_cents,
+        country: invoice.address.country,
+        collectionMethod: invoice.collection_method,
+        subscriptionId1: invoice.subscription_ids[0],
+        subscriptionId2: invoice.subscription_ids[1],
+      }
     )
   })
 
@@ -287,7 +330,7 @@ describe('RecurlyEventHandler', function () {
         },
       }
     )
-    sinon.assert.notCalled(this.AnalyticsManager.recordEventForUser)
+    sinon.assert.notCalled(this.AnalyticsManager.recordEventForUserInBackground)
   })
 
   it('with closed_invoice_notification', function () {
@@ -304,7 +347,7 @@ describe('RecurlyEventHandler', function () {
       }
     )
     sinon.assert.calledWith(
-      this.AnalyticsManager.recordEventForUser,
+      this.AnalyticsManager.recordEventForUserInBackground,
       this.userId,
       'subscription-invoice-collected'
     )
@@ -323,7 +366,7 @@ describe('RecurlyEventHandler', function () {
         },
       }
     )
-    sinon.assert.notCalled(this.AnalyticsManager.recordEventForUser)
+    sinon.assert.notCalled(this.AnalyticsManager.recordEventForUserInBackground)
   })
 
   it('nothing is called with invalid account code', function () {
@@ -333,9 +376,15 @@ describe('RecurlyEventHandler', function () {
       'new_subscription_notification',
       this.eventData
     )
-    sinon.assert.notCalled(this.AnalyticsManager.recordEventForUser)
-    sinon.assert.notCalled(this.AnalyticsManager.setUserPropertyForUser)
-    sinon.assert.notCalled(this.AnalyticsManager.setUserPropertyForUser)
-    sinon.assert.notCalled(this.AnalyticsManager.setUserPropertyForUser)
+    sinon.assert.notCalled(this.AnalyticsManager.recordEventForUserInBackground)
+    sinon.assert.notCalled(
+      this.AnalyticsManager.setUserPropertyForUserInBackground
+    )
+    sinon.assert.notCalled(
+      this.AnalyticsManager.setUserPropertyForUserInBackground
+    )
+    sinon.assert.notCalled(
+      this.AnalyticsManager.setUserPropertyForUserInBackground
+    )
   })
 })

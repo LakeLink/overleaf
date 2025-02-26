@@ -1,3 +1,4 @@
+import '../../helpers/bootstrap-3'
 import PdfSynctexControls from '../../../../frontend/js/features/pdf-preview/components/pdf-synctex-controls'
 import { cloneDeep } from 'lodash'
 import { useDetachCompileContext as useCompileContext } from '../../../../frontend/js/shared/context/detach-compile-context'
@@ -6,6 +7,7 @@ import { useEffect } from 'react'
 import { EditorProviders } from '../../helpers/editor-providers'
 import { mockScope } from './scope'
 import { detachChannel, testDetachChannel } from '../../helpers/detach-channel'
+import { FindResult } from '@/features/file-tree/util/path'
 
 const mockHighlights = [
   {
@@ -36,11 +38,7 @@ const mockPosition: Position = {
   pageSize: { height: 500, width: 500 },
 }
 
-type Entity = {
-  type: string
-}
-
-const mockSelectedEntities: Entity[] = [{ type: 'doc' }]
+const mockSelectedEntities = [{ type: 'doc' }] as FindResult[]
 
 const WithPosition = ({ mockPosition }: { mockPosition: Position }) => {
   const { setPosition } = useCompileContext()
@@ -65,7 +63,7 @@ const setDetachedPosition = (mockPosition: Position) => {
 const WithSelectedEntities = ({
   mockSelectedEntities = [],
 }: {
-  mockSelectedEntities: Entity[]
+  mockSelectedEntities: FindResult[]
 }) => {
   const { setSelectedEntities } = useFileTreeData()
 
@@ -78,14 +76,9 @@ const WithSelectedEntities = ({
 
 describe('<PdfSynctexControls/>', function () {
   beforeEach(function () {
-    window.metaAttributesCache = new Map()
     window.metaAttributesCache.set('ol-project_id', 'test-project')
     window.metaAttributesCache.set('ol-preventCompileOnLoad', false)
     cy.interceptEvents()
-  })
-
-  afterEach(function () {
-    window.metaAttributesCache = new Map()
   })
 
   it('handles clicks on sync buttons', function () {
@@ -158,7 +151,9 @@ describe('<PdfSynctexControls/>', function () {
       <EditorProviders scope={scope}>
         <WithPosition mockPosition={mockPosition} />
         <WithSelectedEntities
-          mockSelectedEntities={[{ type: 'doc' }, { type: 'doc' }]}
+          mockSelectedEntities={
+            [{ type: 'doc' }, { type: 'doc' }] as FindResult[]
+          }
         />
         <PdfSynctexControls />
       </EditorProviders>
@@ -179,7 +174,9 @@ describe('<PdfSynctexControls/>', function () {
     cy.mount(
       <EditorProviders scope={scope}>
         <WithPosition mockPosition={mockPosition} />
-        <WithSelectedEntities mockSelectedEntities={[{ type: 'file' }]} />
+        <WithSelectedEntities
+          mockSelectedEntities={[{ type: 'fileRef' }] as FindResult[]}
+        />
         <PdfSynctexControls />
       </EditorProviders>
     )
@@ -272,7 +269,7 @@ describe('<PdfSynctexControls/>', function () {
 
       // synctex is called locally and the result are broadcast for the detached tab
       // NOTE: can't use `.to.deep.include({…})` as it doesn't match the nested array
-      cy.get('@postDetachMessage').should('be.calledWith', {
+      cy.get('@postDetachMessage').should('have.been.calledWith', {
         role: 'detacher',
         event: 'action-setHighlights',
         data: { args: [mockHighlights] },
@@ -376,7 +373,7 @@ describe('<PdfSynctexControls/>', function () {
 
       cy.get('.synctex-spin-icon').should('not.exist')
 
-      cy.get('@postDetachMessage').should('be.calledWith', {
+      cy.get('@postDetachMessage').should('have.been.calledWith', {
         role: 'detached',
         event: 'action-sync-to-code',
         data: {

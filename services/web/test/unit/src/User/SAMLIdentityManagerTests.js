@@ -1,4 +1,4 @@
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 const sinon = require('sinon')
 const { expect } = require('chai')
 const SandboxedModule = require('sandboxed-module')
@@ -43,6 +43,7 @@ describe('SAMLIdentityManager', function () {
     }
     this.SAMLIdentityManager = SandboxedModule.require(modulePath, {
       requires: {
+        'mongodb-legacy': { ObjectId },
         '../Email/EmailHandler': (this.EmailHandler = {
           sendEmail: sinon.stub().yields(),
         }),
@@ -186,7 +187,6 @@ describe('SAMLIdentityManager', function () {
               error = e
             } finally {
               expect(error).to.exist
-              console.log(error)
               expect(error.message).to.contain(
                 'missing data when linking institution SSO'
               )
@@ -371,7 +371,7 @@ describe('SAMLIdentityManager', function () {
             expect(
               this.UserGetter.promises.getUser
             ).to.have.been.calledWithMatch({
-              _id: ObjectId('6005c75b12cbcaf771f4a105'),
+              _id: new ObjectId('6005c75b12cbcaf771f4a105'),
               'samlIdentifiers.providerId': '123456',
             })
             expect(error).to.be.instanceof(Errors.SAMLAlreadyLinkedError)

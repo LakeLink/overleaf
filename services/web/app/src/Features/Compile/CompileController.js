@@ -1,12 +1,13 @@
 let CompileController
-const { URL } = require('url')
+const { URL, URLSearchParams } = require('url')
+const { pipeline } = require('stream/promises')
+const { Cookie } = require('tough-cookie')
 const OError = require('@overleaf/o-error')
 const Metrics = require('@overleaf/metrics')
 const ProjectGetter = require('../Project/ProjectGetter')
 const CompileManager = require('./CompileManager')
 const ClsiManager = require('./ClsiManager')
 const logger = require('@overleaf/logger')
-const request = require('request')
 const Settings = require('@overleaf/settings')
 const SessionManager = require('../Authentication/SessionManager')
 const { RateLimiter } = require('../../infrastructure/RateLimiter')
@@ -16,7 +17,11 @@ const ClsiCookieManager = require('./ClsiCookieManager')(
 const Path = require('path')
 const AnalyticsManager = require('../Analytics/AnalyticsManager')
 const SplitTestHandler = require('../SplitTests/SplitTestHandler')
-const { callbackify } = require('../../util/promises')
+const { callbackify } = require('@overleaf/promise-utils')
+const {
+  fetchStreamWithResponse,
+  RequestFailedError,
+} = require('@overleaf/fetch-utils')
 
 const COMPILE_TIMEOUT_MS = 10 * 60 * 1000
 
@@ -24,6 +29,15 @@ const pdfDownloadRateLimiter = new RateLimiter('full-pdf-download', {
   points: 1000,
   duration: 60 * 60,
 })
+
+function getOutputFilesArchiveSpecification(projectId, userId, buildId) {
+  const fileName = 'output.zip'
+  return {
+    path: fileName,
+    url: CompileController._getFileUrl(projectId, userId, buildId, fileName),
+    type: 'zip',
+  }
+}
 
 function getImageNameForProject(projectId, callback) {
   ProjectGetter.getProject(projectId, { imageName: 1 }, (err, project) => {
@@ -52,39 +66,13 @@ const getSplitTestOptions = callbackify(async function (req, res) {
   } catch (e) {}
   const editorReq = { ...req, query }
 
-  const { variant: domainVariant } =
-    await SplitTestHandler.promises.getAssignment(
-      editorReq,
-      res,
-      'pdf-download-domain'
-    )
-  const { variant: forceNewDomainVariant } =
-    await SplitTestHandler.promises.getAssignment(
-      editorReq,
-      res,
-      'force-new-compile-domain'
-    )
-  const pdfDownloadDomain =
-    (domainVariant === 'user' || forceNewDomainVariant === 'enabled') &&
-    Settings.compilesUserContentDomain
-      ? Settings.compilesUserContentDomain
-      : Settings.pdfDownloadDomain
-
-  const { variant: hybridDomainVariant } =
-    await SplitTestHandler.promises.getAssignment(
-      editorReq,
-      res,
-      'pdf-download-domain-hybrid'
-    )
-  const enableHybridPdfDownload = hybridDomainVariant === 'enabled'
+  const pdfDownloadDomain = Settings.pdfDownloadDomain
 
   if (!req.query.enable_pdf_caching) {
     // The frontend does not want to do pdf caching.
     return {
       pdfDownloadDomain,
-      enableHybridPdfDownload,
       enablePdfCaching: false,
-      forceNewDomainVariant,
     }
   }
 
@@ -101,18 +89,14 @@ const getSplitTestOptions = callbackify(async function (req, res) {
     // Skip the lookup of the chunk size when caching is not enabled.
     return {
       pdfDownloadDomain,
-      enableHybridPdfDownload,
       enablePdfCaching: false,
-      forceNewDomainVariant,
     }
   }
   const pdfCachingMinChunkSize = await getPdfCachingMinChunkSize(editorReq, res)
   return {
     pdfDownloadDomain,
-    enableHybridPdfDownload,
     enablePdfCaching,
     pdfCachingMinChunkSize,
-    forceNewDomainVariant,
   }
 })
 
@@ -154,13 +138,8 @@ module.exports = CompileController = {
 
     getSplitTestOptions(req, res, (err, splitTestOptions) => {
       if (err) return next(err)
-      let {
-        enablePdfCaching,
-        pdfCachingMinChunkSize,
-        pdfDownloadDomain,
-        enableHybridPdfDownload,
-        forceNewDomainVariant,
-      } = splitTestOptions
+      let { enablePdfCaching, pdfCachingMinChunkSize, pdfDownloadDomain } =
+        splitTestOptions
       options.enablePdfCaching = enablePdfCaching
       if (enablePdfCaching) {
         options.pdfCachingMinChunkSize = pdfCachingMinChunkSize
@@ -179,7 +158,8 @@ module.exports = CompileController = {
           validationProblems,
           stats,
           timings,
-          outputUrlPrefix
+          outputUrlPrefix,
+          buildId
         ) => {
           if (error) {
             Metrics.inc('compile-error')
@@ -217,18 +197,23 @@ module.exports = CompileController = {
               }
             )
           }
+
+          const outputFilesArchive = buildId
+            ? getOutputFilesArchiveSpecification(projectId, userId, buildId)
+            : null
+
           res.json({
             status,
             outputFiles,
+            outputFilesArchive,
             compileGroup: limits?.compileGroup,
             clsiServerId,
             validationProblems,
             stats,
             timings,
+            outputUrlPrefix,
             pdfDownloadDomain,
             pdfCachingMinChunkSize,
-            enableHybridPdfDownload,
-            forceNewDomainVariant,
           })
         }
       )
@@ -265,7 +250,7 @@ module.exports = CompileController = {
     }
     options.compileGroup =
       req.body?.compileGroup || Settings.defaultFeatures.compileGroup
-    options.compileBackendClass = Settings.apis.clsi.defaultBackendClass
+    options.compileBackendClass = Settings.apis.clsi.submissionBackendClass
     options.timeout =
       req.body?.timeout || Settings.defaultFeatures.compileTimeout
     ClsiManager.sendExternalRequest(
@@ -309,24 +294,19 @@ module.exports = CompileController = {
   downloadPdf(req, res, next) {
     Metrics.inc('pdf-downloads')
     const projectId = req.params.Project_id
-    const isPdfjsPartialDownload = req.query?.pdfng
     const rateLimit = function (callback) {
-      if (isPdfjsPartialDownload) {
-        callback(null, true)
-      } else {
-        pdfDownloadRateLimiter
-          .consume(req.ip)
-          .then(() => {
-            callback(null, true)
-          })
-          .catch(err => {
-            if (err instanceof Error) {
-              callback(err)
-            } else {
-              callback(null, false)
-            }
-          })
-      }
+      pdfDownloadRateLimiter
+        .consume(req.ip, 1, { method: 'ip' })
+        .then(() => {
+          callback(null, true)
+        })
+        .catch(err => {
+          if (err instanceof Error) {
+            callback(err)
+          } else {
+            callback(null, false)
+          }
+        })
     }
 
     ProjectGetter.getProject(projectId, { name: 1 }, function (err, project) {
@@ -339,7 +319,7 @@ module.exports = CompileController = {
       if (req.query.popupDownload) {
         res.setContentDisposition('attachment', { filename })
       } else {
-        res.setContentDisposition('', { filename })
+        res.setContentDisposition('inline', { filename })
       }
 
       rateLimit(function (err, canContinue) {
@@ -363,7 +343,15 @@ module.exports = CompileController = {
               req.params.build_id,
               'output.pdf'
             )
-            CompileController.proxyToClsi(projectId, url, req, res, next)
+            CompileController.proxyToClsi(
+              projectId,
+              'output-file',
+              url,
+              {},
+              req,
+              res,
+              next
+            )
           })
         }
       })
@@ -371,9 +359,7 @@ module.exports = CompileController = {
   },
 
   _getSafeProjectName(project) {
-    const wordRegExp = /\W/g
-    const safeProjectName = project.name.replace(wordRegExp, '_')
-    return safeProjectName
+    return project.name.replace(/[^\p{L}\p{Nd}]/gu, '_')
   },
 
   deleteAuxFiles(req, res, next) {
@@ -411,7 +397,15 @@ module.exports = CompileController = {
         return
       }
       const url = `/project/${projectId}/output/output.pdf`
-      CompileController.proxyToClsi(projectId, url, req, res, next)
+      CompileController.proxyToClsi(
+        projectId,
+        'output-file',
+        url,
+        {},
+        req,
+        res,
+        next
+      )
     })
   },
 
@@ -421,13 +415,24 @@ module.exports = CompileController = {
       if (error) {
         return next(error)
       }
+
+      const qs = {}
+
       const url = CompileController._getFileUrl(
         projectId,
         userId,
         req.params.build_id,
         req.params.file
       )
-      CompileController.proxyToClsi(projectId, url, req, res, next)
+      CompileController.proxyToClsi(
+        projectId,
+        'output-file',
+        url,
+        qs,
+        req,
+        res,
+        next
+      )
     })
   },
 
@@ -444,11 +449,13 @@ module.exports = CompileController = {
         req.body?.compileGroup ||
         req.query?.compileGroup ||
         Settings.defaultFeatures.compileGroup,
-      compileBackendClass: Settings.apis.clsi.defaultBackendClass,
+      compileBackendClass: Settings.apis.clsi.submissionBackendClass,
     }
     CompileController.proxyToClsiWithLimits(
       submissionId,
+      'output-file',
       url,
+      {},
       limits,
       req,
       res,
@@ -501,8 +508,15 @@ module.exports = CompileController = {
         if (error) return next(error)
 
         const url = CompileController._getUrl(projectId, userId, 'sync/pdf')
-        const destination = { url, qs: { page, h, v, imageName } }
-        CompileController.proxyToClsi(projectId, destination, req, res, next)
+        CompileController.proxyToClsi(
+          projectId,
+          'sync-to-pdf',
+          url,
+          { page, h, v, imageName },
+          req,
+          res,
+          next
+        )
       })
     })
   },
@@ -536,20 +550,29 @@ module.exports = CompileController = {
         if (error) return next(error)
 
         const url = CompileController._getUrl(projectId, userId, 'sync/code')
-        const destination = { url, qs: { file, line, column, imageName } }
-        CompileController.proxyToClsi(projectId, destination, req, res, next)
+        CompileController.proxyToClsi(
+          projectId,
+          'sync-to-code',
+          url,
+          { file, line, column, imageName },
+          req,
+          res,
+          next
+        )
       })
     })
   },
 
-  proxyToClsi(projectId, url, req, res, next) {
+  proxyToClsi(projectId, action, url, qs, req, res, next) {
     CompileManager.getProjectCompileLimits(projectId, function (error, limits) {
       if (error) {
         return next(error)
       }
       CompileController.proxyToClsiWithLimits(
         projectId,
+        action,
         url,
+        qs,
         limits,
         req,
         res,
@@ -558,60 +581,103 @@ module.exports = CompileController = {
     })
   },
 
-  proxyToClsiWithLimits(projectId, url, limits, req, res, next) {
+  proxyToClsiWithLimits(projectId, action, url, qs, limits, req, res, next) {
     _getPersistenceOptions(
       req,
       projectId,
       limits.compileGroup,
       limits.compileBackendClass,
       (err, persistenceOptions) => {
-        let qs
         if (err) {
           OError.tag(err, 'error getting cookie jar for clsi request')
           return next(err)
         }
-        // expand any url parameter passed in as {url:..., qs:...}
-        if (typeof url === 'object') {
-          ;({ url, qs } = url)
-        }
-        const compilerUrl = Settings.apis.clsi.url
-        url = `${compilerUrl}${url}`
-        const oneMinute = 60 * 1000
-        // the base request
-        const options = {
-          url,
-          method: req.method,
-          timeout: oneMinute,
-          ...persistenceOptions,
-        }
-        // add any provided query string
-        if (qs != null) {
-          options.qs = Object.assign(options.qs || {}, qs)
-        }
-        // if we have a build parameter, pass it through to the clsi
-        if (req.query?.pdfng && req.query?.build != null) {
-          // only for new pdf viewer
-          if (options.qs == null) {
-            options.qs = {}
-          }
-          options.qs.build = req.query.build
-        }
-        // if we are byte serving pdfs, pass through If-* and Range headers
-        // do not send any others, there's a proxying loop if Host: is passed!
-        if (req.query?.pdfng) {
-          const newHeaders = {}
-          for (const h in req.headers) {
-            if (/^(If-|Range)/i.test(h)) {
-              newHeaders[h] = req.headers[h]
-            }
-          }
-          options.headers = newHeaders
-        }
-        const proxy = request(options)
-        proxy.pipe(res)
-        proxy.on('error', error =>
-          logger.warn({ err: error, url }, 'CLSI proxy error')
+        url = new URL(`${Settings.apis.clsi.url}${url}`)
+        url.search = new URLSearchParams({
+          ...persistenceOptions.qs,
+          ...qs,
+        }).toString()
+        const timer = new Metrics.Timer(
+          'proxy_to_clsi',
+          1,
+          { path: action },
+          [0, 100, 1000, 2000, 5000, 10000, 15000, 20000, 30000, 45000, 60000]
         )
+        Metrics.inc('proxy_to_clsi', 1, { path: action, status: 'start' })
+        fetchStreamWithResponse(url.href, {
+          method: req.method,
+          signal: AbortSignal.timeout(60 * 1000),
+          headers: persistenceOptions.headers,
+        })
+          .then(({ stream, response }) => {
+            if (req.destroyed) {
+              // The client has disconnected already, avoid trying to write into the broken connection.
+              Metrics.inc('proxy_to_clsi', 1, {
+                path: action,
+                status: 'req-aborted',
+              })
+              return
+            }
+            Metrics.inc('proxy_to_clsi', 1, {
+              path: action,
+              status: response.status,
+            })
+
+            for (const key of ['Content-Length', 'Content-Type']) {
+              if (response.headers.has(key)) {
+                res.setHeader(key, response.headers.get(key))
+              }
+            }
+            res.writeHead(response.status)
+            return pipeline(stream, res)
+          })
+          .then(() => {
+            timer.labels.status = 'success'
+            timer.done()
+          })
+          .catch(err => {
+            const reqAborted = Boolean(req.destroyed)
+            const status = reqAborted ? 'req-aborted-late' : 'error'
+            timer.labels.status = status
+            const duration = timer.done()
+            Metrics.inc('proxy_to_clsi', 1, { path: action, status })
+            const streamingStarted = Boolean(res.headersSent)
+            if (!streamingStarted) {
+              if (err instanceof RequestFailedError) {
+                res.sendStatus(err.response.status)
+              } else {
+                res.sendStatus(500)
+              }
+            }
+            if (
+              streamingStarted &&
+              reqAborted &&
+              err.code === 'ERR_STREAM_PREMATURE_CLOSE'
+            ) {
+              // Ignore noisy spurious error
+              return
+            }
+            if (
+              err instanceof RequestFailedError &&
+              ['sync-to-code', 'sync-to-pdf', 'output-file'].includes(action)
+            ) {
+              // Ignore noisy error
+              // https://github.com/overleaf/internal/issues/15201
+              return
+            }
+            logger.warn(
+              {
+                err,
+                projectId,
+                url,
+                action,
+                reqAborted,
+                streamingStarted,
+                duration,
+              },
+              'CLSI proxy error'
+            )
+          })
       }
     )
   },
@@ -650,15 +716,29 @@ function _getPersistenceOptions(
   const { clsiserverid } = req.query
   const userId = SessionManager.getLoggedInUserId(req)
   if (clsiserverid && typeof clsiserverid === 'string') {
-    callback(null, { qs: { clsiserverid, compileGroup, compileBackendClass } })
+    callback(null, {
+      qs: { clsiserverid, compileGroup, compileBackendClass },
+      headers: {},
+    })
   } else {
-    ClsiCookieManager.getCookieJar(
+    ClsiCookieManager.getServerId(
       projectId,
       userId,
       compileGroup,
       compileBackendClass,
-      (err, jar) => {
-        callback(err, { jar, qs: { compileGroup, compileBackendClass } })
+      (err, clsiServerId) => {
+        if (err) return callback(err)
+        callback(null, {
+          qs: { compileGroup, compileBackendClass },
+          headers: clsiServerId
+            ? {
+                Cookie: new Cookie({
+                  key: Settings.clsiCookie.key,
+                  value: clsiServerId,
+                }).cookieString(),
+              }
+            : {},
+        })
       }
     )
   }

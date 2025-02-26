@@ -1,11 +1,18 @@
 import { memo, useEffect, useState } from 'react'
-import { Alert, Modal } from 'react-bootstrap'
 import { useTranslation } from 'react-i18next'
 import { Project } from '../../../../../../types/project/dashboard/api'
-import AccessibleModal from '../../../../shared/components/accessible-modal'
 import { getUserFacingMessage } from '../../../../infrastructure/fetch-json'
 import useIsMounted from '../../../../shared/hooks/use-is-mounted'
 import * as eventTracking from '../../../../infrastructure/event-tracking'
+import { isSmallDevice } from '../../../../infrastructure/event-tracking'
+import Notification from '@/shared/components/notification'
+import OLButton from '@/features/ui/components/ol/ol-button'
+import OLModal, {
+  OLModalBody,
+  OLModalFooter,
+  OLModalHeader,
+  OLModalTitle,
+} from '@/features/ui/components/ol/ol-modal'
 
 type ProjectsActionModalProps = {
   title?: string
@@ -57,53 +64,51 @@ function ProjectsActionModal({
 
   useEffect(() => {
     if (showModal) {
-      eventTracking.send(
-        'project-list-page-interaction',
-        'project action',
-        action
-      )
+      eventTracking.sendMB('project-list-page-interaction', {
+        action,
+        isSmallDevice,
+      })
     }
   }, [action, showModal])
 
   return (
-    <AccessibleModal
+    <OLModal
       animation
       show={showModal}
       onHide={handleCloseModal}
       id="action-project-modal"
       backdrop="static"
     >
-      <Modal.Header closeButton>
-        <Modal.Title>{title}</Modal.Title>
-      </Modal.Header>
-      <Modal.Body>{children}</Modal.Body>
-      <Modal.Footer>
+      <OLModalHeader closeButton>
+        <OLModalTitle>{title}</OLModalTitle>
+      </OLModalHeader>
+      <OLModalBody>
+        {children}
         {!isProcessing &&
           errors.length > 0 &&
-          errors.map((e, i) => (
-            <Alert
-              bsStyle="danger"
-              key={`action-error-${i}`}
-              className="text-center"
-              aria-live="polite"
-            >
-              <b>{e.projectName}</b>
-              <br />
-              {getUserFacingMessage(e.error)}
-            </Alert>
+          errors.map((error, i) => (
+            <div className="notification-list" key={i}>
+              <Notification
+                type="error"
+                title={error.projectName}
+                content={getUserFacingMessage(error.error) as string}
+              />
+            </div>
           ))}
-        <button className="btn btn-secondary" onClick={handleCloseModal}>
+      </OLModalBody>
+      <OLModalFooter>
+        <OLButton variant="secondary" onClick={handleCloseModal}>
           {t('cancel')}
-        </button>
-        <button
-          className="btn btn-danger"
+        </OLButton>
+        <OLButton
+          variant="danger"
           onClick={() => handleActionForProjects(projects)}
           disabled={isProcessing}
         >
           {t('confirm')}
-        </button>
-      </Modal.Footer>
-    </AccessibleModal>
+        </OLButton>
+      </OLModalFooter>
+    </OLModal>
   )
 }
 

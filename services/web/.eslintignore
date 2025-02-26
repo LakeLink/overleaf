@@ -1,8 +1,12 @@
 # NOTE: changing paths may require updating them in the Makefile too.
+data/
+scripts/translations/.cache/
 node_modules
-modules/**/scripts
 frontend/js/vendor
 modules/**/frontend/js/vendor
 /public/
-modules/source-editor/frontend/js/lezer-latex/latex.mjs
-modules/source-editor/frontend/js/lezer-latex/latex.terms.mjs
+frontend/js/features/source-editor/lezer-latex/latex.mjs
+frontend/js/features/source-editor/lezer-latex/latex.terms.mjs
+frontend/js/features/source-editor/lezer-bibtex/bibtex.mjs
+frontend/js/features/source-editor/lezer-bibtex/bibtex.terms.mjs
+frontend/js/features/source-editor/hunspell/wasm/hunspell.mjs

@@ -14,9 +14,8 @@
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
  */
 const DocUpdaterClient = require('../../acceptance/js/helpers/DocUpdaterClient')
-// MockTrackChangesApi = require "../../acceptance/js/helpers/MockTrackChangesApi"
 // MockWebApi = require "../../acceptance/js/helpers/MockWebApi"
-const assert = require('assert')
+const assert = require('node:assert')
 const async = require('async')
 
 const insert = function (string, pos, content) {
@@ -163,9 +162,12 @@ class StressTestClient {
   continue() {
     if (this.updateCount > 0) {
       this.updateCount--
-      return setTimeout(() => {
-        return this.sendUpdate()
-      }, this.options.updateDelay * (0.5 + Math.random()))
+      return setTimeout(
+        () => {
+          return this.sendUpdate()
+        },
+        this.options.updateDelay * (0.5 + Math.random())
+      )
     } else {
       return this.updateCallback()
     }

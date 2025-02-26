@@ -1,6 +1,6 @@
 import OError from '@overleaf/o-error'
 import { fallbackRequest, fetchRange } from './pdf-caching'
-import { captureException } from '../../../infrastructure/error-reporter'
+import { captureException } from '@/infrastructure/error-reporter'
 import { getPdfCachingMetrics } from './metrics'
 import {
   cachedUrlLookupEnabled,
@@ -9,17 +9,17 @@ import {
   prefetchLargeEnabled,
   trackPdfDownloadEnabled,
 } from './pdf-caching-flags'
-import { isNetworkError } from '../../../utils/isNetworkError'
-import { isSplitTestEnabled } from '../../../utils/splitTestUtils'
-import { isURLOnUserContentDomain } from './fetchFromCompileDomain'
+import { isNetworkError } from '@/utils/is-network-error'
+import { debugConsole } from '@/utils/debugging'
+import { PDFJS } from './pdf-js'
 
 // 30 seconds: The shutdown grace period of a clsi pre-emp instance.
 const STALE_OUTPUT_REQUEST_THRESHOLD_MS = 30 * 1000
 
-export function generatePdfCachingTransportFactory(PDFJS) {
+export function generatePdfCachingTransportFactory() {
   // NOTE: The custom transport can be used for tracking download volume.
   if (!enablePdfCaching && !trackPdfDownloadEnabled) {
-    return () => null
+    return () => undefined
   }
   const usageScore = new Map()
   const cachedUrls = new Map()
@@ -78,9 +78,6 @@ export function generatePdfCachingTransportFactory(PDFJS) {
         end,
         metrics,
       })
-      const isExpectedFailureOnNewCompileDomain = err =>
-        isSplitTestEnabled('force-new-compile-domain') &&
-        isURLOnUserContentDomain(OError.getFullInfo(err).url)
 
       const isStaleOutputRequest = () =>
         performance.now() - this.startTime > STALE_OUTPUT_REQUEST_THRESHOLD_MS
@@ -96,9 +93,8 @@ export function generatePdfCachingTransportFactory(PDFJS) {
       // - requests for the main output.pdf file
       //   A fallback request would not be able to retrieve the PDF either.
       const isExpectedError = err =>
-        ((is404(err) || isNetworkError(err)) &&
-          (isStaleOutputRequest() || isFromOutputPDFRequest(err))) ||
-        isExpectedFailureOnNewCompileDomain(err)
+        (is404(err) || isNetworkError(err)) &&
+        (isStaleOutputRequest() || isFromOutputPDFRequest(err))
 
       fetchRange({
         url: this.url,
@@ -119,8 +115,6 @@ export function generatePdfCachingTransportFactory(PDFJS) {
           if (isExpectedError(err)) {
             if (is404(err)) {
               // A regular pdf-js request would have seen this 404 as well.
-            } else if (isExpectedFailureOnNewCompileDomain(err)) {
-              // A regular pdf-js request would have seen this proxy-error as well.
             } else {
               // Flaky network, switch back to regular pdf-js requests.
               metrics.failedCount++
@@ -129,6 +123,7 @@ export function generatePdfCachingTransportFactory(PDFJS) {
             throw OError.tag(new PDFJS.MissingPDFException(), 'caching', {
               statusCode: OError.getFullInfo(err).statusCode,
               url: OError.getFullInfo(err).url,
+              err,
             })
           }
           metrics.failedCount++
@@ -137,7 +132,7 @@ export function generatePdfCachingTransportFactory(PDFJS) {
             throw err // This was a fallback request already. Do not retry.
           }
           err = OError.tag(err, 'optimized pdf download error', getDebugInfo())
-          console.error(err)
+          debugConsole.error(err)
           captureException(err, {
             tags: {
               fromPdfCaching: true,
@@ -154,6 +149,7 @@ export function generatePdfCachingTransportFactory(PDFJS) {
               throw OError.tag(new PDFJS.MissingPDFException(), 'fallback', {
                 statusCode: OError.getFullInfo(err).statusCode,
                 url: OError.getFullInfo(err).url,
+                err,
               })
             }
             throw err
@@ -166,7 +162,7 @@ export function generatePdfCachingTransportFactory(PDFJS) {
         .catch(err => {
           if (abortSignal.aborted) return
           err = OError.tag(err, 'fatal pdf download error', getDebugInfo())
-          console.error(err)
+          debugConsole.error(err)
           if (!(err instanceof PDFJS.MissingPDFException)) {
             captureException(err, {
               tags: {
@@ -185,7 +181,7 @@ export function generatePdfCachingTransportFactory(PDFJS) {
     if (metrics.failedOnce) {
       // Disable pdf caching once any fetch request failed.
       // Be trigger-happy here until we reached a stable state of the feature.
-      return null
+      return undefined
     }
     // Latency is collected per preview cycle.
     metrics.latencyComputeMax = 0

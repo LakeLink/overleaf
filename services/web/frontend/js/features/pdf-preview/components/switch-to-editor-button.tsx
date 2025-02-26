@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next'
-import { Button } from 'react-bootstrap'
 import Icon from '../../../shared/components/icon'
+import MaterialIcon from '@/shared/components/material-icon'
+import OLButton from '@/features/ui/components/ol/ol-button'
+import BootstrapVersionSwitcher from '@/features/ui/components/bootstrap-5/bootstrap-version-switcher'
 import { useLayoutContext } from '../../../shared/context/layout-context'
 
 function SwitchToEditorButton() {
@@ -18,18 +20,27 @@ function SwitchToEditorButton() {
 
   function handleClick() {
     setView('editor')
+    window.setTimeout(() => {
+      window.dispatchEvent(new Event('editor:focus'))
+    })
   }
 
   return (
-    <Button
-      bsStyle={null}
-      bsSize="xs"
+    <OLButton
+      variant="secondary"
+      size="sm"
       onClick={handleClick}
-      className="switch-to-editor-btn btn-secondary"
+      bs3Props={{
+        bsSize: 'xsmall',
+        className: 'switch-to-editor-btn toolbar-btn-secondary',
+      }}
     >
-      <Icon type="code" className="me-1" />
+      <BootstrapVersionSwitcher
+        bs3={<Icon type="code" className="toolbar-btn-secondary-icon" />}
+        bs5={<MaterialIcon type="code" />}
+      />
       {t('switch_to_editor')}
-    </Button>
+    </OLButton>
   )
 }
 

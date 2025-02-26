@@ -45,12 +45,12 @@
 // content for the user's viewport.
 
 .navbar-collapse {
-  max-height: @navbar-collapse-max-height;
   overflow-x: visible;
   padding-right: @navbar-padding-horizontal;
   padding-left: @navbar-padding-horizontal;
   &:extend(.clearfix all);
   -webkit-overflow-scrolling: touch;
+  height: 100vh;
 
   &.in {
     overflow-y: auto;
@@ -84,7 +84,7 @@
 }
 
 .navbar-main {
-  z-index: 1;
+  z-index: @z-index-navbar;
   .container-fluid > .navbar-collapse {
     // High specificity needed to override Bootstrap's default.
     margin: 10px 0 0;
@@ -324,7 +324,8 @@
   padding: 10px @navbar-padding-horizontal;
   border-top: 1px solid transparent;
   border-bottom: 1px solid transparent;
-  @shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1),
+  @shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
     0 1px 0 rgba(255, 255, 255, 0.1);
   .box-shadow(@shadow);
 
@@ -488,6 +489,16 @@
       }
     }
 
+    > li.primary > a {
+      .btn-borderless();
+    }
+
+    > li.secondary > a {
+      .btn-bordered();
+
+      border-width: @border-radius-small;
+    }
+
     @media (min-width: @grid-float-breakpoint) {
       > li > a {
         border-color: @navbar-default-link-border-color;
@@ -497,13 +508,17 @@
   }
 
   .navbar-toggle {
-    border-color: @navbar-default-toggle-border-color;
-    color: @navbar-default-link-color;
-    &:hover,
-    &.active {
+    &.collapsed {
+      border-color: @navbar-default-toggle-border-color;
+      color: @navbar-default-link-color;
+      transition: 0.2s ease-out;
+    }
+
+    &:not(.collapsed) {
       background-color: @navbar-default-toggle-hover-bg;
       border-color: @navbar-default-toggle-hover-bg;
       color: #fff;
+      transition: 0.2s ease-in;
     }
   }
 
@@ -612,5 +627,162 @@
     color: @white;
     text-decoration: none;
     top: @navbar-default-padding-v;
+  }
+}
+
+.website-redesign-navbar {
+  &.navbar-default {
+    background-color: @navbar-default-bg-website-redesign;
+
+    .navbar-brand {
+      background-image: @navbar-brand-image-url-website-redesign;
+    }
+
+    .navbar-text {
+      color: @navbar-default-color-website-redesign;
+    }
+
+    // There is this -15px margin hack that is needed on the original
+    // This causes inconsistency with the website redesign navbar,
+    // so reset it to 0 for now
+    @media (min-width: @grid-float-breakpoint) {
+      .navbar-right:last-child {
+        margin-right: 0;
+      }
+    }
+
+    .navbar-nav {
+      > li > a {
+        color: @navbar-default-link-color-website-redesign;
+        // border: 2px solid transparent;
+
+        @media (min-width: @grid-float-breakpoint) {
+          border-radius: @navbar-btn-border-radius;
+          padding: @navbar-btn-padding;
+        }
+      }
+
+      > li.subdued > a {
+        color: @navbar-subdued-color-website-redesign;
+        &:hover,
+        &:focus {
+          color: @navbar-subdued-hover-color-website-redesign;
+          background-color: @navbar-subdued-hover-bg-website-redesign;
+        }
+        &:focus {
+          .tab-focus();
+        }
+        @media (min-width: @grid-float-breakpoint) {
+          padding: @navbar-subdued-padding;
+        }
+      }
+
+      > li.primary > a {
+        .btn-borderless(@white, @green-50, @green-60);
+      }
+
+      > li.secondary > a {
+        .btn-bordered();
+
+        border-width: @border-radius-small;
+        border-color: transparent;
+
+        @media (min-width: @grid-float-breakpoint) {
+          border-color: @btn-bordered-border-color;
+        }
+      }
+    }
+
+    .navbar-toggle {
+      &.collapsed {
+        border-color: @navbar-default-toggle-border-color-website-redesign;
+        color: @navbar-default-link-color-website-redesign;
+        transition: 0.2s ease-out;
+      }
+
+      &:not(.collapsed) {
+        background-color: @navbar-default-toggle-hover-bg-website-redesign;
+        border-color: @navbar-default-toggle-hover-bg-website-redesign;
+        color: #fff;
+        transition: 0.2s ease-in;
+      }
+    }
+
+    .navbar-collapse {
+      // Use absolute positioning to build the hamburger menu.
+      background-color: @navbar-default-bg-website-redesign;
+      border-bottom: solid 1px @navbar-default-border;
+    }
+
+    // Dropdown menu items
+    .navbar-nav {
+      .dropdown-menu-button,
+      .dropdown-menu > li > a {
+        &:hover,
+        &:focus {
+          background-color: @navbar-default-link-active-bg-website-redesign;
+        }
+      }
+
+      // Remove background color from open dropdown
+      > .open > a {
+        &,
+        &:hover,
+        &:focus {
+          background-color: @btn-secondary-hover-bg-color; // force secondary button style
+          color: @navbar-default-link-active-color-website-redesign;
+        }
+      }
+
+      > .open.subdued > a {
+        &,
+        &:hover,
+        &:focus {
+          color: @navbar-subdued-hover-color-website-redesign;
+          background-color: @navbar-subdued-hover-bg-website-redesign;
+        }
+      }
+
+      @media (max-width: @grid-float-breakpoint-max) {
+        // Dropdowns get custom display when collapsed
+        .open .dropdown-menu {
+          background-color: darken(@navbar-default-bg-website-redesign, 5%);
+          > li > div.subdued {
+            color: mix(
+              @navbar-default-link-color-website-redesign,
+              @navbar-default-bg-website-redesign
+            );
+          }
+          > li > a,
+          > li > form > button {
+            // padding: 12px 12px 13px 30px;
+            color: @navbar-default-link-color-website-redesign;
+            &:hover,
+            &:focus {
+              color: #fff;
+              background-color: @navbar-default-link-hover-bg-website-redesign;
+            }
+          }
+          > .active > a,
+          > .active > form > button {
+            &,
+            &:hover,
+            &:focus {
+              color: @navbar-default-link-active-color-website-redesign;
+              background-color: @navbar-default-link-active-bg-website-redesign;
+            }
+          }
+          > .disabled > a,
+          > .disabled > form > button {
+            &,
+            &:hover,
+            &:focus {
+              color: @navbar-default-link-disabled-color-website-redesign;
+              background-color: @navbar-default-link-disabled-bg;
+            }
+          }
+        }
+      }
+    }
   }
 }

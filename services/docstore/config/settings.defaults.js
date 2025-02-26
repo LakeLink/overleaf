@@ -1,22 +1,30 @@
-const http = require('http')
+const http = require('node:http')
+const https = require('node:https')
+
 http.globalAgent.maxSockets = 300
+http.globalAgent.keepAlive = false
+https.globalAgent.keepAlive = false
 
 const Settings = {
   internal: {
     docstore: {
       port: 3016,
-      host: process.env.LISTEN_ADDRESS || 'localhost',
+      host: process.env.LISTEN_ADDRESS || '127.0.0.1',
     },
   },
 
-  mongo: {},
+  mongo: {
+    options: {
+      monitorCommands: true,
+    },
+  },
 
   docstore: {
     archiveOnSoftDelete: process.env.ARCHIVE_ON_SOFT_DELETE === 'true',
     keepSoftDeletedDocsArchived:
       process.env.KEEP_SOFT_DELETED_DOCS_ARCHIVED === 'true',
 
-    backend: process.env.BACKEND || 's3',
+    backend: process.env.BACKEND,
     healthCheck: {
       project_id: process.env.HEALTH_CHECK_PROJECT_ID,
     },
@@ -67,7 +75,6 @@ if (
 if (process.env.GCS_API_ENDPOINT) {
   Settings.docstore.gcs.endpoint = {
     apiEndpoint: process.env.GCS_API_ENDPOINT,
-    apiScheme: process.env.GCS_API_SCHEME,
     projectId: process.env.GCS_PROJECT_ID,
   }
 }

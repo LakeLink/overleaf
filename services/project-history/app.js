@@ -1,3 +1,6 @@
+// Metrics must be initialized before importing anything else
+import '@overleaf/metrics/initialize.js'
+
 import Settings from '@overleaf/settings'
 import logger from '@overleaf/logger'
 import OError from '@overleaf/o-error'
@@ -11,10 +14,11 @@ mongoClient
   .connect()
   .then(() => {
     app.listen(port, host, error => {
-      if (error != null) {
-        logger.error(OError.tag(error, 'could not start history server'))
+      if (error) {
+        error = OError.tag(error, 'could not start history server')
+        logger.error({ error }, error.message)
       } else {
-        logger.debug(`history starting up, listening on ${host}:${port}`)
+        logger.debug({}, `history starting up, listening on ${host}:${port}`)
       }
     })
   })

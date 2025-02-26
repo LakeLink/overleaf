@@ -4,6 +4,8 @@ import { deleteJSON, postJSON } from '../../../infrastructure/fetch-json'
 import { debounce } from 'lodash'
 import { trackPdfDownload } from './metrics'
 import { enablePdfCaching } from './pdf-caching-flags'
+import { debugConsole } from '@/utils/debugging'
+import { signalWithTimeout } from '@/utils/abort-signal'
 
 const AUTO_COMPILE_MAX_WAIT = 5000
 // We add a 2 second debounce to sending user changes to server if they aren't
@@ -12,13 +14,15 @@ const AUTO_COMPILE_MAX_WAIT = 5000
 // and then again on ack.
 const AUTO_COMPILE_DEBOUNCE = 2500
 
+// If there is a pending op, wait for it to be saved before compiling
+const PENDING_OP_MAX_WAIT = 10000
+
 const searchParams = new URLSearchParams(window.location.search)
 
 export default class DocumentCompiler {
   constructor({
     compilingRef,
     projectId,
-    rootDocId,
     setChangedAt,
     setCompiling,
     setData,
@@ -27,10 +31,10 @@ export default class DocumentCompiler {
     setError,
     cleanupCompileResult,
     signal,
+    openDocs,
   }) {
     this.compilingRef = compilingRef
     this.projectId = projectId
-    this.rootDocId = rootDocId
     this.setChangedAt = setChangedAt
     this.setCompiling = setCompiling
     this.setData = setData
@@ -39,7 +43,9 @@ export default class DocumentCompiler {
     this.setError = setError
     this.cleanupCompileResult = cleanupCompileResult
     this.signal = signal
+    this.openDocs = openDocs
 
+    this.projectRootDocId = null
     this.clsiServerId = null
     this.currentDoc = null
     this.error = undefined
@@ -81,18 +87,22 @@ export default class DocumentCompiler {
     }
 
     try {
+      await this.openDocs.awaitBufferedOps(
+        signalWithTimeout(this.signal, PENDING_OP_MAX_WAIT)
+      )
+
       // reset values
       this.setChangedAt(0) // TODO: wait for doc:saved?
       this.validationIssues = undefined
-
-      window.dispatchEvent(new CustomEvent('flush-changes')) // TODO: wait for this?
 
       const params = this.buildCompileParams(options)
 
       const t0 = performance.now()
 
+      const rootDocId = this.getRootDocOverrideId()
+
       const body = {
-        rootDoc_id: this.getRootDocOverrideId(),
+        rootDoc_id: rootDocId,
         draft: options.draft,
         check: 'silent', // NOTE: 'error' and 'validate' are possible, but unused
         // use incremental compile for all users but revert to a full compile
@@ -119,12 +129,13 @@ export default class DocumentCompiler {
       this.setError(undefined)
 
       data.options = options
+      data.rootDocId = rootDocId
       if (data.clsiServerId) {
         this.clsiServerId = data.clsiServerId
       }
       this.setData(data)
     } catch (error) {
-      console.error(error)
+      debugConsole.error(error)
       this.cleanupCompileResult()
       this.setError(error.info?.statusCode === 429 ? 'rate-limited' : 'error')
     } finally {
@@ -136,7 +147,7 @@ export default class DocumentCompiler {
   // if it contains "\documentclass" then use this as the root doc
   getRootDocOverrideId() {
     // only override when not in the root doc itself
-    if (this.currentDoc.doc_id !== this.rootDocId) {
+    if (this.currentDoc && this.currentDoc.doc_id !== this.projectRootDocId) {
       const snapshot = this.currentDoc.getSnapshot()
 
       if (snapshot && isMainFile(snapshot)) {
@@ -195,7 +206,7 @@ export default class DocumentCompiler {
       signal: this.signal,
     })
       .catch(error => {
-        console.error(error)
+        debugConsole.error(error)
         this.setError('error')
       })
       .finally(() => {
@@ -210,7 +221,7 @@ export default class DocumentCompiler {
     return deleteJSON(`/project/${this.projectId}/output?${params}`, {
       signal: this.signal,
     }).catch(error => {
-      console.error(error)
+      debugConsole.error(error)
       this.setError('clear-cache')
     })
   }

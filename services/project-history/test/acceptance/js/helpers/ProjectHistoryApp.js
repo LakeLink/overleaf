@@ -9,8 +9,6 @@
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
  */
 import { app } from '../../../../app/js/server.js'
-import logger from '@overleaf/logger'
-logger.logger.level('error')
 
 let running = false
 let initing = false
@@ -27,7 +25,7 @@ export function ensureRunning(callback) {
   }
   initing = true
   callbacks.push(callback)
-  app.listen(3054, 'localhost', error => {
+  app.listen(3054, '127.0.0.1', error => {
     if (error != null) {
       throw error
     }

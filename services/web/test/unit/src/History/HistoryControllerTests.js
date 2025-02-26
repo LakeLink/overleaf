@@ -16,6 +16,7 @@ const Errors = require('../../../../app/src/Features/Errors/Errors')
 
 const modulePath = '../../../../app/src/Features/History/HistoryController'
 const SandboxedModule = require('sandboxed-module')
+const { ObjectId } = require('mongodb-legacy')
 
 describe('HistoryController', function () {
   beforeEach(function () {
@@ -31,6 +32,9 @@ describe('HistoryController', function () {
       requires: {
         request: (this.request = sinon.stub()),
         '@overleaf/settings': (this.settings = {}),
+        '@overleaf/fetch-utils': {},
+        '@overleaf/Metrics': {},
+        '../../infrastructure/mongodb': { ObjectId },
         stream: this.Stream,
         '../Authentication/SessionManager': this.SessionManager,
         './HistoryManager': (this.HistoryManager = {}),
@@ -38,6 +42,7 @@ describe('HistoryController', function () {
         '../Project/ProjectEntityUpdateHandler':
           (this.ProjectEntityUpdateHandler = {}),
         '../User/UserGetter': (this.UserGetter = {}),
+        '../Project/ProjectGetter': (this.ProjectGetter = {}),
         './RestoreManager': (this.RestoreManager = {}),
         '../../infrastructure/Features': (this.Features = sinon
           .stub()
@@ -46,57 +51,9 @@ describe('HistoryController', function () {
       },
     })
     return (this.settings.apis = {
-      trackchanges: {
-        enabled: false,
-        url: 'http://trackchanges.example.com',
-      },
       project_history: {
         url: 'http://project_history.example.com',
       },
-    })
-  })
-
-  describe('selectHistoryApi', function () {
-    beforeEach(function () {
-      this.req = { url: '/mock/url', method: 'POST', params: {} }
-      this.res = 'mock-res'
-      return (this.next = sinon.stub())
-    })
-
-    describe('for a project with project history', function () {
-      beforeEach(function () {
-        this.ProjectDetailsHandler.getDetails = sinon
-          .stub()
-          .callsArgWith(1, null, {
-            overleaf: { history: { id: 42, display: true } },
-          })
-        return this.HistoryController.selectHistoryApi(
-          this.req,
-          this.res,
-          this.next
-        )
-      })
-
-      it('should set the flag for project history to true', function () {
-        return this.req.useProjectHistory.should.equal(true)
-      })
-    })
-
-    describe('for any other project ', function () {
-      beforeEach(function () {
-        this.ProjectDetailsHandler.getDetails = sinon
-          .stub()
-          .callsArgWith(1, null, {})
-        return this.HistoryController.selectHistoryApi(
-          this.req,
-          this.res,
-          this.next
-        )
-      })
-
-      it('should not set the flag for project history to false', function () {
-        return this.req.useProjectHistory.should.equal(false)
-      })
     })
   })
 
@@ -158,18 +115,6 @@ describe('HistoryController', function () {
       it('should get the user id', function () {
         return this.SessionManager.getLoggedInUserId
           .calledWith(this.req.session)
-          .should.equal(true)
-      })
-
-      it('should call the track changes api', function () {
-        return this.request
-          .calledWith({
-            url: `${this.settings.apis.trackchanges.url}${this.req.url}`,
-            method: this.req.method,
-            headers: {
-              'X-User-Id': this.user_id,
-            },
-          })
           .should.equal(true)
       })
 
@@ -249,19 +194,6 @@ describe('HistoryController', function () {
           .should.equal(true)
       })
 
-      it('should call the track changes api', function () {
-        return this.request
-          .calledWith({
-            url: `${this.settings.apis.trackchanges.url}${this.req.url}`,
-            method: this.req.method,
-            json: true,
-            headers: {
-              'X-User-Id': this.user_id,
-            },
-          })
-          .should.equal(true)
-      })
-
       it('should inject the user data', function () {
         return this.HistoryManager.injectUserDetails
           .calledWith(this.data)
@@ -305,7 +237,7 @@ describe('HistoryController', function () {
     describe('for a project without project-history enabled', function () {
       beforeEach(function () {
         this.project_id = 'mock-project-id'
-        this.req = { params: { Project_id: this.project_id } }
+        this.req = { params: { Project_id: this.project_id }, body: {} }
         this.res = { setTimeout: sinon.stub(), sendStatus: sinon.stub() }
         this.next = sinon.stub()
 
@@ -329,7 +261,7 @@ describe('HistoryController', function () {
     describe('for a project with project-history enabled', function () {
       beforeEach(function () {
         this.project_id = 'mock-project-id'
-        this.req = { params: { Project_id: this.project_id } }
+        this.req = { params: { Project_id: this.project_id }, body: {} }
         this.res = { setTimeout: sinon.stub(), sendStatus: sinon.stub() }
         this.next = sinon.stub()
 

@@ -1,14 +1,16 @@
 'use strict'
 
 const assert = require('check-types').assert
-const BPromise = require('bluebird')
 
 const Blob = require('../blob')
 const FileData = require('./')
 
+/**
+ * @import { RawBinaryFileData } from '../types'
+ */
+
 class BinaryFileData extends FileData {
   /**
-   * @constructor
    * @param {string} hash
    * @param {number} byteLength
    * @see FileData
@@ -23,11 +25,18 @@ class BinaryFileData extends FileData {
     this.byteLength = byteLength
   }
 
+  /**
+   * @param {RawBinaryFileData} raw
+   * @returns {BinaryFileData}
+   */
   static fromRaw(raw) {
     return new BinaryFileData(raw.hash, raw.byteLength)
   }
 
-  /** @inheritdoc */
+  /**
+   * @inheritdoc
+   * @returns {RawBinaryFileData}
+   */
   toRaw() {
     return { hash: this.hash, byteLength: this.byteLength }
   }
@@ -48,23 +57,25 @@ class BinaryFileData extends FileData {
   }
 
   /** @inheritdoc */
-  toEager() {
-    return BPromise.resolve(this)
+  async toEager() {
+    return this
   }
 
   /** @inheritdoc */
-  toLazy() {
-    return BPromise.resolve(this)
+  async toLazy() {
+    return this
   }
 
   /** @inheritdoc */
-  toHollow() {
-    return BPromise.try(() => FileData.createHollow(this.byteLength, null))
+  async toHollow() {
+    return FileData.createHollow(this.byteLength, null)
   }
 
-  /** @inheritdoc */
-  store() {
-    return BPromise.resolve({ hash: this.hash })
+  /** @inheritdoc
+   * @return {Promise<RawFileData>}
+   */
+  async store() {
+    return { hash: this.hash }
   }
 }
 

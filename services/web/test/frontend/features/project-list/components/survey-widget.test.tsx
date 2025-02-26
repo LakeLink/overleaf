@@ -1,15 +1,15 @@
 import { expect } from 'chai'
 import { fireEvent, render, screen } from '@testing-library/react'
-import SurveyWidget from '../../../../../frontend/js/features/project-list/components/survey-widget'
+import { SurveyWidgetDsNav } from '../../../../../frontend/js/features/project-list/components/survey-widget-ds-nav'
+import { SplitTestProvider } from '@/shared/context/split-test-context'
 
-describe('<SurveyWidget />', function () {
+describe('<SurveyWidgetDsNav />', function () {
   beforeEach(function () {
     this.name = 'my-survey'
     this.preText = 'To help shape the future of Overleaf'
     this.linkText = 'Click here!'
     this.url = 'https://example.com/my-survey'
 
-    window.metaAttributesCache = new Map()
     localStorage.clear()
   })
 
@@ -22,7 +22,11 @@ describe('<SurveyWidget />', function () {
         url: this.url,
       })
 
-      render(<SurveyWidget />)
+      render(
+        <SplitTestProvider>
+          <SurveyWidgetDsNav />
+        </SplitTestProvider>
+      )
     })
 
     it('shows text and link', function () {
@@ -30,16 +34,17 @@ describe('<SurveyWidget />', function () {
       expect(dismissed).to.equal(null)
 
       screen.getByText(this.preText)
+      screen.getByText(this.linkText)
 
       const link = screen.getByRole('link', {
-        name: this.linkText,
+        name: 'Take survey',
       }) as HTMLAnchorElement
       expect(link.href).to.equal(this.url)
     })
 
     it('it is dismissed on click on the dismiss button', function () {
       const dismissButton = screen.getByRole('button', {
-        name: 'Dismiss Overleaf survey',
+        name: 'Close',
       })
       fireEvent.click(dismissButton)
 
@@ -64,7 +69,11 @@ describe('<SurveyWidget />', function () {
       })
       localStorage.setItem('dismissed-my-survey', 'true')
 
-      render(<SurveyWidget />)
+      render(
+        <SplitTestProvider>
+          <SurveyWidgetDsNav />
+        </SplitTestProvider>
+      )
     })
 
     it('nothing is displayed', function () {
@@ -78,7 +87,11 @@ describe('<SurveyWidget />', function () {
 
   describe('survey widget is not shown when no survey is configured', function () {
     beforeEach(function () {
-      render(<SurveyWidget />)
+      render(
+        <SplitTestProvider>
+          <SurveyWidgetDsNav />
+        </SplitTestProvider>
+      )
     })
 
     it('nothing is displayed', function () {

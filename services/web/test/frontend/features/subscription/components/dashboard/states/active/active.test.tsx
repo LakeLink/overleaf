@@ -1,6 +1,6 @@
 import { expect } from 'chai'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
-import * as eventTracking from '../../../../../../../../frontend/js/infrastructure/event-tracking'
+import * as eventTracking from '@/infrastructure/event-tracking'
 import { RecurlySubscription } from '../../../../../../../../types/subscription/dashboard/subscription'
 import {
   annualActiveSubscription,
@@ -11,7 +11,7 @@ import {
   trialCollaboratorSubscription,
   trialSubscription,
 } from '../../../../fixtures/subscriptions'
-import sinon from 'sinon'
+import sinon, { type SinonStub } from 'sinon'
 import { cleanUpContext } from '../../../../helpers/render-with-subscription-dash-context'
 import { renderActiveSubscription } from '../../../../helpers/render-active-subscription'
 import { cloneDeep } from 'lodash'
@@ -20,11 +20,22 @@ import {
   cancelSubscriptionUrl,
   extendTrialUrl,
   subscriptionUpdateUrl,
-} from '../../../../../../../../frontend/js/features/subscription/data/subscription-url'
+} from '@/features/subscription/data/subscription-url'
 import * as useLocationModule from '../../../../../../../../frontend/js/shared/hooks/use-location'
+import { MetaTag } from '@/utils/meta'
+import * as bootstrapUtils from '@/features/utils/bootstrap-5'
 
 describe('<ActiveSubscription />', function () {
   let sendMBSpy: sinon.SinonSpy
+  let isBootstrap5Stub: SinonStub
+
+  before(function () {
+    isBootstrap5Stub = sinon.stub(bootstrapUtils, 'isBootstrap5').returns(true)
+  })
+
+  after(function () {
+    isBootstrap5Stub.restore()
+  })
 
   beforeEach(function () {
     sendMBSpy = sinon.spy(eventTracking, 'sendMB')
@@ -53,18 +64,12 @@ describe('<ActiveSubscription />', function () {
     })
     expect(dates.length).to.equal(2)
 
-    // sentence broken up by link
-    screen.getByText(
-      'Get the most out of your Overleaf subscription by checking out the list of',
-      { exact: false }
-    )
-
     screen.getByText(
       '* Prices may be subject to additional VAT, depending on your country.'
     )
 
-    screen.getByRole('link', { name: 'Update Your Billing Details' })
-    screen.getByRole('link', { name: 'View Your Invoices' })
+    screen.getByRole('link', { name: 'Update your billing details' })
+    screen.getByRole('link', { name: 'View your invoices' })
   }
 
   it('renders the dash annual active subscription', function () {
@@ -169,14 +174,14 @@ describe('<ActiveSubscription />', function () {
     screen.getByText(subscription.recurly.totalLicenses)
   })
 
-  it('shows when trial ends and first payment collected', function () {
+  it('shows when trial ends and first payment collected and when subscription would become inactive if cancelled', function () {
     renderActiveSubscription(trialSubscription)
     screen.getByText('You’re on a free trial which ends on', { exact: false })
 
     const endDate = screen.getAllByText(
       trialSubscription.recurly.trialEndsAtFormatted!
     )
-    expect(endDate.length).to.equal(2)
+    expect(endDate.length).to.equal(3)
   })
 
   it('shows current discounts', function () {
@@ -202,7 +207,10 @@ describe('<ActiveSubscription />', function () {
     beforeEach(function () {
       this.locationStub = sinon.stub(useLocationModule, 'useLocation').returns({
         assign: assignStub,
+        replace: sinon.stub(),
         reload: reloadStub,
+        setHash: sinon.stub(),
+        toString: sinon.stub(),
       })
     })
 
@@ -213,14 +221,13 @@ describe('<ActiveSubscription />', function () {
 
     function showConfirmCancelUI() {
       const button = screen.getByRole('button', {
-        name: 'Cancel Your Subscription',
+        name: 'Cancel your subscription',
       })
       fireEvent.click(button)
     }
 
-    it('shows cancel UI and sends event', function () {
+    it('shows cancel UI', function () {
       renderActiveSubscription(annualActiveSubscription)
-      // before button clicked
       screen.getByText(
         'Your subscription will remain active until the end of your billing period',
         { exact: false }
@@ -232,6 +239,30 @@ describe('<ActiveSubscription />', function () {
         }
       )
       expect(dates.length).to.equal(2)
+      const button = screen.getByRole('button', {
+        name: 'Cancel your subscription',
+      })
+      expect(button).to.exist
+    })
+
+    it('shows cancel UI when still in a trial period', function () {
+      renderActiveSubscription(trialSubscription)
+      screen.getByText(
+        'Your subscription will remain active until the end of your trial period',
+        { exact: false }
+      )
+      const dates = screen.getAllByText(
+        trialSubscription.recurly.trialEndsAtFormatted!
+      )
+      expect(dates.length).to.equal(3)
+      const button = screen.getByRole('button', {
+        name: 'Cancel your subscription',
+      })
+      expect(button).to.exist
+    })
+
+    it('shows cancel prompt on button click and sends event', function () {
+      renderActiveSubscription(annualActiveSubscription)
 
       showConfirmCancelUI()
 
@@ -280,7 +311,7 @@ describe('<ActiveSubscription />', function () {
       })
     })
 
-    it('disables cancels subscription button after clicking and updates text', async function () {
+    it('disables cancels subscription button after clicking and shows loading spinner', async function () {
       renderActiveSubscription(annualActiveSubscription)
       showConfirmCancelUI()
       screen.getByRole('button', {
@@ -291,19 +322,24 @@ describe('<ActiveSubscription />', function () {
       })
       fireEvent.click(button)
 
-      const cancelButtton = screen.getByRole('button', {
-        name: 'Processing…',
+      const cancelButton = screen.getByRole('button', {
+        name: 'Loading',
       }) as HTMLButtonElement
-      expect(cancelButtton.disabled).to.be.true
+      expect(cancelButton.disabled).to.be.true
 
-      expect(screen.queryByText('Cancel my subscription')).to.be.null
+      const hiddenText = screen.getByText('Cancel my subscription')
+      expect(hiddenText.getAttribute('aria-hidden')).to.equal('true')
     })
 
     describe('extend trial', function () {
+      const canExtend: MetaTag = {
+        name: 'ol-userCanExtendTrial',
+        value: true,
+      }
       const cancelButtonText = 'No thanks, I still want to cancel'
       const extendTrialButtonText = 'I’ll take it!'
       it('shows alternate cancel subscription button text for cancel button and option to extend trial', function () {
-        renderActiveSubscription(trialCollaboratorSubscription)
+        renderActiveSubscription(trialCollaboratorSubscription, [canExtend])
         showConfirmCancelUI()
         screen.getByText('Have another', { exact: false })
         screen.getByText('14 days', { exact: false })
@@ -317,7 +353,7 @@ describe('<ActiveSubscription />', function () {
       })
 
       it('disables both buttons and updates text for when trial button clicked', function () {
-        renderActiveSubscription(trialCollaboratorSubscription)
+        renderActiveSubscription(trialCollaboratorSubscription, [canExtend])
         showConfirmCancelUI()
         const extendTrialButton = screen.getByRole('button', {
           name: extendTrialButtonText,
@@ -332,12 +368,12 @@ describe('<ActiveSubscription />', function () {
           name: cancelButtonText,
         })
         screen.getByRole('button', {
-          name: 'Processing…',
+          name: 'Loading',
         })
       })
 
       it('disables both buttons and updates text for when cancel button clicked', function () {
-        renderActiveSubscription(trialCollaboratorSubscription)
+        renderActiveSubscription(trialCollaboratorSubscription, [canExtend])
         showConfirmCancelUI()
         const cancelButtton = screen.getByRole('button', {
           name: cancelButtonText,
@@ -349,29 +385,15 @@ describe('<ActiveSubscription />', function () {
         expect(buttons[0].getAttribute('disabled')).to.equal('')
         expect(buttons[1].getAttribute('disabled')).to.equal('')
         screen.getByRole('button', {
-          name: 'Processing…',
+          name: 'Loading',
         })
         screen.getByRole('button', {
           name: extendTrialButtonText,
         })
       })
 
-      it('does not show option to extend trial when not a collaborator trial', function () {
-        const trialPlan = cloneDeep(trialCollaboratorSubscription)
-        trialPlan.plan.planCode = 'anotherplan'
-        renderActiveSubscription(trialPlan)
-        showConfirmCancelUI()
-        expect(
-          screen.queryByRole('button', {
-            name: extendTrialButtonText,
-          })
-        ).to.be.null
-      })
-
-      it('does not show option to extend trial when a collaborator trial but does not expire in 7 days', function () {
-        const trialPlan = cloneDeep(trialCollaboratorSubscription)
-        trialPlan.recurly.trial_ends_at = null
-        renderActiveSubscription(trialPlan)
+      it('does not show option to extend trial when user is not eligible', function () {
+        renderActiveSubscription(trialCollaboratorSubscription)
         showConfirmCancelUI()
         expect(
           screen.queryByRole('button', {
@@ -385,7 +407,7 @@ describe('<ActiveSubscription />', function () {
           status: 200,
         }
         fetchMock.put(extendTrialUrl, endPointResponse)
-        renderActiveSubscription(trialCollaboratorSubscription)
+        renderActiveSubscription(trialCollaboratorSubscription, [canExtend])
         showConfirmCancelUI()
         const extendTrialButton = screen.getByRole('button', {
           name: extendTrialButtonText,
@@ -434,7 +456,7 @@ describe('<ActiveSubscription />', function () {
           name: cancelButtonText,
         })
         screen.getByRole('button', {
-          name: 'Processing…',
+          name: 'Loading',
         })
       })
 
@@ -451,7 +473,7 @@ describe('<ActiveSubscription />', function () {
         expect(buttons[0].getAttribute('disabled')).to.equal('')
         expect(buttons[1].getAttribute('disabled')).to.equal('')
         screen.getByRole('button', {
-          name: 'Processing…',
+          name: 'Loading',
         })
         screen.getByRole('button', {
           name: downgradeButtonText,

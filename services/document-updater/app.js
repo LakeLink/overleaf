@@ -1,16 +1,13 @@
-const Metrics = require('@overleaf/metrics')
-Metrics.initialize('doc-updater')
+// Metrics must be initialized before importing anything else
+require('@overleaf/metrics/initialize')
 
+const Metrics = require('@overleaf/metrics')
 const express = require('express')
 const Settings = require('@overleaf/settings')
 const logger = require('@overleaf/logger')
 logger.initialize('document-updater')
 
 logger.logger.addSerializers(require('./app/js/LoggerSerializers'))
-
-if (Settings.sentry != null && Settings.sentry.dsn != null) {
-  logger.initializeErrorReporting(Settings.sentry.dsn)
-}
 
 const RedisManager = require('./app/js/RedisManager')
 const DispatchManager = require('./app/js/DispatchManager')
@@ -23,6 +20,7 @@ const async = require('async')
 const bodyParser = require('body-parser')
 
 Metrics.event_loop.monitor(logger, 100)
+Metrics.open_sockets.monitor()
 
 const app = express()
 app.use(bodyParser.json({ limit: Settings.maxJsonRequestSize }))
@@ -123,7 +121,24 @@ app.param('doc_id', (req, res, next, docId) => {
   }
 })
 
+// Record requests that come in after we've started shutting down - for investigation.
+app.use((req, res, next) => {
+  if (Settings.shuttingDown) {
+    logger.warn(
+      { req, timeSinceShutdown: Date.now() - Settings.shutDownTime },
+      'request received after shutting down'
+    )
+    // We don't want keep-alive connections to be kept open when the server is shutting down.
+    res.set('Connection', 'close')
+  }
+  next()
+})
+
 app.get('/project/:project_id/doc/:doc_id', HttpController.getDoc)
+app.get(
+  '/project/:project_id/doc/:doc_id/comment/:comment_id',
+  HttpController.getComment
+)
 app.get('/project/:project_id/doc/:doc_id/peek', HttpController.peekDoc)
 // temporarily keep the GET method for backwards compatibility
 app.get('/project/:project_id/doc', HttpController.getProjectDocsAndFlushIfOld)
@@ -134,6 +149,7 @@ app.post(
 )
 app.post('/project/:project_id/clearState', HttpController.clearProjectState)
 app.post('/project/:project_id/doc/:doc_id', HttpController.setDoc)
+app.post('/project/:project_id/doc/:doc_id/append', HttpController.appendToDoc)
 app.post(
   '/project/:project_id/doc/:doc_id/flush',
   HttpController.flushDocIfLoaded
@@ -156,12 +172,22 @@ app.post(
   '/project/:project_id/doc/:doc_id/change/accept',
   HttpController.acceptChanges
 )
+app.post(
+  '/project/:project_id/doc/:doc_id/comment/:comment_id/resolve',
+  HttpController.resolveComment
+)
+app.post(
+  '/project/:project_id/doc/:doc_id/comment/:comment_id/reopen',
+  HttpController.reopenComment
+)
 app.delete(
   '/project/:project_id/doc/:doc_id/comment/:comment_id',
   HttpController.deleteComment
 )
 
-app.get('/flush_all_projects', HttpController.flushAllProjects)
+app.post('/project/:project_id/block', HttpController.blockProject)
+app.post('/project/:project_id/unblock', HttpController.unblockProject)
+
 app.get('/flush_queued_projects', HttpController.flushQueuedProjects)
 
 app.get('/total', (req, res, next) => {
@@ -179,7 +205,7 @@ app.use((error, req, res, next) => {
   if (error instanceof Errors.NotFoundError) {
     return res.sendStatus(404)
   } else if (error instanceof Errors.OpRangeNotAvailableError) {
-    return res.sendStatus(422) // Unprocessable Entity
+    return res.status(422).json(error.info)
   } else if (error instanceof Errors.FileTooLargeError) {
     return res.sendStatus(413)
   } else if (error.statusCode === 413) {
@@ -192,11 +218,17 @@ app.use((error, req, res, next) => {
 
 const shutdownCleanly = signal => () => {
   logger.info({ signal }, 'received interrupt, cleaning up')
+  if (Settings.shuttingDown) {
+    logger.warn({ signal }, 'already shutting down, ignoring interrupt')
+    return
+  }
   Settings.shuttingDown = true
+  // record the time we started shutting down
+  Settings.shutDownTime = Date.now()
   setTimeout(() => {
     logger.info({ signal }, 'shutting down')
     process.exit()
-  }, 10000)
+  }, Settings.gracefulShutdownDelayInMs)
 }
 
 const watchForEvent = eventName => {
@@ -216,7 +248,7 @@ const port =
     Settings.api.documentupdater &&
     Settings.api.documentupdater.port) ||
   3003
-const host = Settings.internal.documentupdater.host || 'localhost'
+const host = Settings.internal.documentupdater.host || '127.0.0.1'
 
 if (!module.parent) {
   // Called directly

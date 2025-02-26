@@ -1,36 +1,44 @@
 const { Tag } = require('../../models/Tag')
-const { promisifyAll } = require('../../util/promises')
+const { callbackify } = require('@overleaf/promise-utils')
 
 const MAX_TAG_LENGTH = 50
 
-function getAllTags(userId, callback) {
-  Tag.find({ user_id: userId }, callback)
+async function getAllTags(userId) {
+  return Tag.find({ user_id: userId })
 }
 
-function createTag(userId, name, callback) {
-  if (!callback) {
-    callback = function () {}
-  }
+async function countTagsForProject(userId, projectId) {
+  return Tag.countDocuments({ user_id: userId, project_ids: projectId })
+}
+
+async function getTagsForProject(userId, projectId) {
+  return Tag.find({ user_id: userId, project_ids: projectId }, '-project_ids')
+}
+
+async function createTag(userId, name, color, options = {}) {
   if (name.length > MAX_TAG_LENGTH) {
-    return callback(new Error('Exceeded max tag length'))
-  }
-  Tag.create({ user_id: userId, name }, function (err, tag) {
-    // on duplicate key error return existing tag
-    if (err && err.code === 11000) {
-      return Tag.findOne({ user_id: userId, name }, callback)
+    if (options.truncate) {
+      name = name.slice(0, MAX_TAG_LENGTH)
+    } else {
+      throw new Error('Exceeded max tag length')
     }
-    callback(err, tag)
-  })
+  }
+  try {
+    return await Tag.create({ user_id: userId, name, color })
+  } catch (error) {
+    // on duplicate key error return existing tag
+    if (error && error.code === 11000) {
+      return Tag.findOne({ user_id: userId, name })
+    }
+    throw error
+  }
 }
 
-function renameTag(userId, tagId, name, callback) {
-  if (!callback) {
-    callback = function () {}
-  }
+async function renameTag(userId, tagId, name) {
   if (name.length > MAX_TAG_LENGTH) {
-    return callback(new Error('Exceeded max tag length'))
+    throw new Error('Exceeded max tag length')
   }
-  Tag.updateOne(
+  return Tag.updateOne(
     {
       _id: tagId,
       user_id: userId,
@@ -39,112 +47,121 @@ function renameTag(userId, tagId, name, callback) {
       $set: {
         name,
       },
-    },
-    callback
+    }
   )
 }
 
-function deleteTag(userId, tagId, callback) {
-  if (!callback) {
-    callback = function () {}
+async function editTag(userId, tagId, name, color) {
+  if (name.length > MAX_TAG_LENGTH) {
+    throw new Error('Exceeded max tag length')
   }
-  Tag.deleteOne(
+  return Tag.updateOne(
     {
       _id: tagId,
       user_id: userId,
     },
-    callback
+    {
+      $set: {
+        name,
+        color,
+      },
+    }
   )
 }
 
-// TODO: unused?
-function updateTagUserIds(oldUserId, newUserId, callback) {
-  if (!callback) {
-    callback = function () {}
-  }
-  const searchOps = { user_id: oldUserId }
-  const updateOperation = { $set: { user_id: newUserId } }
-  Tag.updateMany(searchOps, updateOperation, callback)
+async function deleteTag(userId, tagId) {
+  await Tag.deleteOne({
+    _id: tagId,
+    user_id: userId,
+  })
 }
 
-function removeProjectFromTag(userId, tagId, projectId, callback) {
-  if (!callback) {
-    callback = function () {}
-  }
+async function removeProjectFromTag(userId, tagId, projectId) {
   const searchOps = {
     _id: tagId,
     user_id: userId,
   }
   const deleteOperation = { $pull: { project_ids: projectId } }
-  Tag.updateOne(searchOps, deleteOperation, callback)
+  await Tag.updateOne(searchOps, deleteOperation)
 }
 
-function removeProjectsFromTag(userId, tagId, projectIds, callback) {
-  if (!callback) {
-    callback = function () {}
-  }
+async function removeProjectsFromTag(userId, tagId, projectIds) {
   const searchOps = {
     _id: tagId,
     user_id: userId,
   }
   const deleteOperation = { $pullAll: { project_ids: projectIds } }
-  Tag.updateOne(searchOps, deleteOperation, callback)
+  await Tag.updateOne(searchOps, deleteOperation)
 }
 
-function addProjectToTag(userId, tagId, projectId, callback) {
-  if (!callback) {
-    callback = function () {}
-  }
+async function addProjectToTag(userId, tagId, projectId) {
   const searchOps = {
     _id: tagId,
     user_id: userId,
   }
   const insertOperation = { $addToSet: { project_ids: projectId } }
-  Tag.findOneAndUpdate(searchOps, insertOperation, callback)
+  return Tag.findOneAndUpdate(searchOps, insertOperation)
 }
 
-function addProjectsToTag(userId, tagId, projectIds, callback) {
-  if (!callback) {
-    callback = function () {}
-  }
+async function addProjectsToTag(userId, tagId, projectIds) {
   const searchOps = {
     _id: tagId,
     user_id: userId,
   }
   const insertOperation = { $addToSet: { project_ids: { $each: projectIds } } }
-  Tag.findOneAndUpdate(searchOps, insertOperation, callback)
+  await Tag.findOneAndUpdate(searchOps, insertOperation)
 }
 
-function addProjectToTagName(userId, name, projectId, callback) {
-  if (!callback) {
-    callback = function () {}
-  }
+async function addProjectToTagName(userId, name, projectId) {
   const searchOps = {
     name,
     user_id: userId,
   }
   const insertOperation = { $addToSet: { project_ids: projectId } }
-  Tag.updateOne(searchOps, insertOperation, { upsert: true }, callback)
+  await Tag.updateOne(searchOps, insertOperation, { upsert: true })
 }
 
-function removeProjectFromAllTags(userId, projectId, callback) {
+async function removeProjectFromAllTags(userId, projectId) {
   const searchOps = { user_id: userId }
   const deleteOperation = { $pull: { project_ids: projectId } }
-  Tag.updateMany(searchOps, deleteOperation, callback)
+  await Tag.updateMany(searchOps, deleteOperation)
 }
 
-const TagsHandler = {
-  getAllTags,
-  createTag,
-  renameTag,
-  deleteTag,
-  updateTagUserIds,
-  addProjectToTag,
-  addProjectsToTag,
-  removeProjectFromTag,
-  removeProjectsFromTag,
-  addProjectToTagName,
-  removeProjectFromAllTags,
+async function addProjectToTags(userId, tagIds, projectId) {
+  const searchOps = { user_id: userId, _id: { $in: tagIds } }
+  const insertOperation = { $addToSet: { project_ids: projectId } }
+  await Tag.updateMany(searchOps, insertOperation)
 }
-TagsHandler.promises = promisifyAll(TagsHandler)
-module.exports = TagsHandler
+
+module.exports = {
+  getAllTags: callbackify(getAllTags),
+  countTagsForProject: callbackify(countTagsForProject),
+  getTagsForProject: callbackify(getTagsForProject),
+  createTag: callbackify(createTag),
+  renameTag: callbackify(renameTag),
+  editTag: callbackify(editTag),
+  deleteTag: callbackify(deleteTag),
+  addProjectToTag: callbackify(addProjectToTag),
+  addProjectsToTag: callbackify(addProjectsToTag),
+  addProjectToTags: callbackify(addProjectToTags),
+  removeProjectFromTag: callbackify(removeProjectFromTag),
+  removeProjectsFromTag: callbackify(removeProjectsFromTag),
+  addProjectToTagName: callbackify(addProjectToTagName),
+  removeProjectFromAllTags: callbackify(removeProjectFromAllTags),
+  promises: {
+    getAllTags,
+    countTagsForProject,
+    getTagsForProject,
+    createTag,
+    renameTag,
+    editTag,
+    deleteTag,
+    addProjectToTag,
+    addProjectsToTag,
+    addProjectToTags,
+    removeProjectFromTag,
+    removeProjectsFromTag,
+    addProjectToTagName,
+    removeProjectFromAllTags,
+  },
+}

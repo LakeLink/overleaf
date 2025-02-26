@@ -5,6 +5,9 @@ const settings = require('@overleaf/settings')
 // backward-compatible (can be instantiated with string as argument instead
 // of object)
 class BackwardCompatibleError extends OError {
+  /**
+   * @param {string | { message: string, info?: Object }} messageOrOptions
+   */
   constructor(messageOrOptions) {
     if (typeof messageOrOptions === 'string') {
       super(messageOrOptions)
@@ -37,6 +40,8 @@ class ForbiddenError extends BackwardCompatibleError {}
 class ServiceNotConfiguredError extends BackwardCompatibleError {}
 
 class TooManyRequestsError extends BackwardCompatibleError {}
+
+class DuplicateNameError extends OError {}
 
 class InvalidNameError extends BackwardCompatibleError {}
 
@@ -90,6 +95,87 @@ class SAMLEmailAffiliatedWithAnotherInstitutionError extends OError {
   }
 }
 
+class SAMLAuthenticationError extends OError {
+  get i18nKey() {
+    return 'saml_auth_error'
+  }
+}
+class SAMLAssertionAudienceMismatch extends SAMLAuthenticationError {}
+
+class SAMLAuthenticationRequiredError extends SAMLAuthenticationError {
+  get i18nKey() {
+    return 'saml_authentication_required_error'
+  }
+}
+
+class SAMLGroupSSOLoginIdentityMismatchError extends SAMLAuthenticationError {
+  get i18nKey() {
+    return 'saml_login_identity_mismatch_error'
+  }
+}
+
+class SAMLGroupSSOLoginIdentityNotFoundError extends SAMLAuthenticationError {
+  get i18nKey() {
+    return 'saml_login_identity_not_found_error'
+  }
+}
+
+class SAMLGroupSSODisabledError extends SAMLAuthenticationError {
+  get i18nKey() {
+    return 'saml_login_disabled_error'
+  }
+}
+
+class SAMLInvalidSignatureError extends SAMLAuthenticationError {
+  get i18nKey() {
+    return 'saml_invalid_signature_error'
+  }
+}
+
+class SAMLMissingSignatureError extends SAMLAuthenticationError {
+  get i18nKey() {
+    return 'saml_missing_signature_error'
+  }
+}
+
+class SAMLInvalidUserIdentifierError extends SAMLAuthenticationError {
+  get i18nKey() {
+    return 'saml_authentication_required_error'
+  }
+}
+
+class SAMLInvalidUserAttributeError extends SAMLAuthenticationError {
+  get i18nKey() {
+    return 'saml_authentication_required_error'
+  }
+}
+
+class SAMLMissingUserIdentifierError extends SAMLAuthenticationError {
+  get i18nKey() {
+    return 'saml_missing_user_attribute'
+  }
+}
+
+class SAMLInvalidResponseError extends SAMLAuthenticationError {}
+
+class SAMLResponseAlreadyProcessedError extends SAMLInvalidResponseError {
+  constructor() {
+    super('saml response already processed')
+  }
+}
+
+class SAMLLoginFailureError extends SAMLAuthenticationError {
+  get i18nKey() {
+    return 'saml_login_failure'
+  }
+}
+
+class SAMLEmailNotRecognizedError extends SAMLAuthenticationError {
+  get i18nKey() {
+    return 'saml_email_not_recognized'
+  }
+}
+
 class SAMLSessionDataMissing extends BackwardCompatibleError {
   constructor(arg) {
     super(arg)
@@ -123,6 +209,8 @@ class SAMLSessionDataMissing extends BackwardCompatibleError {
   }
 }
 
+class SAMLProviderRequesterError extends SAMLAuthenticationError {}
+
 class ThirdPartyIdentityExistsError extends BackwardCompatibleError {
   constructor(arg) {
     super(arg)
@@ -142,9 +230,17 @@ class ThirdPartyUserNotFoundError extends BackwardCompatibleError {
   }
 }
 
+class OutputFileFetchFailedError extends OError {}
+
 class SubscriptionAdminDeletionError extends OErrorV2CompatibleError {
   constructor(options) {
     super('subscription admins cannot be deleted', options)
+  }
+}
+
+class SubscriptionNotFoundError extends OErrorV2CompatibleError {
+  constructor(options) {
+    super('subscription not found', options)
   }
 }
 
@@ -180,9 +276,21 @@ class InvalidQueryError extends OErrorV2CompatibleError {
 
 class AffiliationError extends OError {}
 
+class InvalidEmailError extends OError {
+  get i18nKey() {
+    return 'invalid_email'
+  }
+}
+
 class InvalidInstitutionalEmailError extends OError {
   get i18nKey() {
     return 'invalid_institutional_email'
+  }
+}
+
+class NonDeletableEntityError extends OError {
+  get i18nKey() {
+    return 'non_deletable_entity'
   }
 }
 
@@ -193,6 +301,7 @@ module.exports = {
   ForbiddenError,
   ServiceNotConfiguredError,
   TooManyRequestsError,
+  DuplicateNameError,
   InvalidNameError,
   UnsupportedFileTypeError,
   FileTooLargeError,
@@ -204,20 +313,40 @@ module.exports = {
   EmailExistsError,
   InvalidError,
   NotInV2Error,
+  OutputFileFetchFailedError,
+  SAMLAssertionAudienceMismatch,
+  SAMLAuthenticationRequiredError,
   SAMLIdentityExistsError,
   SAMLAlreadyLinkedError,
   SAMLEmailNotAffiliatedError,
   SAMLEmailAffiliatedWithAnotherInstitutionError,
   SAMLSessionDataMissing,
+  SAMLAuthenticationError,
+  SAMLGroupSSOLoginIdentityMismatchError,
+  SAMLGroupSSOLoginIdentityNotFoundError,
+  SAMLGroupSSODisabledError,
+  SAMLInvalidUserAttributeError,
+  SAMLInvalidUserIdentifierError,
+  SAMLInvalidSignatureError,
+  SAMLMissingUserIdentifierError,
+  SAMLMissingSignatureError,
+  SAMLProviderRequesterError,
+  SAMLInvalidResponseError,
+  SAMLLoginFailureError,
+  SAMLEmailNotRecognizedError,
+  SAMLResponseAlreadyProcessedError,
   SLInV2Error,
   ThirdPartyIdentityExistsError,
   ThirdPartyUserNotFoundError,
   SubscriptionAdminDeletionError,
+  SubscriptionNotFoundError,
   ProjectNotFoundError,
   UserNotFoundError,
   UserNotCollaboratorError,
   DocHasRangesError,
   InvalidQueryError,
   AffiliationError,
+  InvalidEmailError,
   InvalidInstitutionalEmailError,
+  NonDeletableEntityError,
 }

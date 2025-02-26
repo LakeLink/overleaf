@@ -10,16 +10,16 @@ const { db, ObjectId } = require('./mongodb')
 const request = require('request')
 const async = require('async')
 const _ = require('lodash')
-const crypto = require('crypto')
+const crypto = require('node:crypto')
 const settings = require('@overleaf/settings')
 const { port } = settings.internal.docstore
 const logger = require('@overleaf/logger')
 
 module.exports = {
   check(callback) {
-    const docId = ObjectId()
-    const projectId = ObjectId(settings.docstore.healthCheck.project_id)
-    const url = `http://localhost:${port}/project/${projectId}/doc/${docId}`
+    const docId = new ObjectId()
+    const projectId = new ObjectId(settings.docstore.healthCheck.project_id)
+    const url = `http://127.0.0.1:${port}/project/${projectId}/doc/${docId}`
     const lines = [
       'smoke test - delete me',
       `${crypto.randomBytes(32).toString('hex')}`,
@@ -61,7 +61,6 @@ module.exports = {
         })
       },
       cb => db.docs.deleteOne({ _id: docId, project_id: projectId }, cb),
-      cb => db.docOps.deleteOne({ doc_id: docId }, cb),
     ]
     return async.series(jobs, callback)
   },

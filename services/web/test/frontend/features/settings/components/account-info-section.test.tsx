@@ -3,6 +3,7 @@ import { fireEvent, screen, render } from '@testing-library/react'
 import fetchMock from 'fetch-mock'
 import AccountInfoSection from '../../../../../frontend/js/features/settings/components/account-info-section'
 import { UserProvider } from '../../../../../frontend/js/shared/context/user-context'
+import getMeta from '@/utils/meta'
 
 function renderSectionWithUserProvider() {
   render(<AccountInfoSection />, {
@@ -12,13 +13,12 @@ function renderSectionWithUserProvider() {
 
 describe('<AccountInfoSection />', function () {
   beforeEach(function () {
-    window.metaAttributesCache = window.metaAttributesCache || new Map()
     window.metaAttributesCache.set('ol-user', {
       email: 'sherlock@holmes.co.uk',
       first_name: 'Sherlock',
       last_name: 'Holmes',
     })
-    window.metaAttributesCache.set('ol-ExposedSettings', {
+    Object.assign(getMeta('ol-ExposedSettings'), {
       hasAffiliationsFeature: false,
     })
     window.metaAttributesCache.set(
@@ -29,7 +29,6 @@ describe('<AccountInfoSection />', function () {
   })
 
   afterEach(function () {
-    window.metaAttributesCache = new Map()
     fetchMock.reset()
   })
 
@@ -40,10 +39,10 @@ describe('<AccountInfoSection />', function () {
     fireEvent.change(screen.getByLabelText('Email'), {
       target: { value: 'john@watson.co.uk' },
     })
-    fireEvent.change(screen.getByLabelText('First Name'), {
+    fireEvent.change(screen.getByLabelText('First name'), {
       target: { value: 'John' },
     })
-    fireEvent.change(screen.getByLabelText('Last Name'), {
+    fireEvent.change(screen.getByLabelText('Last name'), {
       target: { value: 'Watson' },
     })
     fireEvent.click(
@@ -144,7 +143,7 @@ describe('<AccountInfoSection />', function () {
   })
 
   it('hides email input', async function () {
-    window.metaAttributesCache.set('ol-ExposedSettings', {
+    Object.assign(getMeta('ol-ExposedSettings'), {
       hasAffiliationsFeature: true,
     })
     const updateMock = fetchMock.post('/user/settings', 200)
@@ -174,11 +173,11 @@ describe('<AccountInfoSection />', function () {
 
     renderSectionWithUserProvider()
     expect(screen.getByLabelText('Email')).to.have.property('readOnly', true)
-    expect(screen.getByLabelText('First Name')).to.have.property(
+    expect(screen.getByLabelText('First name')).to.have.property(
       'readOnly',
       false
     )
-    expect(screen.getByLabelText('Last Name')).to.have.property(
+    expect(screen.getByLabelText('Last name')).to.have.property(
       'readOnly',
       false
     )
@@ -202,11 +201,11 @@ describe('<AccountInfoSection />', function () {
 
     renderSectionWithUserProvider()
     expect(screen.getByLabelText('Email')).to.have.property('readOnly', false)
-    expect(screen.getByLabelText('First Name')).to.have.property(
+    expect(screen.getByLabelText('First name')).to.have.property(
       'readOnly',
       true
     )
-    expect(screen.getByLabelText('Last Name')).to.have.property(
+    expect(screen.getByLabelText('Last name')).to.have.property(
       'readOnly',
       true
     )

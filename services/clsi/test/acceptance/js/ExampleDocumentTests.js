@@ -13,20 +13,20 @@
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
  */
 const Client = require('./helpers/Client')
-const request = require('request')
-const fs = require('fs')
-const fsExtra = require('fs-extra')
-const ChildProcess = require('child_process')
+const fetch = require('node-fetch')
+const { pipeline } = require('node:stream')
+const fs = require('node:fs')
+const ChildProcess = require('node:child_process')
 const ClsiApp = require('./helpers/ClsiApp')
 const logger = require('@overleaf/logger')
-const Path = require('path')
+const Path = require('node:path')
 const fixturePath = path => {
   if (path.slice(0, 3) === 'tmp') {
     return '/tmp/clsi_acceptance_tests' + path.slice(3)
   }
   return Path.join(__dirname, '../fixtures/', path)
 }
-const process = require('process')
+const process = require('node:process')
 console.log(
   process.pid,
   process.ppid,
@@ -175,37 +175,41 @@ const comparePdf = function (projectId, exampleDir, callback) {
 }
 
 const downloadAndComparePdf = function (projectId, exampleDir, url, callback) {
-  if (callback == null) {
-    callback = function () {}
-  }
-  const writeStream = fs.createWriteStream(fixturePath(`tmp/${projectId}.pdf`))
-  request.get(url).pipe(writeStream)
-  console.log('writing file out', fixturePath(`tmp/${projectId}.pdf`))
-  return writeStream.on('close', () => {
-    return checkPdfInfo(`tmp/${projectId}.pdf`, (error, optimised) => {
-      if (error != null) {
-        throw error
+  fetch(url)
+    .then(res => {
+      if (!res.ok) {
+        return callback(new Error('non success response: ' + res.statusText))
       }
-      optimised.should.equal(true)
-      return comparePdf(projectId, exampleDir, callback)
+
+      const dest = fs.createWriteStream(fixturePath(`tmp/${projectId}.pdf`))
+      pipeline(res.body, dest, err => {
+        if (err) return callback(err)
+
+        checkPdfInfo(`tmp/${projectId}.pdf`, (err, optimised) => {
+          if (err) return callback(err)
+
+          optimised.should.equal(true)
+          comparePdf(projectId, exampleDir, callback)
+        })
+      })
     })
-  })
+    .catch(callback)
 }
 
-Client.runServer(4242, fixturePath('examples'))
-
 describe('Example Documents', function () {
+  Client.runFakeFilestoreService(fixturePath('examples'))
+
   before(function (done) {
     ClsiApp.ensureRunning(done)
   })
   before(function (done) {
-    fsExtra.remove(fixturePath('tmp'), done)
+    fs.rm(fixturePath('tmp'), { force: true, recursive: true }, done)
   })
   before(function (done) {
     fs.mkdir(fixturePath('tmp'), done)
   })
   after(function (done) {
-    fsExtra.remove(fixturePath('tmp'), done)
+    fs.rm(fixturePath('tmp'), { force: true, recursive: true }, done)
   })
 
   return Array.from(fs.readdirSync(fixturePath('examples'))).map(exampleDir =>
@@ -221,7 +225,6 @@ describe('Example Documents', function () {
             this.project_id,
             fixturePath('examples'),
             exampleDir,
-            4242,
             (error, res, body) => {
               if (
                 error ||
@@ -250,7 +253,6 @@ describe('Example Documents', function () {
             this.project_id,
             fixturePath('examples'),
             exampleDir,
-            4242,
             (error, res, body) => {
               if (
                 error ||

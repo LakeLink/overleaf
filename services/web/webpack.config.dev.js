@@ -7,11 +7,23 @@ process.env.REACT_REFRESH = '1'
 
 const base = require('./webpack.config')
 
+// if WEBPACK_ENTRYPOINTS is defined, remove any entrypoints that aren't included
+if (process.env.WEBPACK_ENTRYPOINTS) {
+  const entrypoints = new Set(process.env.WEBPACK_ENTRYPOINTS.split(/\s*,\s*/))
+  console.log(`Building entrypoints ${[...entrypoints].join(',')}`)
+  for (const entrypoint in base.entry) {
+    if (!entrypoints.has(entrypoint)) {
+      delete base.entry[entrypoint]
+    }
+  }
+}
+
 module.exports = merge(base, {
   mode: 'development',
 
   // Enable accurate source maps for dev
-  devtool: 'source-map',
+  devtool:
+    process.env.CSP_ENABLED === 'true' ? 'source-map' : 'eval-source-map',
 
   // Load entrypoints without contenthash in filename
   output: {
@@ -50,6 +62,7 @@ module.exports = merge(base, {
         /node_modules/, // default
         /source-editor/, // avoid crashing the source editor
       ],
+      overlay: false,
     }),
 
     // Disable React DevTools if DISABLE_REACT_DEVTOOLS is set to "true"
@@ -65,6 +78,7 @@ module.exports = merge(base, {
     port: parseInt(process.env.PORT, 10) || 3808,
     client: {
       webSocketURL: 'auto://0.0.0.0:0/ws',
+      overlay: process.env.DISABLE_WEBPACK_OVERLAY !== 'true',
     },
     hot: true,
     allowedHosts: '.dev-overleaf.com',
@@ -76,19 +90,7 @@ module.exports = merge(base, {
 
   // Customise output to the (node) console
   stats: {
-    colors: true, // Enable some coloured highlighting
-    // Hide some overly verbose output
-    performance: false, // Disable as code is uncompressed in dev mode
-    hash: false,
-    version: false,
-    chunks: false,
-    modules: false,
-    // Hide copied assets from output
-    excludeAssets: [
-      /^js\/ace/,
-      /^js\/libs/,
-      /^js\/cmaps/,
-      /^js\/standard_fonts/,
-    ],
+    preset: 'minimal',
+    colors: true,
   },
 })

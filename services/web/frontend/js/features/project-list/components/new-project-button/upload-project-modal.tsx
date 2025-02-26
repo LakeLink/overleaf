@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react'
-import { Button, Modal } from 'react-bootstrap'
+import OLModal, {
+  OLModalBody,
+  OLModalFooter,
+  OLModalHeader,
+  OLModalTitle,
+} from '@/features/ui/components/ol/ol-modal'
+import OLButton from '@/features/ui/components/ol/ol-button'
 import { useTranslation } from 'react-i18next'
 import Uppy from '@uppy/core'
-import { Dashboard, useUppy } from '@uppy/react'
+import { Dashboard } from '@uppy/react'
 import XHRUpload from '@uppy/xhr-upload'
-import AccessibleModal from '../../../../shared/components/accessible-modal'
 import getMeta from '../../../../utils/meta'
-import { ExposedSettings } from '../../../../../../types/exposed-settings'
 
 import '@uppy/core/dist/style.css'
 import '@uppy/dashboard/dist/style.css'
-import { useLocation } from '../../../../shared/hooks/use-location'
 
 type UploadResponse = {
   project_id: string
@@ -18,18 +21,17 @@ type UploadResponse = {
 
 type UploadProjectModalProps = {
   onHide: () => void
+  openProject: (projectId: string) => void
 }
 
-function UploadProjectModal({ onHide }: UploadProjectModalProps) {
+function UploadProjectModal({ onHide, openProject }: UploadProjectModalProps) {
   const { t } = useTranslation()
-  const { maxUploadSize } = getMeta('ol-ExposedSettings') as ExposedSettings
-  const [ableToUpload, setAbleToUpload] = useState(true)
-  const [correctfileAdded, setCorrectFileAdded] = useState(false)
-  const location = useLocation()
+  const { maxUploadSize, projectUploadTimeout } = getMeta('ol-ExposedSettings')
+  const [ableToUpload, setAbleToUpload] = useState(false)
 
-  const uppy: Uppy.Uppy<Uppy.StrictTypes> = useUppy(() => {
-    return Uppy({
-      allowMultipleUploads: false,
+  const [uppy] = useState(() => {
+    return new Uppy({
+      allowMultipleUploadBatches: false,
       restrictions: {
         maxNumberOfFiles: 1,
         maxFileSize: maxUploadSize,
@@ -39,11 +41,11 @@ function UploadProjectModal({ onHide }: UploadProjectModalProps) {
       .use(XHRUpload, {
         endpoint: '/project/new/upload',
         headers: {
-          'X-CSRF-TOKEN': window.csrfToken,
+          'X-CSRF-TOKEN': getMeta('ol-csrfToken'),
         },
         limit: 1,
         fieldName: 'qqfile', // "qqfile" is needed for our express multer middleware
-        timeout: 120000,
+        timeout: projectUploadTimeout,
       })
       .on('file-added', () => {
         // this function can be invoked multiple times depending on maxNumberOfFiles
@@ -51,13 +53,17 @@ function UploadProjectModal({ onHide }: UploadProjectModalProps) {
         // once if the correct file were added
         // if user dragged more files than the maxNumberOfFiles allow,
         // the rest of the files will appear on the 'restriction-failed' event callback
-        setCorrectFileAdded(true)
+        setAbleToUpload(true)
+      })
+      .on('upload-error', () => {
+        // refresh state so they can try uploading a new zip
+        setAbleToUpload(false)
       })
       .on('upload-success', async (file, response) => {
         const { project_id: projectId }: UploadResponse = response.body
 
         if (projectId) {
-          location.assign(`/project/${projectId}`)
+          openProject(projectId)
         }
       })
       .on('restriction-failed', () => {
@@ -68,30 +74,30 @@ function UploadProjectModal({ onHide }: UploadProjectModalProps) {
         // will be invoked once
         // 2. maxFileSize: if the uploaded file has size > maxFileSize, it will appear here
         // 3. allowedFileTypes: if the type is not .zip, it will also appear here
+
+        // reset state so they can try uploading a different file, etc
         setAbleToUpload(false)
       })
   })
 
   useEffect(() => {
-    if (ableToUpload && correctfileAdded) {
+    if (ableToUpload) {
       uppy.upload()
     }
-  }, [ableToUpload, correctfileAdded, uppy])
+  }, [ableToUpload, uppy])
 
   return (
-    <AccessibleModal
+    <OLModal
       show
       animation
       onHide={onHide}
       id="upload-project-modal"
       backdrop="static"
     >
-      <Modal.Header closeButton>
-        <Modal.Title componentClass="h3">
-          {t('upload_zipped_project')}
-        </Modal.Title>
-      </Modal.Header>
-      <Modal.Body>
+      <OLModalHeader closeButton>
+        <OLModalTitle as="h3">{t('upload_zipped_project')}</OLModalTitle>
+      </OLModalHeader>
+      <OLModalBody>
         <Dashboard
           uppy={uppy}
           proudlyDisplayPoweredByUppy={false}
@@ -107,12 +113,13 @@ function UploadProjectModal({ onHide }: UploadProjectModalProps) {
           }}
           className="project-list-upload-project-modal-uppy-dashboard"
         />
-      </Modal.Body>
-
-      <Modal.Footer>
-        <Button onClick={onHide}>{t('cancel')}</Button>
-      </Modal.Footer>
-    </AccessibleModal>
+      </OLModalBody>
+      <OLModalFooter>
+        <OLButton variant="secondary" onClick={onHide}>
+          {t('cancel')}
+        </OLButton>
+      </OLModalFooter>
+    </OLModal>
   )
 }
 

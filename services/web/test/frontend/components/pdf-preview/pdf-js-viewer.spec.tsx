@@ -1,8 +1,14 @@
+import '../../helpers/bootstrap-3'
 import { EditorProviders } from '../../helpers/editor-providers'
 import PdfJsViewer from '../../../../frontend/js/features/pdf-preview/components/pdf-js-viewer'
 import { mockScope } from './scope'
 import { getContainerEl } from 'cypress/react'
 import { unmountComponentAtNode } from 'react-dom'
+import { PdfPreviewProvider } from '../../../../frontend/js/features/pdf-preview/components/pdf-preview-provider'
+
+// Unicode directional isolates, added around placeables by @fluent/bundle/esm/resolver
+const FSI = '\u2068'
+const PDI = '\u2069'
 
 describe('<PdfJSViewer/>', function () {
   beforeEach(function () {
@@ -16,18 +22,20 @@ describe('<PdfJSViewer/>', function () {
 
     cy.mount(
       <EditorProviders scope={scope}>
-        <div className="pdf-viewer">
-          <PdfJsViewer url="/build/123/output.pdf" />
-        </div>
+        <PdfPreviewProvider>
+          <div className="pdf-viewer">
+            <PdfJsViewer url="/build/123/output.pdf" />
+          </div>
+        </PdfPreviewProvider>
       </EditorProviders>
     )
 
-    cy.waitForCompile()
+    cy.waitForCompile({ pdf: true })
 
-    cy.findByLabelText('Page 1')
-    cy.findByLabelText('Page 2')
-    cy.findByLabelText('Page 3')
-    cy.findByLabelText('Page 4').should('not.exist')
+    cy.findByRole('region', { name: `Page ${FSI}1${PDI}` })
+    cy.findByRole('region', { name: `Page ${FSI}2${PDI}` })
+    cy.findByRole('region', { name: `Page ${FSI}3${PDI}` })
+    cy.findByRole('region', { name: `Page ${FSI}4${PDI}` }).should('not.exist')
 
     cy.contains('Your Paper')
   })
@@ -39,15 +47,17 @@ describe('<PdfJSViewer/>', function () {
 
     cy.mount(
       <EditorProviders scope={scope}>
-        <div className="pdf-viewer">
-          <PdfJsViewer url="/build/123/output.pdf" />
-        </div>
+        <PdfPreviewProvider>
+          <div className="pdf-viewer">
+            <PdfJsViewer url="/build/123/output.pdf" />
+          </div>
+        </PdfPreviewProvider>
       </EditorProviders>
     )
 
     cy.waitForCompile()
 
-    cy.findByLabelText('Loading…')
+    cy.get('.page.loading')
   })
 
   it('can be unmounted while loading a document', function () {
@@ -57,9 +67,11 @@ describe('<PdfJSViewer/>', function () {
 
     cy.mount(
       <EditorProviders scope={scope}>
-        <div className="pdf-viewer">
-          <PdfJsViewer url="/build/123/output.pdf" />
-        </div>
+        <PdfPreviewProvider>
+          <div className="pdf-viewer">
+            <PdfJsViewer url="/build/123/output.pdf" />
+          </div>
+        </PdfPreviewProvider>
       </EditorProviders>
     )
 
@@ -75,15 +87,17 @@ describe('<PdfJSViewer/>', function () {
 
     cy.mount(
       <EditorProviders scope={scope}>
-        <div className="pdf-viewer">
-          <PdfJsViewer url="/build/123/output.pdf" />
-        </div>
+        <PdfPreviewProvider>
+          <div className="pdf-viewer">
+            <PdfJsViewer url="/build/123/output.pdf" />
+          </div>
+        </PdfPreviewProvider>
       </EditorProviders>
     )
 
-    cy.waitForCompile()
+    cy.waitForCompile({ pdf: true })
 
-    cy.findByLabelText('Page 1')
+    cy.findByRole('region', { name: `Page ${FSI}1${PDI}` })
 
     cy.then(() => unmountComponentAtNode(getContainerEl()))
   })

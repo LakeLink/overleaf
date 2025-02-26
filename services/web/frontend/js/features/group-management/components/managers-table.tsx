@@ -1,19 +1,16 @@
 import { useCallback, useState } from 'react'
 import { Button, Col, Form, FormControl, Row } from 'react-bootstrap'
 import { useTranslation } from 'react-i18next'
-import {
-  deleteJSON,
-  FetchError,
-  postJSON,
-} from '../../../infrastructure/fetch-json'
+import { deleteJSON, FetchError, postJSON } from '@/infrastructure/fetch-json'
 import MaterialIcon from '../../../shared/components/material-icon'
 import Tooltip from '../../../shared/components/tooltip'
 import getMeta from '../../../utils/meta'
 import { parseEmails } from '../utils/emails'
 import ErrorAlert, { APIError } from './error-alert'
-import GroupMemberRow from './group-member-row'
+import UserRow from './user-row'
 import useUserSelection from '../hooks/use-user-selection'
 import { User } from '../../../../../types/group-management/user'
+import { debugConsole } from '@/utils/debugging'
 
 type ManagersPaths = {
   addMember: string
@@ -45,7 +42,7 @@ export function ManagersTable({
     unselectAllUsers,
     selectUser,
     unselectUser,
-  } = useUserSelection(getMeta('ol-users', []))
+  } = useUserSelection(getMeta('ol-users') || [])
 
   const [emailString, setEmailString] = useState<string>('')
   const [inviteUserInflightCount, setInviteUserInflightCount] = useState(0)
@@ -77,7 +74,7 @@ export function ManagersTable({
             }
             setEmailString('')
           } catch (error: unknown) {
-            console.error(error)
+            debugConsole.error(error)
             setInviteError((error as FetchError)?.data?.error || {})
           }
           setInviteUserInflightCount(count => count - 1)
@@ -105,7 +102,7 @@ export function ManagersTable({
             setUsers(users => users.filter(u => u !== user))
             unselectUser(user)
           } catch (error: unknown) {
-            console.error(error)
+            debugConsole.error(error)
             setRemoveMemberError((error as FetchError)?.data?.error || {})
           }
           setRemoveMemberInflightCount(count => count - 1)
@@ -178,6 +175,7 @@ export function ManagersTable({
                         className="select-all"
                         id="select-all"
                         type="checkbox"
+                        autoComplete="off"
                         onChange={handleSelectAllClick}
                         checked={selectedUsers.length === users.length}
                       />
@@ -215,7 +213,7 @@ export function ManagersTable({
                   </li>
                 )}
                 {users.map(user => (
-                  <GroupMemberRow
+                  <UserRow
                     key={user.email}
                     user={user}
                     selectUser={selectUser}
@@ -227,7 +225,7 @@ export function ManagersTable({
             </div>
             <hr />
             <div>
-              <p className="small">{t('add_more_members')}</p>
+              <p className="small">{t('add_more_managers')}</p>
               <ErrorAlert error={inviteError} />
               <Form horizontal onSubmit={addManagers} className="form">
                 <Row>

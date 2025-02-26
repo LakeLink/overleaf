@@ -21,6 +21,16 @@
   text-shadow: none;
 }
 
+.light.close {
+  color: #000;
+}
+
+.dark.close {
+  color: #fff;
+  opacity: 1;
+  text-shadow: none;
+}
+
 .clickable {
   cursor: pointer;
 }
@@ -170,6 +180,41 @@
     & > a {
       color: #fff;
       text-decoration: underline;
+    }
+  }
+}
+
+.website-redesign {
+  .recaptcha-branding {
+    padding: @padding-sm 0;
+    text-align: left;
+    font-size: @font-size-extra-small;
+
+    & > a {
+      color: var(--green-50);
+
+      &:hover {
+        color: var(--green-60);
+      }
+      text-decoration: underline;
+    }
+  }
+
+  .light-design {
+    .recaptcha-branding {
+      padding: @padding-sm 0;
+      text-align: center; // This is different from above
+      font-size: @font-size-extra-small;
+
+      & > a {
+        color: var(--green-50);
+
+        &:hover {
+          color: var(--green-60);
+        }
+
+        text-decoration: underline;
+      }
     }
   }
 }

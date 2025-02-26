@@ -44,8 +44,21 @@ class RangesTracker {
       comments = []
     }
     this.comments = comments
-    this.setIdSeed(RangesTracker.generateIdSeed())
-    this.resetDirtyState()
+    this.track_changes = false
+    this.id_seed = RangesTracker.generateIdSeed()
+    this.id_increment = 0
+    this._dirtyState = {
+      comment: {
+        moved: {},
+        removed: {},
+        added: {},
+      },
+      change: {
+        moved: {},
+        removed: {},
+        added: {},
+      },
+    }
   }
 
   getIdSeed() {
@@ -126,46 +139,24 @@ class RangesTracker {
     return change
   }
 
-  getChanges(changeIds) {
-    const changesResponse = []
-    const idsMap = {}
-
-    for (const changeId of changeIds) {
-      idsMap[changeId] = true
-    }
-
-    for (const change of this.changes) {
-      if (idsMap[change.id]) {
-        delete idsMap[change.id]
-        changesResponse.push(change)
-      }
-    }
-
-    return changesResponse
+  getChanges(ids) {
+    const idSet = new Set(ids)
+    return this.changes.filter(change => idSet.has(change.id))
   }
 
   removeChangeId(changeId) {
-    const change = this.getChange(changeId)
-    if (change == null) {
-      return
-    }
-    this._removeChange(change)
+    this.removeChangeIds([changeId])
   }
 
-  removeChangeIds(changeToRemoveIds) {
-    if (changeToRemoveIds == null || changeToRemoveIds.length === 0) {
+  removeChangeIds(ids) {
+    if (ids == null || ids.length === 0) {
       return
     }
-    const removeChangeId = {}
-    for (const changeId of changeToRemoveIds) {
-      removeChangeId[changeId] = true
-    }
 
+    const idSet = new Set(ids)
     const remainingChanges = []
-
     for (const change of this.changes) {
-      if (removeChangeId[change.id]) {
-        delete removeChangeId[change.id]
+      if (idSet.has(change.id)) {
         this._markAsDirty(change, 'change', 'removed')
       } else {
         remainingChanges.push(change)
@@ -181,22 +172,14 @@ class RangesTracker {
       if (change.op.i != null) {
         content = text.slice(change.op.p, change.op.p + change.op.i.length)
         if (content !== change.op.i) {
-          throw new Error(
-            `Change (${JSON.stringify(
-              change
-            )}) doesn't match text (${JSON.stringify(content)})`
-          )
+          throw new Error('insertion does not match text in document')
         }
       }
     }
     for (const comment of this.comments) {
       content = text.slice(comment.op.p, comment.op.p + comment.op.c.length)
       if (content !== comment.op.c) {
-        throw new Error(
-          `Comment (${JSON.stringify(
-            comment
-          )}) doesn't match text (${JSON.stringify(content)})`
-        )
+        throw new Error('comment does not match text in document')
       }
     }
   }
@@ -323,13 +306,14 @@ class RangesTracker {
     const opLength = op.i.length
     const opEnd = op.p + opLength
     const undoing = !!op.u
+    const fixedRemoveChange = op.fixedRemoveChange
 
     let alreadyMerged = false
     let previousChange = null
     const movedChanges = []
     const removeChanges = []
     const newChanges = []
-
+    const trackedDeletesAtOpPosition = []
     for (let i = 0; i < this.changes.length; i++) {
       change = this.changes[i]
       const changeStart = change.op.p
@@ -340,13 +324,15 @@ class RangesTracker {
           change.op.p += opLength
           movedChanges.push(change)
         } else if (opStart === changeStart) {
-          // If we are undoing, then we want to cancel any existing delete ranges if we can.
-          // Check if the insert matches the start of the delete, and just remove it from the delete instead if so.
           if (
+            !alreadyMerged &&
             undoing &&
             change.op.d.length >= op.i.length &&
             change.op.d.slice(0, op.i.length) === op.i
           ) {
+            // If we are undoing, then we want to reject any existing tracked delete if we can.
+            // Check if the insert matches the start of the delete, and just
+            // remove it from the delete instead if so.
             change.op.d = change.op.d.slice(op.i.length)
             change.op.p += op.i.length
             if (change.op.d === '') {
@@ -355,9 +341,25 @@ class RangesTracker {
               movedChanges.push(change)
             }
             alreadyMerged = true
+
+            // Any tracked delete that came before this tracked delete
+            // rejection was moved after the incoming insert. Move them back
+            // so that they appear before the tracked delete rejection.
+            for (const trackedDelete of trackedDeletesAtOpPosition) {
+              trackedDelete.op.p -= opLength
+            }
           } else {
+            // We're not rejecting that tracked delete. Move it after the
+            // insert.
             change.op.p += opLength
             movedChanges.push(change)
+
+            // Keep track of tracked deletes that are at the same position as the
+            // insert. If we find a tracked delete to reject, we'll want to
+            // reposition them.
+            if (!alreadyMerged) {
+              trackedDeletesAtOpPosition.push(change)
+            }
           }
         }
       } else if (change.op.i != null) {
@@ -470,7 +472,11 @@ class RangesTracker {
     }
 
     for (change of removeChanges) {
-      this._removeChange(change)
+      if (fixedRemoveChange) {
+        this._removeChange(change)
+      } else {
+        this._brokenRemoveChange(change)
+      }
     }
 
     for (change of movedChanges) {
@@ -483,6 +489,7 @@ class RangesTracker {
     const opLength = op.d.length
     const opEnd = op.p + opLength
     const removeChanges = []
+    const fixedRemoveChange = op.fixedRemoveChange
     let movedChanges = []
 
     // We might end up modifying our delete op if it merges with existing deletes, or cancels out
@@ -610,7 +617,11 @@ class RangesTracker {
         movedChanges.push(change)
         op.d = '' // stop it being added
       } else {
-        this._removeChange(change)
+        if (fixedRemoveChange) {
+          this._removeChange(change)
+        } else {
+          this._brokenRemoveChange(change)
+        }
       }
     }
 
@@ -626,7 +637,11 @@ class RangesTracker {
       const results = this._scanAndMergeAdjacentUpdates()
       movedChanges = movedChanges.concat(results.movedChanges)
       for (const change of results.removeChanges) {
-        this._removeChange(change)
+        if (fixedRemoveChange) {
+          this._removeChange(change)
+        } else {
+          this._brokenRemoveChange(change)
+        }
         movedChanges = movedChanges.filter(c => c !== change)
       }
     }
@@ -637,9 +652,11 @@ class RangesTracker {
   }
 
   _addOp(op, metadata) {
+    // Don't take a reference to the existing op since we'll modify this in place with future changes
+    op = this._clone(op)
     const change = {
       id: this.newId(),
-      op: this._clone(op), // Don't take a reference to the existing op since we'll modify this in place with future changes
+      op,
       metadata: this._clone(metadata),
     }
     this.changes.push(change)
@@ -662,6 +679,11 @@ class RangesTracker {
   }
 
   _removeChange(change) {
+    this.changes = this.changes.filter(c => c !== change)
+    this._markAsDirty(change, 'change', 'removed')
+  }
+
+  _brokenRemoveChange(change) {
     this.changes = this.changes.filter(c => c.id !== change.id)
     this._markAsDirty(change, 'change', 'removed')
   }
@@ -695,11 +717,7 @@ class RangesTracker {
             modification.p + modification.d.length
           ) !== modification.d
         ) {
-          throw new Error(
-            `deleted content does not match. content: ${JSON.stringify(
-              content
-            )}; modification: ${JSON.stringify(modification)}`
-          )
+          throw new Error('deletion does not match text in document')
         }
         content =
           content.slice(0, modification.p) +
@@ -765,6 +783,16 @@ class RangesTracker {
 
   getDirtyState() {
     return this._dirtyState
+  }
+
+  getTrackedDeletesLength() {
+    let length = 0
+    for (const change of this.changes) {
+      if (change.op.d != null) {
+        length += change.op.d.length
+      }
+    }
+    return length
   }
 
   _markAsDirty(object, type, action) {

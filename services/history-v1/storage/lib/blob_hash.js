@@ -2,8 +2,9 @@
 'use strict'
 
 const BPromise = require('bluebird')
-const fs = BPromise.promisifyAll(require('fs'))
-const crypto = require('crypto')
+const fs = BPromise.promisifyAll(require('node:fs'))
+const crypto = require('node:crypto')
+const { pipeline } = require('node:stream')
 const assert = require('./assert')
 
 function getGitBlobHeader(byteLength) {
@@ -25,23 +26,24 @@ function getBlobHash(byteLength) {
  * @param  {stream.Readable} stream
  * @return {Promise.<string>} hexadecimal SHA-1 hash
  */
-exports.fromStream = BPromise.method(function blobHashFromStream(
-  byteLength,
-  stream
-) {
-  assert.integer(byteLength, 'blobHash: bad byteLength')
-  assert.object(stream, 'blobHash: bad stream')
+exports.fromStream = BPromise.method(
+  function blobHashFromStream(byteLength, stream) {
+    assert.integer(byteLength, 'blobHash: bad byteLength')
+    assert.object(stream, 'blobHash: bad stream')
 
-  const hash = getBlobHash(byteLength)
-  return new BPromise(function (resolve, reject) {
-    stream.on('end', function () {
-      hash.end()
-      resolve(hash.read())
+    const hash = getBlobHash(byteLength)
+    return new BPromise(function (resolve, reject) {
+      pipeline(stream, hash, function (err) {
+        if (err) {
+          reject(err)
+        } else {
+          hash.end()
+          resolve(hash.read())
+        }
+      })
     })
-    stream.on('error', reject)
-    stream.pipe(hash)
-  })
-})
+  }
+)
 
 /**
  * Compute the git blob hash for a blob with the given string content.

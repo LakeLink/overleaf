@@ -3,20 +3,28 @@ const sinon = require('sinon')
 const { expect } = require('chai')
 const PrivilegeLevels = require('../../../../app/src/Features/Authorization/PrivilegeLevels')
 const Errors = require('../../../../app/src/Features/Errors/Errors')
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 
 const MODULE_PATH =
   '../../../../app/src/Features/Collaborators/OwnershipTransferHandler'
 
 describe('OwnershipTransferHandler', function () {
   beforeEach(function () {
-    this.user = { _id: ObjectId(), email: 'owner@example.com' }
-    this.collaborator = { _id: ObjectId(), email: 'collaborator@example.com' }
+    this.user = { _id: new ObjectId(), email: 'owner@example.com' }
+    this.collaborator = {
+      _id: new ObjectId(),
+      email: 'collaborator@example.com',
+    }
+    this.readOnlyCollaborator = {
+      _id: new ObjectId(),
+      email: 'readonly@example.com',
+    }
     this.project = {
-      _id: ObjectId(),
+      _id: new ObjectId(),
       name: 'project',
       owner_ref: this.user._id,
       collaberator_refs: [this.collaborator._id],
+      readOnly_refs: [this.readOnlyCollaborator._id],
     }
     this.ProjectGetter = {
       promises: {
@@ -71,7 +79,8 @@ describe('OwnershipTransferHandler', function () {
         '../Email/EmailHandler': this.EmailHandler,
         './CollaboratorsHandler': this.CollaboratorsHandler,
         '../Analytics/AnalyticsManager': {
-          recordEventForUser: (this.recordEventForUser = sinon.stub()),
+          recordEventForUserInBackground: (this.recordEventForUserInBackground =
+            sinon.stub()),
         },
       },
     })
@@ -85,6 +94,9 @@ describe('OwnershipTransferHandler', function () {
       this.UserGetter.promises.getUser
         .withArgs(this.collaborator._id)
         .resolves(this.collaborator)
+      this.UserGetter.promises.getUser
+        .withArgs(this.readOnlyCollaborator._id)
+        .resolves(this.readOnlyCollaborator)
     })
 
     it("should return a not found error if the project can't be found", async function () {
@@ -126,6 +138,32 @@ describe('OwnershipTransferHandler', function () {
       expect(this.ProjectModel.updateOne).to.have.been.calledWith(
         { _id: this.project._id },
         sinon.match({ $set: { owner_ref: this.collaborator._id } })
+      )
+    })
+
+    it('should transfer ownership of the project to a read-only collaborator', async function () {
+      await this.handler.promises.transferOwnership(
+        this.project._id,
+        this.readOnlyCollaborator._id
+      )
+      expect(this.ProjectModel.updateOne).to.have.been.calledWith(
+        { _id: this.project._id },
+        sinon.match({ $set: { owner_ref: this.readOnlyCollaborator._id } })
+      )
+    })
+
+    it('gives old owner read-only permissions if new owner was previously a viewer', async function () {
+      await this.handler.promises.transferOwnership(
+        this.project._id,
+        this.readOnlyCollaborator._id
+      )
+      expect(
+        this.CollaboratorsHandler.promises.addUserIdToProject
+      ).to.have.been.calledWith(
+        this.project._id,
+        this.readOnlyCollaborator._id,
+        this.user._id,
+        PrivilegeLevels.READ_ONLY
       )
     })
 
@@ -195,14 +233,23 @@ describe('OwnershipTransferHandler', function () {
       )
     })
 
+    it('should not send an email notification with the skipEmails option', async function () {
+      await this.handler.promises.transferOwnership(
+        this.project._id,
+        this.collaborator._id,
+        { skipEmails: true }
+      )
+      expect(this.EmailHandler.promises.sendEmail).not.to.have.been.called
+    })
+
     it('should track the change in BigQuery', async function () {
-      const sessionUserId = ObjectId()
+      const sessionUserId = new ObjectId()
       await this.handler.promises.transferOwnership(
         this.project._id,
         this.collaborator._id,
         { sessionUserId }
       )
-      expect(this.recordEventForUser).to.have.been.calledWith(
+      expect(this.recordEventForUserInBackground).to.have.been.calledWith(
         this.user._id,
         'project-ownership-transfer',
         {
@@ -213,7 +260,7 @@ describe('OwnershipTransferHandler', function () {
     })
 
     it('should write an entry in the audit log', async function () {
-      const sessionUserId = ObjectId()
+      const sessionUserId = new ObjectId()
       await this.handler.promises.transferOwnership(
         this.project._id,
         this.collaborator._id,
@@ -225,6 +272,7 @@ describe('OwnershipTransferHandler', function () {
         this.project._id,
         'transfer-ownership',
         sessionUserId,
+        '', // IP address
         {
           previousOwnerId: this.user._id,
           newOwnerId: this.collaborator._id,
@@ -234,6 +282,7 @@ describe('OwnershipTransferHandler', function () {
 
     it('should decline to transfer ownership to a non-collaborator', async function () {
       this.project.collaberator_refs = []
+      this.project.readOnly_refs = []
       await expect(
         this.handler.promises.transferOwnership(
           this.project._id,

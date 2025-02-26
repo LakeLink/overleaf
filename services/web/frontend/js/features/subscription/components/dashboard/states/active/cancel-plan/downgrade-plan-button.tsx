@@ -2,19 +2,18 @@ import { useTranslation } from 'react-i18next'
 import { Plan } from '../../../../../../../../../types/subscription/plan'
 import { postJSON } from '../../../../../../../infrastructure/fetch-json'
 import { subscriptionUpdateUrl } from '../../../../../data/subscription-url'
-import ActionButtonText from '../../../action-button-text'
 import { useLocation } from '../../../../../../../shared/hooks/use-location'
+import { debugConsole } from '@/utils/debugging'
+import OLButton from '@/features/ui/components/ol/ol-button'
 
 export default function DowngradePlanButton({
   isButtonDisabled,
-  isLoadingSecondaryAction,
-  isSuccessSecondaryAction,
+  isLoading,
   planToDowngradeTo,
   runAsyncSecondaryAction,
 }: {
   isButtonDisabled: boolean
-  isLoadingSecondaryAction: boolean
-  isSuccessSecondaryAction: boolean
+  isLoading: boolean
   planToDowngradeTo: Plan
   runAsyncSecondaryAction: (promise: Promise<unknown>) => Promise<unknown>
 }) {
@@ -31,22 +30,21 @@ export default function DowngradePlanButton({
       )
       location.reload()
     } catch (e) {
-      console.error(e)
+      debugConsole.error(e)
     }
   }
 
   return (
-    <>
-      <button
-        className="btn btn-primary"
-        onClick={handleDowngradePlan}
-        disabled={isButtonDisabled}
-      >
-        <ActionButtonText
-          inflight={isLoadingSecondaryAction || isSuccessSecondaryAction}
-          buttonText={buttonText}
-        />
-      </button>
-    </>
+    <OLButton
+      variant="primary"
+      onClick={handleDowngradePlan}
+      disabled={isButtonDisabled}
+      isLoading={isLoading}
+      bs3Props={{
+        loading: isLoading ? t('processing_uppercase') + '…' : buttonText,
+      }}
+    >
+      {buttonText}
+    </OLButton>
   )
 }

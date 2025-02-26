@@ -1,4 +1,4 @@
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 const EmailHandler = require('../Email/EmailHandler')
 const Errors = require('../Errors/Errors')
 const InstitutionsAPI = require('../Institutions/InstitutionsAPI')
@@ -10,7 +10,7 @@ const UserGetter = require('../User/UserGetter')
 const UserUpdater = require('../User/UserUpdater')
 const logger = require('@overleaf/logger')
 const { User } = require('../../models/User')
-const { promiseMapWithLimit } = require('../../util/promises')
+const { promiseMapWithLimit } = require('@overleaf/promise-utils')
 
 async function _addAuditLogEntry(operation, userId, auditLog, extraInfo) {
   await UserAuditLogHandler.promises.addEntry(
@@ -24,7 +24,7 @@ async function _addAuditLogEntry(operation, userId, auditLog, extraInfo) {
 
 async function _ensureCanAddIdentifier(userId, institutionEmail, providerId) {
   const userWithProvider = await UserGetter.promises.getUser(
-    { _id: ObjectId(userId), 'samlIdentifiers.providerId': providerId },
+    { _id: new ObjectId(userId), 'samlIdentifiers.providerId': providerId },
     { _id: 1 }
   )
 
@@ -32,9 +32,8 @@ async function _ensureCanAddIdentifier(userId, institutionEmail, providerId) {
     throw new Errors.SAMLAlreadyLinkedError()
   }
 
-  const userWithEmail = await UserGetter.promises.getUserByAnyEmail(
-    institutionEmail
-  )
+  const userWithEmail =
+    await UserGetter.promises.getUserByAnyEmail(institutionEmail)
 
   if (!userWithEmail) {
     // email doesn't exist; all good
@@ -157,9 +156,7 @@ async function _addInstitutionEmail(userId, email, providerId, auditLog) {
     throw new Errors.NotFoundError('user not found')
   }
   const emailAlreadyAssociated = user.emails.find(e => e.email === email)
-  if (emailAlreadyAssociated && emailAlreadyAssociated.confirmedAt) {
-    await UserUpdater.promises.updateUser(query, update)
-  } else if (emailAlreadyAssociated) {
+  if (emailAlreadyAssociated) {
     await UserUpdater.promises.updateUser(query, update)
   } else {
     await UserUpdater.promises.addEmailAddress(

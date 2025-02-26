@@ -1,16 +1,12 @@
+import '../../helpers/bootstrap-3'
 import { EditorProviders } from '../../helpers/editor-providers'
 import PdfPreviewHybridToolbar from '../../../../frontend/js/features/pdf-preview/components/pdf-preview-hybrid-toolbar'
 import { testDetachChannel } from '../../helpers/detach-channel'
 
 describe('<PdfPreviewHybridToolbar/>', function () {
   beforeEach(function () {
-    window.metaAttributesCache = new Map()
     window.metaAttributesCache.set('ol-preventCompileOnLoad', true)
     cy.interceptEvents()
-  })
-
-  afterEach(function () {
-    window.metaAttributesCache = new Map()
   })
 
   it('shows normal mode', function () {
@@ -26,7 +22,7 @@ describe('<PdfPreviewHybridToolbar/>', function () {
   describe('orphan mode', function () {
     it('shows connecting message  on load', function () {
       cy.window().then(win => {
-        win.metaAttributesCache = new Map([['ol-detachRole', 'detached']])
+        win.metaAttributesCache.set('ol-detachRole', 'detached')
       })
 
       cy.mount(
@@ -40,7 +36,7 @@ describe('<PdfPreviewHybridToolbar/>', function () {
 
     it('shows compile UI when connected', function () {
       cy.window().then(win => {
-        win.metaAttributesCache = new Map([['ol-detachRole', 'detached']])
+        win.metaAttributesCache.set('ol-detachRole', 'detached')
       })
 
       cy.mount(
@@ -61,7 +57,7 @@ describe('<PdfPreviewHybridToolbar/>', function () {
 
     it('shows connecting message when disconnected', function () {
       cy.window().then(win => {
-        win.metaAttributesCache = new Map([['ol-detachRole', 'detached']])
+        win.metaAttributesCache.set('ol-detachRole', 'detached')
       })
 
       cy.mount(
@@ -86,7 +82,7 @@ describe('<PdfPreviewHybridToolbar/>', function () {
 
     it('shows redirect button after timeout', function () {
       cy.window().then(win => {
-        win.metaAttributesCache = new Map([['ol-detachRole', 'detached']])
+        win.metaAttributesCache.set('ol-detachRole', 'detached')
       })
 
       cy.clock()

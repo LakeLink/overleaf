@@ -1,8 +1,13 @@
-import localStorage from '../../../../frontend/js/infrastructure/local-storage'
+import '../../helpers/bootstrap-3'
+import localStorage from '@/infrastructure/local-storage'
 import PdfPreview from '../../../../frontend/js/features/pdf-preview/components/pdf-preview'
 import { EditorProviders } from '../../helpers/editor-providers'
 import { mockScope } from './scope'
-import { useLayoutContext } from '../../../../frontend/js/shared/context/layout-context'
+import {
+  IdeLayout,
+  IdeView,
+  useLayoutContext,
+} from '../../../../frontend/js/shared/context/layout-context'
 import { FC, useEffect } from 'react'
 
 const storeAndFireEvent = (win: typeof window, key: string, value: unknown) => {
@@ -10,7 +15,10 @@ const storeAndFireEvent = (win: typeof window, key: string, value: unknown) => {
   win.dispatchEvent(new StorageEvent('storage', { key }))
 }
 
-const Layout: FC<{ layout: string; view?: string }> = ({ layout, view }) => {
+const Layout: FC<{ layout: IdeLayout; view?: IdeView }> = ({
+  layout,
+  view,
+}) => {
   const { changeLayout } = useLayoutContext()
 
   useEffect(() => {
@@ -23,11 +31,11 @@ const Layout: FC<{ layout: string; view?: string }> = ({ layout, view }) => {
 describe('<PdfPreview/>', function () {
   beforeEach(function () {
     window.metaAttributesCache.set('ol-preventCompileOnLoad', true)
+    window.metaAttributesCache.set(
+      'ol-compilesUserContentDomain',
+      'https://compiles-user.dev-overleaf.com'
+    )
     cy.interceptEvents()
-  })
-
-  afterEach(function () {
-    window.metaAttributesCache = new Map()
   })
 
   it('renders the PDF preview', function () {
@@ -110,25 +118,23 @@ describe('<PdfPreview/>', function () {
         )
 
         // start compiling
-        cy.findByRole('button', { name: 'Recompile' })
-          .click()
-          .then(() => {
-            cy.findByRole('button', { name: 'Compiling…' })
+        cy.findByRole('button', { name: 'Recompile' }).click()
 
-            // trigger a recompile
-            cy.window().then(win => {
-              win.dispatchEvent(new CustomEvent('pdf:recompile'))
-            })
+        cy.findByRole('button', { name: 'Compiling…' }).then(() => {
+          // trigger a recompile
+          cy.window().then(win => {
+            win.dispatchEvent(new CustomEvent('pdf:recompile'))
+          })
 
-            // finish the original compile
-            resolveDeferredCompile()
+          // finish the original compile
+          resolveDeferredCompile()
 
-            // wait for the original compile to finish
-            cy.waitForCompile({ pdf: true })
-
+          // wait for the original compile to finish
+          cy.waitForCompile().then(() => {
             // NOTE: difficult to assert that a second request won't be sent, at some point
             expect(counter).to.equal(1)
           })
+        })
       }
     )
   })
@@ -226,12 +232,12 @@ describe('<PdfPreview/>', function () {
 
     const scope = mockScope()
     // enable linting in the editor
-    scope.settings.syntaxValidation = true
+    const userSettings = { syntaxValidation: true }
     // mock a linting error
     scope.hasLintingError = true
 
     cy.mount(
-      <EditorProviders scope={scope}>
+      <EditorProviders scope={scope} userSettings={userSettings}>
         <div className="pdf-viewer">
           <PdfPreview />
         </div>

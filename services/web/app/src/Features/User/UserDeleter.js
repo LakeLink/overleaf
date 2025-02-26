@@ -12,9 +12,12 @@ const SubscriptionUpdater = require('../Subscription/SubscriptionUpdater')
 const SubscriptionLocator = require('../Subscription/SubscriptionLocator')
 const UserMembershipsHandler = require('../UserMembership/UserMembershipsHandler')
 const UserSessionsManager = require('./UserSessionsManager')
+const UserAuditLogHandler = require('./UserAuditLogHandler')
 const InstitutionsAPI = require('../Institutions/InstitutionsAPI')
 const Modules = require('../../infrastructure/Modules')
 const Errors = require('../Errors/Errors')
+const OnboardingDataCollectionManager = require('../OnboardingDataCollection/OnboardingDataCollectionManager')
+const EmailHandler = require('../Email/EmailHandler')
 
 module.exports = {
   deleteUser: callbackify(deleteUser),
@@ -32,7 +35,7 @@ module.exports = {
   },
 }
 
-async function deleteUser(userId, options = {}) {
+async function deleteUser(userId, options) {
   if (!userId) {
     logger.warn('user_id is null when trying to delete user')
     throw new Error('no user_id')
@@ -45,8 +48,15 @@ async function deleteUser(userId, options = {}) {
     await ensureCanDeleteUser(user)
     await _cleanupUser(user)
     await Modules.promises.hooks.fire('deleteUser', userId)
+    await UserAuditLogHandler.promises.addEntry(
+      userId,
+      'delete-account',
+      options.deleterUser ? options.deleterUser._id : userId,
+      options.ipAddress
+    )
     await _createDeletedUser(user, options)
     await ProjectDeleter.promises.deleteUsersProjects(user._id)
+    await _sendDeleteEmail(user, options.force)
     await deleteMongoUser(user._id)
   } catch (error) {
     logger.warn({ error, userId }, 'something went wrong deleting the user')
@@ -72,6 +82,7 @@ async function expireDeletedUser(userId) {
   }).exec()
 
   await Feedback.deleteMany({ userId }).exec()
+  await OnboardingDataCollectionManager.deleteOnboardingDataCollection(userId)
 
   deletedUser.user = undefined
   deletedUser.deleterData.deleterIpAddress = undefined
@@ -101,11 +112,30 @@ async function expireDeletedUsersAfterDuration() {
 }
 
 async function ensureCanDeleteUser(user) {
-  const subscription = await SubscriptionLocator.promises.getUsersSubscription(
-    user
-  )
+  const subscription =
+    await SubscriptionLocator.promises.getUsersSubscription(user)
   if (subscription) {
     throw new Errors.SubscriptionAdminDeletionError({})
+  }
+}
+
+async function _sendDeleteEmail(user, force) {
+  const emailOptions = {
+    to: user.email,
+    action: 'account deleted',
+    actionDescribed: 'your Overleaf account was deleted',
+  }
+  try {
+    await EmailHandler.promises.sendEmail('securityAlert', emailOptions)
+  } catch (error) {
+    if (force) {
+      logger.error(
+        { error },
+        'error sending account deletion email notification'
+      )
+    } else {
+      throw error
+    }
   }
 }
 
@@ -133,10 +163,14 @@ async function _createDeletedUser(user, options) {
 }
 
 async function _cleanupUser(user) {
-  await UserSessionsManager.promises.revokeAllUserSessions(user._id, [])
+  await UserSessionsManager.promises.removeSessionsFromRedis(user)
   await NewsletterManager.promises.unsubscribe(user, { delete: true })
   await SubscriptionHandler.promises.cancelSubscription(user)
   await InstitutionsAPI.promises.deleteAffiliations(user._id)
   await SubscriptionUpdater.promises.removeUserFromAllGroups(user._id)
   await UserMembershipsHandler.promises.removeUserFromAllEntities(user._id)
+  await Modules.promises.hooks.fire('cleanupPersonalAccessTokens', user._id, [
+    'collabratec',
+    'git_bridge',
+  ])
 }

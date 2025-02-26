@@ -1,8 +1,8 @@
 import { memo, useCallback, useState } from 'react'
-import { MenuItem } from 'react-bootstrap'
 import { useTranslation } from 'react-i18next'
 import { useProjectListContext } from '../../../../context/project-list-context'
 import useIsMounted from '../../../../../../shared/hooks/use-is-mounted'
+import OLDropdownMenuItem from '@/features/ui/components/ol/ol-dropdown-menu-item'
 import RenameProjectModal from '../../../modals/rename-project-modal'
 
 function RenameProjectMenuItem() {
@@ -21,15 +21,26 @@ function RenameProjectMenuItem() {
     }
   }, [isMounted])
 
-  if (selectedProjects.length !== 1) return null
+  if (selectedProjects.length !== 1) {
+    return null
+  }
+
+  const [selectedProject] = selectedProjects
+
+  // only show Rename if the current user is the project owner
+  if (selectedProject.accessLevel !== 'owner') {
+    return null
+  }
 
   return (
     <>
-      <MenuItem onClick={handleOpenModal}>{t('rename')}</MenuItem>
+      <OLDropdownMenuItem onClick={handleOpenModal} as="button" tabIndex={-1}>
+        {t('rename')}
+      </OLDropdownMenuItem>
       <RenameProjectModal
         handleCloseModal={handleCloseModal}
         showModal={showModal}
-        project={selectedProjects[0]}
+        project={selectedProject}
       />
     </>
   )

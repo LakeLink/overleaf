@@ -1,84 +1,12 @@
 /* eslint-disable no-console */
-const os = require('os')
+
 const ExpressCompression = require('compression')
 const promClient = require('prom-client')
 const promWrapper = require('./prom_wrapper')
-const tracing = require('./tracing')
 
-const DEFAULT_APP_NAME = 'unknown'
-
-const { collectDefaultMetrics } = promWrapper
 const destructors = []
 
 require('./uv_threadpool_size')
-
-/**
- * Configure the metrics module
- */
-function configure(opts = {}) {
-  const appName = opts.appName || DEFAULT_APP_NAME
-  const hostname = os.hostname()
-  promClient.register.setDefaultLabels({ app: appName, host: hostname })
-  if (opts.ttlInMinutes) {
-    promWrapper.ttlInMinutes = opts.ttlInMinutes
-  }
-}
-
-let initialized = false
-
-/**
- * Configure the metrics module and start the default metrics collectors and
- * profiling agents.
- */
-function initialize(appName, opts = {}) {
-  if (initialized) {
-    return
-  }
-  appName = appName || DEFAULT_APP_NAME
-  if (tracing.tracingEnabled()) {
-    tracing.initialize(appName)
-  }
-  configure({ ...opts, appName })
-  collectDefaultMetrics({ timeout: 5000, prefix: '' })
-  promWrapper.setupSweeping()
-
-  console.log(`ENABLE_TRACE_AGENT set to ${process.env.ENABLE_TRACE_AGENT}`)
-  if (process.env.ENABLE_TRACE_AGENT === 'true') {
-    console.log('starting google trace agent')
-    const traceAgent = require('@google-cloud/trace-agent')
-
-    const traceOpts = { ignoreUrls: [/^\/status/, /^\/health_check/] }
-    traceAgent.start(traceOpts)
-  }
-
-  console.log(`ENABLE_DEBUG_AGENT set to ${process.env.ENABLE_DEBUG_AGENT}`)
-  if (process.env.ENABLE_DEBUG_AGENT === 'true') {
-    console.log('starting google debug agent')
-    const debugAgent = require('@google-cloud/debug-agent')
-    debugAgent.start({
-      allowExpressions: true,
-      serviceContext: {
-        service: appName,
-        version: process.env.BUILD_VERSION,
-      },
-    })
-  }
-
-  console.log(`ENABLE_PROFILE_AGENT set to ${process.env.ENABLE_PROFILE_AGENT}`)
-  if (process.env.ENABLE_PROFILE_AGENT === 'true') {
-    console.log('starting google profile agent')
-    const profiler = require('@google-cloud/profiler')
-    profiler.start({
-      serviceContext: {
-        service: appName,
-        version: process.env.BUILD_VERSION,
-      },
-    })
-  }
-
-  inc('process_startup')
-  initialized = true
-}
 
 function registerDestructor(func) {
   destructors.push(func)
@@ -169,7 +97,7 @@ function histogram(key, value, buckets, labels = {}) {
 }
 
 class Timer {
-  constructor(key, sampleRate = 1, labels = {}, buckets) {
+  constructor(key, sampleRate = 1, labels = {}, buckets = undefined) {
     if (typeof sampleRate === 'object') {
       // called with (key, labels, buckets)
       if (arguments.length === 3) {
@@ -193,12 +121,13 @@ class Timer {
     this.buckets = buckets
   }
 
-  done() {
+  // any labels passed into the done method override labels from constructor
+  done(labels = {}) {
     const timeSpan = new Date() - this.start
     if (this.buckets) {
-      histogram(this.key, timeSpan, this.buckets, this.labels)
+      histogram(this.key, timeSpan, this.buckets, { ...this.labels, ...labels })
     } else {
-      timing(this.key, timeSpan, this.sampleRate, this.labels)
+      timing(this.key, timeSpan, this.sampleRate, { ...this.labels, ...labels })
     }
     return timeSpan
   }
@@ -228,8 +157,6 @@ function close() {
   }
 }
 
-module.exports.configure = configure
-module.exports.initialize = initialize
 module.exports.registerDestructor = registerDestructor
 module.exports.injectMetricsRoute = injectMetricsRoute
 module.exports.buildPromKey = buildPromKey
@@ -249,7 +176,7 @@ module.exports.register = promWrapper.registry
 
 module.exports.http = require('./http')
 module.exports.open_sockets = require('./open_sockets')
+module.exports.leaked_sockets = require('./leaked_sockets')
 module.exports.event_loop = require('./event_loop')
 module.exports.memory = require('./memory')
 module.exports.mongodb = require('./mongodb')
-module.exports.timeAsyncMethod = require('./timeAsyncMethod')

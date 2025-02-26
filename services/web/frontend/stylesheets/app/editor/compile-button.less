@@ -13,30 +13,20 @@
   margin-left: 6px;
 }
 
-.detach-compile-button-container when (@is-new-css = false) {
-  margin-right: -5px;
-}
-
-// because 2px border on :active state
-.detach-compile-button-container when (@is-new-css = true) {
-  margin-right: -3px;
+// only apply for legacy editor
+.toolbar-pdf-right {
+  // because 2px border on :active state
+  .detach-compile-button-container {
+    margin-right: -3px;
+  }
 }
 
 .btn-striped-animated {
   // prettier-ignore
   #gradient > .striped(@color: rgba(255, 255, 255, 0.2), @angle: -45deg);
   background-size: @stripe-width @stripe-width;
+  background-origin: content-box;
   .animation(pdf-toolbar-stripes 2s linear infinite);
-}
-
-.detach-compile-button when (@is-new-css = false) {
-  &[disabled],
-  &[disabled].active,
-  &[disabled]:hover,
-  &[disabled]:focus {
-    background-color: mix(@btn-primary-bg, @toolbar-alt-bg-color, 65%);
-    .opacity(1);
-  }
 }
 
 .detach-compile-button {
@@ -53,7 +43,7 @@
   }
 }
 
-.detach-compile-button when (@is-new-css = true) {
+.detach-compile-button {
   border: none;
 }
 

@@ -16,8 +16,6 @@ if (httpAuthUser && httpAuthPass) {
   httpAuthUsers[httpAuthUser] = httpAuthPass
 }
 
-const sessionSecret = process.env.SESSION_SECRET || 'secret-please-change'
-
 const intFromEnv = function (name, defaultValue) {
   if (
     [null, undefined].includes(defaultValue) ||
@@ -44,7 +42,6 @@ const defaultTextExtensions = [
   'rtex',
   'md',
   'asy',
-  'latexmkrc',
   'lbx',
   'bbx',
   'cbx',
@@ -62,6 +59,13 @@ const defaultTextExtensions = [
   'mf',
   'yml',
   'yaml',
+  'lhs',
+  'mk',
+  'xmpdata',
+  'cfg',
+  'rnw',
+  'ltx',
+  'inc',
 ]
 
 const parseTextExtensions = function (extensions) {
@@ -70,6 +74,40 @@ const parseTextExtensions = function (extensions) {
   } else {
     return []
   }
+}
+
+const httpPermissionsPolicy = {
+  blocked: [
+    'accelerometer',
+    'attribution-reporting',
+    'browsing-topics',
+    'camera',
+    'display-capture',
+    'encrypted-media',
+    'gamepad',
+    'geolocation',
+    'gyroscope',
+    'hid',
+    'identity-credentials-get',
+    'idle-detection',
+    'local-fonts',
+    'magnetometer',
+    'microphone',
+    'midi',
+    'otp-credentials',
+    'payment',
+    'picture-in-picture',
+    'screen-wake-lock',
+    'serial',
+    'storage-access',
+    'usb',
+    'window-management',
+    'xr-spatial-tracking',
+  ],
+  allowed: {
+    autoplay: 'self "https://videos.ctfassets.net"',
+    fullscreen: 'self',
+  },
 }
 
 module.exports = {
@@ -81,7 +119,7 @@ module.exports = {
   },
 
   allowAnonymousReadAndWriteSharing:
-    process.env.SHARELATEX_ALLOW_ANONYMOUS_READ_AND_WRITE_SHARING === 'true',
+    process.env.OVERLEAF_ALLOW_ANONYMOUS_READ_AND_WRITE_SHARING === 'true',
 
   // Databases
   // ---------
@@ -91,17 +129,23 @@ module.exports = {
       maxPoolSize: parseInt(process.env.MONGO_POOL_SIZE, 10) || 100,
       serverSelectionTimeoutMS:
         parseInt(process.env.MONGO_SERVER_SELECTION_TIMEOUT, 10) || 60000,
-      socketTimeoutMS: parseInt(process.env.MONGO_SOCKET_TIMEOUT, 10) || 60000,
+      // Setting socketTimeoutMS to 0 means no timeout
+      socketTimeoutMS: parseInt(
+        process.env.MONGO_SOCKET_TIMEOUT ?? '60000',
+        10
+      ),
+      monitorCommands: true,
     },
     url:
       process.env.MONGO_CONNECTION_STRING ||
       process.env.MONGO_URL ||
       `mongodb://${process.env.MONGO_HOST || '127.0.0.1'}/sharelatex`,
+    hasSecondaries: process.env.MONGO_HAS_SECONDARIES === 'true',
   },
 
   redis: {
     web: {
-      host: process.env.REDIS_HOST || 'localhost',
+      host: process.env.REDIS_HOST || '127.0.0.1',
       port: process.env.REDIS_PORT || '6379',
       password: process.env.REDIS_PASSWORD || '',
       db: process.env.REDIS_DB,
@@ -112,36 +156,36 @@ module.exports = {
 
     // websessions:
     // 	cluster: [
-    // 		{host: 'localhost', port: 7000}
-    // 		{host: 'localhost', port: 7001}
-    // 		{host: 'localhost', port: 7002}
-    // 		{host: 'localhost', port: 7003}
-    // 		{host: 'localhost', port: 7004}
-    // 		{host: 'localhost', port: 7005}
+    // 		{host: '127.0.0.1', port: 7000}
+    // 		{host: '127.0.0.1', port: 7001}
+    // 		{host: '127.0.0.1', port: 7002}
+    // 		{host: '127.0.0.1', port: 7003}
+    // 		{host: '127.0.0.1', port: 7004}
+    // 		{host: '127.0.0.1', port: 7005}
     // 	]
 
     // ratelimiter:
     // 	cluster: [
-    // 		{host: 'localhost', port: 7000}
-    // 		{host: 'localhost', port: 7001}
-    // 		{host: 'localhost', port: 7002}
-    // 		{host: 'localhost', port: 7003}
-    // 		{host: 'localhost', port: 7004}
-    // 		{host: 'localhost', port: 7005}
+    // 		{host: '127.0.0.1', port: 7000}
+    // 		{host: '127.0.0.1', port: 7001}
+    // 		{host: '127.0.0.1', port: 7002}
+    // 		{host: '127.0.0.1', port: 7003}
+    // 		{host: '127.0.0.1', port: 7004}
+    // 		{host: '127.0.0.1', port: 7005}
     // 	]
 
     // cooldown:
     // 	cluster: [
-    // 		{host: 'localhost', port: 7000}
-    // 		{host: 'localhost', port: 7001}
-    // 		{host: 'localhost', port: 7002}
-    // 		{host: 'localhost', port: 7003}
-    // 		{host: 'localhost', port: 7004}
-    // 		{host: 'localhost', port: 7005}
+    // 		{host: '127.0.0.1', port: 7000}
+    // 		{host: '127.0.0.1', port: 7001}
+    // 		{host: '127.0.0.1', port: 7002}
+    // 		{host: '127.0.0.1', port: 7003}
+    // 		{host: '127.0.0.1', port: 7004}
+    // 		{host: '127.0.0.1', port: 7005}
     // 	]
 
     api: {
-      host: process.env.REDIS_HOST || 'localhost',
+      host: process.env.REDIS_HOST || '127.0.0.1',
       port: process.env.REDIS_PORT || '6379',
       password: process.env.REDIS_PASSWORD || '',
       maxRetriesPerRequest: parseInt(
@@ -159,7 +203,7 @@ module.exports = {
   internal: {
     web: {
       port: process.env.WEB_PORT || 3000,
-      host: process.env.LISTEN_ADDRESS || 'localhost',
+      host: process.env.LISTEN_ADDRESS || '127.0.0.1',
     },
   },
 
@@ -169,7 +213,7 @@ module.exports = {
   apis: {
     web: {
       url: `http://${
-        process.env.WEB_API_HOST || process.env.WEB_HOST || 'localhost'
+        process.env.WEB_API_HOST || process.env.WEB_HOST || '127.0.0.1'
       }:${process.env.WEB_API_PORT || process.env.WEB_PORT || 3000}`,
       user: httpAuthUser,
       pass: httpAuthPass,
@@ -178,49 +222,51 @@ module.exports = {
       url: `http://${
         process.env.DOCUPDATER_HOST ||
         process.env.DOCUMENT_UPDATER_HOST ||
-        'localhost'
+        '127.0.0.1'
       }:3003`,
     },
-    spelling: {
-      url: `http://${process.env.SPELLING_HOST || 'localhost'}:3005`,
-      host: process.env.SPELLING_HOST,
-    },
-    trackchanges: {
-      url: `http://${process.env.TRACK_CHANGES_HOST || 'localhost'}:3015`,
-    },
     docstore: {
-      url: `http://${process.env.DOCSTORE_HOST || 'localhost'}:3016`,
-      pubUrl: `http://${process.env.DOCSTORE_HOST || 'localhost'}:3016`,
+      url: `http://${process.env.DOCSTORE_HOST || '127.0.0.1'}:3016`,
+      pubUrl: `http://${process.env.DOCSTORE_HOST || '127.0.0.1'}:3016`,
     },
     chat: {
-      internal_url: `http://${process.env.CHAT_HOST || 'localhost'}:3010`,
+      internal_url: `http://${process.env.CHAT_HOST || '127.0.0.1'}:3010`,
     },
     filestore: {
-      url: `http://${process.env.FILESTORE_HOST || 'localhost'}:3009`,
+      url: `http://${process.env.FILESTORE_HOST || '127.0.0.1'}:3009`,
     },
     clsi: {
-      url: `http://${process.env.CLSI_HOST || 'localhost'}:3013`,
+      url: `http://${process.env.CLSI_HOST || '127.0.0.1'}:3013`,
       // url: "http://#{process.env['CLSI_LB_HOST']}:3014"
       backendGroupName: undefined,
-      defaultBackendClass: process.env.CLSI_DEFAULT_BACKEND_CLASS || 'e2',
+      submissionBackendClass:
+        process.env.CLSI_SUBMISSION_BACKEND_CLASS || 'n2d',
     },
     project_history: {
       sendProjectStructureOps: true,
-      initializeHistoryForNewProjects: true,
-      displayHistoryForNewProjects: true,
-      url: `http://${process.env.PROJECT_HISTORY_HOST || 'localhost'}:3054`,
+      url: `http://${process.env.PROJECT_HISTORY_HOST || '127.0.0.1'}:3054`,
+    },
+    historyBackupDeletion: {
+      enabled: false,
+      url: `http://${process.env.HISTORY_BACKUP_DELETION_HOST || '127.0.0.1'}:3101`,
+      user: process.env.HISTORY_BACKUP_DELETION_USER || 'staging',
+      pass: process.env.HISTORY_BACKUP_DELETION_PASS,
     },
     realTime: {
-      url: `http://${process.env.REALTIME_HOST || 'localhost'}:3026`,
+      url: `http://${process.env.REALTIME_HOST || '127.0.0.1'}:3026`,
     },
     contacts: {
-      url: `http://${process.env.CONTACTS_HOST || 'localhost'}:3036`,
+      url: `http://${process.env.CONTACTS_HOST || '127.0.0.1'}:3036`,
     },
     notifications: {
-      url: `http://${process.env.NOTIFICATIONS_HOST || 'localhost'}:3042`,
+      url: `http://${process.env.NOTIFICATIONS_HOST || '127.0.0.1'}:3042`,
     },
     webpack: {
-      url: `http://${process.env.WEBPACK_HOST || 'localhost'}:3808`,
+      url: `http://${process.env.WEBPACK_HOST || '127.0.0.1'}:3808`,
+    },
+    wiki: {
+      url: process.env.WIKI_URL || 'https://learn.sharelatex.com',
+      maxCacheAge: parseInt(process.env.WIKI_MAX_CACHE_AGE || 5 * minutes, 10),
     },
 
     haveIBeenPwned: {
@@ -229,17 +275,49 @@ module.exports = {
         process.env.HAVE_I_BEEN_PWNED_URL || 'https://api.pwnedpasswords.com',
       timeout: parseInt(process.env.HAVE_I_BEEN_PWNED_TIMEOUT, 10) || 5 * 1000,
     },
+    v1_history: {
+      url:
+        process.env.V1_HISTORY_URL ||
+        `http://${process.env.V1_HISTORY_HOST || '127.0.0.1'}:${
+          process.env.V1_HISTORY_PORT || '3100'
+        }/api`,
+      urlForGitBridge: process.env.V1_HISTORY_URL_FOR_GIT_BRIDGE,
+      user: process.env.V1_HISTORY_USER || 'staging',
+      pass:
+        process.env.V1_HISTORY_PASS ||
+        process.env.V1_HISTORY_PASSWORD ||
+        'password',
+
+      buckets: {
+        globalBlobs: process.env.OVERLEAF_EDITOR_BLOBS_BUCKET,
+        projectBlobs: process.env.OVERLEAF_EDITOR_PROJECT_BLOBS_BUCKET,
+      },
+    },
 
     // For legacy reasons, we need to populate the below objects.
     v1: {},
     recurly: {},
   },
 
+  // Defines which features are allowed in the
+  // Permissions-Policy HTTP header
+  httpPermissions: httpPermissionsPolicy,
+  useHttpPermissionsPolicy: true,
+
+  jwt: {
+    key: process.env.OT_JWT_AUTH_KEY,
+    algorithm: process.env.OT_JWT_AUTH_ALG || 'HS256',
+  },
+
+  devToolbar: {
+    enabled: false,
+  },
+
   splitTests: [],
 
-  // Where your instance of ShareLaTeX can be found publically. Used in emails
+  // Where your instance of Overleaf Community Edition/Server Pro can be found publicly. Used in emails
   // that are sent out, generated links, etc.
-  siteUrl: (siteUrl = process.env.PUBLIC_URL || 'http://localhost:3000'),
+  siteUrl: (siteUrl = process.env.PUBLIC_URL || 'http://127.0.0.1:3000'),
 
   lockManager: {
     lockTestInterval: intFromEnv('LOCK_MANAGER_LOCK_TEST_INTERVAL', 50),
@@ -267,7 +345,7 @@ module.exports = {
   // use full domain for cookies to only be accessible from that domain,
   // replace subdomain with dot to have them accessible on all subdomains
   cookieDomain: process.env.COOKIE_DOMAIN,
-  cookieName: process.env.COOKIE_NAME || 'sharelatex.sid',
+  cookieName: process.env.COOKIE_NAME || 'overleaf.sid',
   cookieRollingSession: true,
 
   // this is only used if cookies are used for clsi backend
@@ -275,8 +353,15 @@ module.exports = {
 
   robotsNoindex: process.env.ROBOTS_NOINDEX === 'true' || false,
 
-  maxEntitiesPerProject: 2000,
+  maxEntitiesPerProject: parseInt(
+    process.env.MAX_ENTITIES_PER_PROJECT || '2000',
+    10
+  ),
 
+  projectUploadTimeout: parseInt(
+    process.env.PROJECT_UPLOAD_TIMEOUT || '120000',
+    10
+  ),
   maxUploadSize: 50 * 1024 * 1024, // 50 MB
   multerOptions: {
     preservePath: process.env.MULTER_PRESERVE_PATH,
@@ -290,7 +375,9 @@ module.exports = {
   // Security
   // --------
   security: {
-    sessionSecret,
+    sessionSecret: process.env.SESSION_SECRET,
+    sessionSecretUpcoming: process.env.SESSION_SECRET_UPCOMING,
+    sessionSecretFallback: process.env.SESSION_SECRET_FALLBACK,
     bcryptRounds: parseInt(process.env.BCRYPT_ROUNDS, 10) || 12,
   }, // number of rounds used to hash user passwords (raised to power 2)
 
@@ -316,7 +403,6 @@ module.exports = {
     compileTimeout: 180,
     compileGroup: 'standard',
     references: true,
-    templates: true,
     trackChanges: true,
   }),
 
@@ -341,7 +427,10 @@ module.exports = {
     },
   ],
 
+  disableChat: process.env.OVERLEAF_DISABLE_CHAT === 'true',
   enableSubscriptions: false,
+  restrictedCountries: [],
+  enableOnboardingEmails: process.env.ENABLE_ONBOARDING_EMAILS === 'true',
 
   enabledLinkedFileTypes: (process.env.ENABLED_LINKED_FILE_TYPES || '').split(
     ','
@@ -360,58 +449,111 @@ module.exports = {
   },
 
   // Spelling languages
+  // dic = available in client
+  // server: false = not available on server
   // ------------------
-  //
-  // You must have the corresponding aspell package installed to
-  // be able to use a language.
   languages: [
     { code: 'en', name: 'English' },
-    { code: 'en_US', name: 'English (American)' },
-    { code: 'en_GB', name: 'English (British)' },
-    { code: 'en_CA', name: 'English (Canadian)' },
-    { code: 'af', name: 'Afrikaans' },
-    { code: 'ar', name: 'Arabic' },
-    { code: 'gl', name: 'Galician' },
-    { code: 'eu', name: 'Basque' },
-    { code: 'br', name: 'Breton' },
-    { code: 'bg', name: 'Bulgarian' },
-    { code: 'ca', name: 'Catalan' },
-    { code: 'hr', name: 'Croatian' },
-    { code: 'cs', name: 'Czech' },
-    { code: 'da', name: 'Danish' },
-    { code: 'nl', name: 'Dutch' },
-    { code: 'eo', name: 'Esperanto' },
-    { code: 'et', name: 'Estonian' },
-    { code: 'fo', name: 'Faroese' },
-    { code: 'fr', name: 'French' },
-    { code: 'de', name: 'German' },
-    { code: 'el', name: 'Greek' },
-    { code: 'id', name: 'Indonesian' },
-    { code: 'ga', name: 'Irish' },
-    { code: 'it', name: 'Italian' },
-    { code: 'kk', name: 'Kazakh' },
+    { code: 'en_US', dic: 'en_US', name: 'English (American)' },
+    { code: 'en_GB', dic: 'en_GB', name: 'English (British)' },
+    { code: 'en_CA', dic: 'en_CA', name: 'English (Canadian)' },
+    {
+      code: 'en_AU',
+      dic: 'en_AU',
+      name: 'English (Australian)',
+      server: false,
+    },
+    {
+      code: 'en_ZA',
+      dic: 'en_ZA',
+      name: 'English (South African)',
+      server: false,
+    },
+    { code: 'af', dic: 'af_ZA', name: 'Afrikaans' },
+    { code: 'an', dic: 'an_ES', name: 'Aragonese', server: false },
+    { code: 'ar', dic: 'ar', name: 'Arabic' },
+    { code: 'be_BY', dic: 'be_BY', name: 'Belarusian', server: false },
+    { code: 'eu', dic: 'eu', name: 'Basque' },
+    { code: 'bn_BD', dic: 'bn_BD', name: 'Bengali', server: false },
+    { code: 'bs_BA', dic: 'bs_BA', name: 'Bosnian', server: false },
+    { code: 'br', dic: 'br_FR', name: 'Breton' },
+    { code: 'bg', dic: 'bg_BG', name: 'Bulgarian' },
+    { code: 'ca', dic: 'ca', name: 'Catalan' },
+    { code: 'hr', dic: 'hr_HR', name: 'Croatian' },
+    { code: 'cs', dic: 'cs_CZ', name: 'Czech' },
+    { code: 'da', dic: 'da_DK', name: 'Danish' },
+    { code: 'nl', dic: 'nl', name: 'Dutch' },
+    { code: 'dz', dic: 'dz', name: 'Dzongkha', server: false },
+    { code: 'eo', dic: 'eo', name: 'Esperanto' },
+    { code: 'et', dic: 'et_EE', name: 'Estonian' },
+    { code: 'fo', dic: 'fo', name: 'Faroese' },
+    { code: 'fr', dic: 'fr', name: 'French' },
+    { code: 'gl', dic: 'gl_ES', name: 'Galician' },
+    { code: 'de', dic: 'de_DE', name: 'German' },
+    { code: 'de_AT', dic: 'de_AT', name: 'German (Austria)', server: false },
+    {
+      code: 'de_CH',
+      dic: 'de_CH',
+      name: 'German (Switzerland)',
+      server: false,
+    },
+    { code: 'el', dic: 'el_GR', name: 'Greek' },
+    { code: 'gug_PY', dic: 'gug_PY', name: 'Guarani', server: false },
+    { code: 'gu_IN', dic: 'gu_IN', name: 'Gujarati', server: false },
+    { code: 'he_IL', dic: 'he_IL', name: 'Hebrew', server: false },
+    { code: 'hi_IN', dic: 'hi_IN', name: 'Hindi', server: false },
+    { code: 'hu_HU', dic: 'hu_HU', name: 'Hungarian', server: false },
+    { code: 'is_IS', dic: 'is_IS', name: 'Icelandic', server: false },
+    { code: 'id', dic: 'id_ID', name: 'Indonesian' },
+    { code: 'ga', dic: 'ga_IE', name: 'Irish' },
+    { code: 'it', dic: 'it_IT', name: 'Italian' },
+    { code: 'kk', dic: 'kk_KZ', name: 'Kazakh' },
+    { code: 'ko', dic: 'ko', name: 'Korean', server: false },
     { code: 'ku', name: 'Kurdish' },
-    { code: 'lv', name: 'Latvian' },
-    { code: 'lt', name: 'Lithuanian' },
+    { code: 'kmr', dic: 'kmr_Latn', name: 'Kurmanji', server: false },
+    { code: 'lv', dic: 'lv_LV', name: 'Latvian' },
+    { code: 'lt', dic: 'lt_LT', name: 'Lithuanian' },
+    { code: 'lo_LA', dic: 'lo_LA', name: 'Laotian', server: false },
+    { code: 'ml_IN', dic: 'ml_IN', name: 'Malayalam', server: false },
+    { code: 'mn_MN', dic: 'mn_MN', name: 'Mongolian', server: false },
     { code: 'nr', name: 'Ndebele' },
+    { code: 'ne_NP', dic: 'ne_NP', name: 'Nepali', server: false },
     { code: 'ns', name: 'Northern Sotho' },
     { code: 'no', name: 'Norwegian' },
-    { code: 'fa', name: 'Persian' },
-    { code: 'pl', name: 'Polish' },
-    { code: 'pt_BR', name: 'Portuguese (Brazilian)' },
-    { code: 'pt_PT', name: 'Portuguese (European)' },
+    { code: 'nb_NO', dic: 'nb_NO', name: 'Norwegian (Bokmål)', server: false },
+    { code: 'nn_NO', dic: 'nn_NO', name: 'Norwegian (Nynorsk)', server: false },
+    { code: 'oc_FR', dic: 'oc_FR', name: 'Occitan', server: false },
+    { code: 'fa', dic: 'fa_IR', name: 'Persian' },
+    { code: 'pl', dic: 'pl_PL', name: 'Polish' },
+    { code: 'pt_BR', dic: 'pt_BR', name: 'Portuguese (Brazilian)' },
+    {
+      code: 'pt_PT',
+      dic: 'pt_PT',
+      name: 'Portuguese (European)',
+    },
     { code: 'pa', name: 'Punjabi' },
-    { code: 'ro', name: 'Romanian' },
-    { code: 'ru', name: 'Russian' },
-    { code: 'sk', name: 'Slovak' },
-    { code: 'sl', name: 'Slovenian' },
+    { code: 'ro', dic: 'ro_RO', name: 'Romanian' },
+    { code: 'ru', dic: 'ru_RU', name: 'Russian' },
+    { code: 'gd_GB', dic: 'gd_GB', name: 'Scottish Gaelic', server: false },
+    { code: 'sr_RS', dic: 'sr_RS', name: 'Serbian', server: false },
+    { code: 'si_LK', dic: 'si_LK', name: 'Sinhala', server: false },
+    { code: 'sk', dic: 'sk_SK', name: 'Slovak' },
+    { code: 'sl', dic: 'sl_SI', name: 'Slovenian' },
     { code: 'st', name: 'Southern Sotho' },
-    { code: 'es', name: 'Spanish' },
-    { code: 'sv', name: 'Swedish' },
-    { code: 'tl', name: 'Tagalog' },
+    { code: 'es', dic: 'es_ES', name: 'Spanish' },
+    { code: 'sw_TZ', dic: 'sw_TZ', name: 'Swahili', server: false },
+    { code: 'sv', dic: 'sv_SE', name: 'Swedish' },
+    { code: 'tl', dic: 'tl', name: 'Tagalog' },
+    { code: 'te_IN', dic: 'te_IN', name: 'Telugu', server: false },
+    { code: 'th_TH', dic: 'th_TH', name: 'Thai', server: false },
+    { code: 'bo', dic: 'bo', name: 'Tibetan', server: false },
     { code: 'ts', name: 'Tsonga' },
     { code: 'tn', name: 'Tswana' },
+    { code: 'tr_TR', dic: 'tr_TR', name: 'Turkish', server: false },
+    { code: 'uk_UA', dic: 'uk_UA', name: 'Ukrainian', server: false },
     { code: 'hsb', name: 'Upper Sorbian' },
+    { code: 'uz_UZ', dic: 'uz_UZ', name: 'Uzbek', server: false },
+    { code: 'vi_VN', dic: 'vi_VN', name: 'Vietnamese', server: false },
     { code: 'cy', name: 'Welsh' },
     { code: 'xh', name: 'Xhosa' },
   ],
@@ -470,7 +612,7 @@ module.exports = {
   // Email support
   // -------------
   //
-  //	ShareLaTeX uses nodemailer (http://www.nodemailer.com/) to send transactional emails.
+  //	Overleaf uses nodemailer (http://www.nodemailer.com/) to send transactional emails.
   //	To see the range of transport and options they support, see http://www.nodemailer.com/docs/transports
   // email:
   //	fromAddress: ""
@@ -500,7 +642,7 @@ module.exports = {
   // them.
   cacheStaticAssets: false,
 
-  // If you are running ShareLaTeX over https, set this to true to send the
+  // If you are running Overleaf over https, set this to true to send the
   // cookie with a secure flag (recommended).
   secureCookie: false,
 
@@ -509,16 +651,14 @@ module.exports = {
   // https://tools.ietf.org/html/draft-ietf-httpbis-rfc6265bis-03#section-4.1.2.7
   sameSiteCookie: 'lax',
 
-  // If you are running ShareLaTeX behind a proxy (like Apache, Nginx, etc)
+  // If you are running Overleaf behind a proxy (like Apache, Nginx, etc)
   // then set this to true to allow it to correctly detect the forwarded IP
   // address and http/https protocol information.
   behindProxy: false,
 
   // Delay before closing the http server upon receiving a SIGTERM process signal.
-  gracefulShutdownDelayInMs: parseInt(
-    process.env.GRACEFUL_SHUTDOWN_DELAY || 30 * seconds,
-    10
-  ),
+  gracefulShutdownDelayInMs:
+    parseInt(process.env.GRACEFUL_SHUTDOWN_DELAY_SECONDS ?? '5', 10) * seconds,
 
   // Expose the hostname in the `X-Served-By` response header
   exposeHostname: process.env.EXPOSE_HOSTNAME === 'true',
@@ -532,7 +672,7 @@ module.exports = {
 
   // Should we allow access to any page without logging in? This includes
   // public projects, /learn, /templates, about pages, etc.
-  allowPublicAccess: process.env.SHARELATEX_ALLOW_PUBLIC_ACCESS === 'true',
+  allowPublicAccess: process.env.OVERLEAF_ALLOW_PUBLIC_ACCESS === 'true',
 
   // editor should be open by default
   editorIsOpen: process.env.EDITOR_OPEN !== 'false',
@@ -547,8 +687,7 @@ module.exports = {
   // disablePerUserCompiles: true
 
   // Domain the client (pdfjs) should download the compiled pdf from
-  pdfDownloadDomain: process.env.PDF_DOWNLOAD_DOMAIN, // "http://clsi-lb:3014"
-  compilesUserContentDomain: process.env.COMPILES_USER_CONTENT_DOMAIN,
+  pdfDownloadDomain: process.env.COMPILES_USER_CONTENT_DOMAIN, // "http://clsi-lb:3014"
 
   // By default turn on feature flag, can be overridden per request.
   enablePdfCaching: process.env.ENABLE_PDF_CACHING === 'true',
@@ -636,11 +775,16 @@ module.exports = {
     endpoint:
       process.env.RECAPTCHA_ENDPOINT ||
       'https://www.google.com/recaptcha/api/siteverify',
+    trustedUsers: (process.env.CAPTCHA_TRUSTED_USERS || '')
+      .split(',')
+      .map(x => x.trim())
+      .filter(x => x !== ''),
     disabled: {
       invite: true,
       login: true,
       passwordReset: true,
       register: true,
+      addEmail: true,
     },
   },
 
@@ -653,9 +797,15 @@ module.exports = {
   reloadModuleViewsOnEachRequest: process.env.NODE_ENV === 'development',
 
   rateLimit: {
+    subnetRateLimiterDisabled:
+      process.env.SUBNET_RATE_LIMITER_DISABLED === 'true',
     autoCompile: {
       everyone: process.env.RATE_LIMIT_AUTO_COMPILE_EVERYONE || 100,
       standard: process.env.RATE_LIMIT_AUTO_COMPILE_STANDARD || 25,
+    },
+    login: {
+      ip: { points: 20, subnetPoints: 200, duration: 60 },
+      email: { points: 10, duration: 120 },
     },
   },
 
@@ -663,16 +813,25 @@ module.exports = {
     enabled: false,
   },
 
-  compileBodySizeLimitMb: process.env.COMPILE_BODY_SIZE_LIMIT_MB || 5,
+  compileBodySizeLimitMb: process.env.COMPILE_BODY_SIZE_LIMIT_MB || 7,
 
   textExtensions: defaultTextExtensions.concat(
     parseTextExtensions(process.env.ADDITIONAL_TEXT_EXTENSIONS)
   ),
 
-  validRootDocExtensions: ['tex', 'Rtex', 'ltx'],
+  // case-insensitive file names that is editable (doc) in the editor
+  editableFilenames: ['latexmkrc', '.latexmkrc', 'makefile', 'gnumakefile'],
+
+  fileIgnorePattern:
+    process.env.FILE_IGNORE_PATTERN ||
+    '**/{{__MACOSX,.git,.texpadtmp,.R}{,/**},.!(latexmkrc),*.{dvi,aux,log,toc,out,pdfsync,synctex,synctex(busy),fdb_latexmk,fls,nlo,ind,glo,gls,glg,bbl,blg,doc,docx,gz,swp}}',
+
+  validRootDocExtensions: ['tex', 'Rtex', 'ltx', 'Rnw'],
 
   emailConfirmationDisabled:
     process.env.EMAIL_CONFIRMATION_DISABLED === 'true' || false,
+
+  emailAddressLimit: intFromEnv('EMAIL_ADDRESS_LIMIT', 10),
 
   enabledServices: (process.env.ENABLED_SERVICES || 'web,api')
     .split(',')
@@ -743,6 +902,7 @@ module.exports = {
           h4: ['class', 'id'],
           h5: ['class', 'id'],
           h6: ['class', 'id'],
+          p: ['class'],
           col: ['width'],
           figure: ['class', 'id', 'style'],
           figcaption: ['class', 'id', 'style'],
@@ -779,45 +939,82 @@ module.exports = {
 
   overleafModuleImports: {
     // modules to import (an empty array for each set of modules)
+    //
+    // Restart webpack after making changes.
+    //
     createFileModes: [],
+    devToolbar: [],
     gitBridge: [],
     publishModal: [],
-    tprLinkedFileInfo: [],
-    tprLinkedFileRefreshError: [],
+    tprFileViewInfo: [],
+    tprFileViewRefreshError: [],
+    tprFileViewRefreshButton: [],
+    tprFileViewNotOriginalImporter: [],
     contactUsModal: [],
     editorToolbarButtons: [],
     sourceEditorExtensions: [],
     sourceEditorComponents: [],
+    pdfLogEntryComponents: [],
+    pdfLogEntriesComponents: [],
+    diagnosticActions: [],
     sourceEditorCompletionSources: [],
+    sourceEditorSymbolPalette: [],
+    sourceEditorToolbarComponents: [],
+    langFeedbackLinkingWidgets: [],
+    labsExperiments: [],
     integrationLinkingWidgets: [],
     referenceLinkingWidgets: [],
     importProjectFromGithubModalWrapper: [],
     importProjectFromGithubMenu: [],
     editorLeftMenuSync: [],
     editorLeftMenuManageTemplate: [],
+    oauth2Server: [],
+    managedGroupSubscriptionEnrollmentNotification: [],
+    managedGroupEnrollmentInvite: [],
+    ssoCertificateInfo: [],
+    v1ImportDataScreen: [],
+    snapshotUtils: [],
+    usGovBanner: [],
+    offlineModeToolbarButtons: [],
+    settingsEntries: [],
+    autoCompleteExtensions: [],
+    sectionTitleGenerators: [],
+    toastGenerators: [],
+    editorSidebarComponents: [],
+    fileTreeToolbarComponents: [],
+    integrationPanelComponents: [],
   },
 
   moduleImportSequence: [
+    'history-v1',
     'launchpad',
     'server-ce-scripts',
     'user-activate',
-    'history-migration',
   ],
+  viewIncludes: {},
 
   csp: {
     enabled: process.env.CSP_ENABLED === 'true',
     reportOnly: process.env.CSP_REPORT_ONLY === 'true',
     reportPercentage: parseFloat(process.env.CSP_REPORT_PERCENTAGE) || 0,
     reportUri: process.env.CSP_REPORT_URI,
-    exclude: ['app/views/project/editor', 'app/views/project/list'],
+    exclude: [],
+    viewDirectives: {
+      'app/views/project/ide-react': [`img-src 'self' data: blob:`],
+    },
   },
 
   unsupportedBrowsers: {
     ie: '<=11',
+    safari: '<=14',
   },
 
   // ID of the IEEE brand in the rails app
   ieeeBrandId: intFromEnv('IEEE_BRAND_ID', 15),
+
+  managedUsers: {
+    enabled: false,
+  },
 }
 
 module.exports.mergeWith = function (overrides) {

@@ -11,8 +11,8 @@
   -webkit-transition: left ease-in-out @left-menu-animation-duration;
   transition: left ease-in-out @left-menu-animation-duration;
   font-size: 14px;
+  left: -@left-menu-width;
 
-  left: -280px;
   &.shown {
     left: 0;
   }
@@ -23,7 +23,7 @@
     font-size: 1rem;
     margin: (@line-height-computed / 2) 0;
     padding-bottom: (@line-height-computed / 4);
-    color: @gray-light;
+    color: @neutral-70;
     border-bottom: 1px solid @gray-lighter;
   }
 
@@ -146,6 +146,20 @@
     }
   }
 
+  .left-menu-setting-position {
+    position: relative;
+
+    .left-menu-setting {
+      margin-top: 0 !important;
+    }
+
+    .left-menu-setting-icon {
+      position: absolute;
+      right: 65%;
+      top: 25%;
+    }
+  }
+
   .left-menu-setting {
     padding: 0 9px;
     display: flex;
@@ -163,7 +177,8 @@
       border-bottom: 0;
     }
 
-    &:hover {
+    &:hover,
+    &:focus-within {
       background-color: @link-color;
 
       label {
@@ -188,4 +203,36 @@
   opacity: 0.4;
   background-color: #999;
   z-index: 99;
+  transition: opacity 0.5s;
+}
+
+// Make the Bootstrap Modal behavior as a left sidebar
+#left-menu-modal {
+  opacity: 1;
+  overflow-y: hidden;
+  padding-left: 0 !important; // bootstrap modal may randomly give padding-left when zooming in / out in chrome
+  .modal-dialog {
+    height: 100%;
+    margin: 0;
+    width: @left-menu-width;
+  }
+
+  .modal-content {
+    position: initial;
+  }
+  &.modal.fade .modal-dialog {
+    left: -@left-menu-width;
+    transition: left ease-in-out @left-menu-animation-duration;
+    -webkit-transition: left ease-in-out @left-menu-animation-duration;
+    transform: translate(0, 0);
+  }
+  &.modal.in .modal-dialog {
+    left: 0;
+    transform: translate(0, 0);
+  }
+}
+// Don't disable backdrop that allows closing the Modal when clicking outside of it,
+// But match its background color with the original mask background color.
+.left-menu-modal-backdrop {
+  background-color: transparent;
 }

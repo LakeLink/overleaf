@@ -18,8 +18,15 @@ const SubscriptionLocator = require('../Subscription/SubscriptionLocator')
 const NotificationsBuilder = require('../Notifications/NotificationsBuilder')
 const _ = require('lodash')
 const Modules = require('../../infrastructure/Modules')
+const UserSessionsManager = require('./UserSessionsManager')
 
-async function _sendSecurityAlertPrimaryEmailChanged(userId, oldEmail, email) {
+async function _sendSecurityAlertPrimaryEmailChanged(
+  userId,
+  oldEmail,
+  email,
+  deleteOldEmail
+) {
+  // here
   // Send email to the following:
   // - the old primary
   // - the new primary
@@ -30,6 +37,11 @@ async function _sendSecurityAlertPrimaryEmailChanged(userId, oldEmail, email) {
   const emailOptions = {
     actionDescribed: `the primary email address on your account was changed to ${email}`,
     action: 'change of primary email address',
+    message: deleteOldEmail
+      ? [
+          `We also removed the previous primary email ${oldEmail} from the account.`,
+        ]
+      : [],
   }
 
   async function sendToRecipients(recipients) {
@@ -75,7 +87,10 @@ async function addEmailAddress(userId, newEmail, affiliationOptions, auditLog) {
 
   await UserGetter.promises.ensureUniqueEmailAddress(newEmail)
 
-  AnalyticsManager.recordEventForUser(userId, 'secondary-email-added')
+  AnalyticsManager.recordEventForUserInBackground(
+    userId,
+    'secondary-email-added'
+  )
 
   await UserAuditLogHandler.promises.addEntry(
     userId,
@@ -104,7 +119,7 @@ async function addEmailAddress(userId, newEmail, affiliationOptions, auditLog) {
         emails: { email: newEmail, createdAt: new Date(), reversedHostname },
       },
     }
-    await updateUser(userId, update)
+    await updateUser({ _id: userId, 'emails.email': { $ne: newEmail } }, update)
   } catch (error) {
     throw OError.tag(error, 'problem updating users emails')
   }
@@ -128,8 +143,10 @@ async function clearSAMLData(userId, auditLog, sendEmail) {
     $unset: {
       samlIdentifiers: 1,
       'emails.$[].samlProviderId': 1,
+      'enrollment.sso': 1,
     },
   }
+
   await updateUser(userId, update)
 
   for (const emailData of user.emails) {
@@ -155,7 +172,8 @@ async function setDefaultEmailAddress(
   email,
   allowUnconfirmed,
   auditLog,
-  sendSecurityAlert
+  sendSecurityAlert,
+  deleteOldEmail = false
 ) {
   email = EmailHelper.parseEmail(email)
   if (email == null) {
@@ -199,15 +217,21 @@ async function setDefaultEmailAddress(
     throw new Error('email update error')
   }
 
-  AnalyticsManager.recordEventForUser(userId, 'primary-email-address-updated')
+  AnalyticsManager.recordEventForUserInBackground(
+    userId,
+    'primary-email-address-updated'
+  )
 
   if (sendSecurityAlert) {
     // no need to wait, errors are logged and not passed back
-    _sendSecurityAlertPrimaryEmailChanged(userId, oldEmail, email).catch(
-      err => {
-        logger.error({ err }, 'failed to send security alert email')
-      }
-    )
+    _sendSecurityAlertPrimaryEmailChanged(
+      userId,
+      oldEmail,
+      email,
+      deleteOldEmail
+    ).catch(err => {
+      logger.error({ err }, 'failed to send security alert email')
+    })
   }
 
   try {
@@ -232,6 +256,58 @@ async function setDefaultEmailAddress(
   } catch (error) {
     // errors are ignored
   }
+}
+
+/**
+ * Overwrites the primary email address of a user in the database in-place.
+ * This function is only intended for use in scripts to migrate email addresses
+ * where we do not want to trigger all the actions that happen when a user
+ * changes their own email.  It should not be used in any other circumstances.
+ */
+async function migrateDefaultEmailAddress(
+  userId,
+  oldEmail,
+  newEmail,
+  auditLog
+) {
+  oldEmail = EmailHelper.parseEmail(oldEmail)
+  if (oldEmail == null) {
+    throw new Error('invalid old email')
+  }
+  newEmail = EmailHelper.parseEmail(newEmail)
+  if (newEmail == null) {
+    throw new Error('invalid new email')
+  }
+  const reversedHostname = newEmail.split('@')[1].split('').reverse().join('')
+  const query = {
+    _id: userId,
+    email: oldEmail,
+    'emails.email': oldEmail,
+  }
+  const update = {
+    $set: {
+      email: newEmail,
+      'emails.$.email': newEmail,
+      'emails.$.reversedHostname': reversedHostname,
+    },
+  }
+  const result = await updateUser(query, update)
+  if (result.modifiedCount !== 1) {
+    throw new Error('email update error')
+  }
+  // add a user audit log entry for the email change
+  await UserAuditLogHandler.promises.addEntry(
+    userId,
+    'migrate-default-email',
+    auditLog.initiatorId,
+    auditLog.ipAddress,
+    {
+      oldEmail,
+      newEmail,
+      // Add optional extra info
+      ...(auditLog.extraInfo || {}),
+    }
+  )
 }
 
 async function confirmEmail(userId, email, affiliationOptions) {
@@ -300,9 +376,8 @@ async function maybeCreateRedundantSubscriptionNotification(userId, email) {
     return
   }
 
-  const affiliations = await InstitutionsAPI.promises.getUserAffiliations(
-    userId
-  )
+  const affiliations =
+    await InstitutionsAPI.promises.getUserAffiliations(userId)
   const confirmedAffiliation = affiliations.find(a => a.email === email)
   if (!confirmedAffiliation || confirmedAffiliation.licence === 'free') {
     return
@@ -435,8 +510,42 @@ async function changeEmailAddress(userId, newEmail, auditLog) {
   await removeEmailAddress(userId, oldEmail, auditLog)
 }
 
-async function removeReconfirmFlag(userId) {
+/**
+ * @param {string} userId
+ * @param {{initiatorId: string, ip: string}} auditLog
+ * @returns {Promise<void>}
+ */
+async function removeReconfirmFlag(userId, auditLog) {
+  await UserAuditLogHandler.promises.addEntry(
+    userId.toString(),
+    'must-reset-password-unset',
+    auditLog.initiatorId,
+    auditLog.ip
+  )
   await updateUser(userId.toString(), { $set: { must_reconfirm: false } })
+}
+
+async function suspendUser(userId, auditLog = {}) {
+  const res = await updateUser(
+    { _id: userId, suspended: { $ne: true } },
+    { $set: { suspended: true } }
+  )
+  if (res.matchedCount !== 1) {
+    throw new Errors.NotFoundError('user id not found or already suspended')
+  }
+  await UserAuditLogHandler.promises.addEntry(
+    userId,
+    'account-suspension',
+    auditLog.initiatorId,
+    auditLog.ip,
+    auditLog.info || {}
+  )
+  await UserSessionsManager.promises.removeSessionsFromRedis({ _id: userId })
+  await Modules.promises.hooks.fire(
+    'removeDropbox',
+    userId,
+    'account-suspension'
+  )
 }
 
 function _securityAlertPrimaryEmailChangedExtraRecipients(
@@ -492,7 +601,9 @@ module.exports = {
   removeEmailAddress: callbackify(removeEmailAddress),
   removeReconfirmFlag: callbackify(removeReconfirmFlag),
   setDefaultEmailAddress: callbackify(setDefaultEmailAddress),
+  migrateDefaultEmailAddress: callbackify(migrateDefaultEmailAddress),
   updateUser: callbackify(updateUser),
+  suspendUser: callbackify(suspendUser),
   promises: {
     addAffiliationForNewUser,
     addEmailAddress,
@@ -502,6 +613,8 @@ module.exports = {
     removeEmailAddress,
     removeReconfirmFlag,
     setDefaultEmailAddress,
+    migrateDefaultEmailAddress,
     updateUser,
+    suspendUser,
   },
 }

@@ -7,7 +7,7 @@ const keys = Settings.redis.documentupdater.key_schema
 const ProjectFlusher = require('../app/js/ProjectFlusher')
 const RedisManager = require('../app/js/RedisManager')
 const { mongoClient, db, ObjectId } = require('../app/js/mongodb')
-const util = require('util')
+const util = require('node:util')
 const getDoc = util.promisify((projectId, docId, cb) =>
   RedisManager.getDoc(projectId, docId, (err, ...args) => cb(err, args))
 )
@@ -19,7 +19,7 @@ async function removeDeletedDocs(dockeys, options) {
   const docIds = ProjectFlusher._extractIds(dockeys)
   for (const docId of docIds) {
     summary.totalDocs++
-    const docCount = await db.docs.find({ _id: ObjectId(docId) }).count()
+    const docCount = await db.docs.find({ _id: new ObjectId(docId) }).count()
     if (!docCount) {
       try {
         await removeDeletedDoc(docId, options)
@@ -44,7 +44,7 @@ async function removeDeletedDoc(docId, options) {
     lastUpdatedBy,
   ] = await getDoc(projectId, docId)
 
-  const project = await db.projects.findOne({ _id: ObjectId(projectId) })
+  const project = await db.projects.findOne({ _id: new ObjectId(projectId) })
 
   let status
 
@@ -153,6 +153,7 @@ findAndProcessDocs({ limit: 1000, dryRun: process.env.DRY_RUN !== 'false' })
     rclient.quit()
     mongoClient.close()
     console.log('DONE')
+    process.exit(0)
   })
   .catch(function (error) {
     console.error(error)

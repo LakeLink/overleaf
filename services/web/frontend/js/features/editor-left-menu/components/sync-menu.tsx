@@ -10,13 +10,20 @@ const components = importOverleafModules('editorLeftMenuSync') as {
 
 export default function SyncMenu() {
   const { t } = useTranslation()
-  const anonymous = getMeta('ol-anonymous') as boolean | undefined
+  const anonymous = getMeta('ol-anonymous')
+  const gitBridgeEnabled = getMeta('ol-gitBridgeEnabled')
 
-  if (anonymous === true || anonymous === undefined) {
+  if (anonymous) {
     return null
   }
 
   if (components.length === 0) {
+    return null
+  }
+
+  // This flag can only be false in CE and Server Pro. In this case we skip rendering the
+  // entire sync section, since Dropbox and GitHub are never available in SP
+  if (!gitBridgeEnabled) {
     return null
   }
 

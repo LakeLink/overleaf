@@ -6,45 +6,95 @@ const request = require('request')
 const settings = require('@overleaf/settings')
 const SessionManager = require('../Authentication/SessionManager')
 const UserGetter = require('../User/UserGetter')
+const ProjectGetter = require('../Project/ProjectGetter')
 const Errors = require('../Errors/Errors')
 const HistoryManager = require('./HistoryManager')
 const ProjectDetailsHandler = require('../Project/ProjectDetailsHandler')
 const ProjectEntityUpdateHandler = require('../Project/ProjectEntityUpdateHandler')
 const RestoreManager = require('./RestoreManager')
 const { pipeline } = require('stream')
+const Stream = require('stream')
 const { prepareZipAttachment } = require('../../infrastructure/Response')
 const Features = require('../../infrastructure/Features')
+const { expressify } = require('@overleaf/promise-utils')
+
+// Number of seconds after which the browser should send a request to revalidate
+// blobs
+const REVALIDATE_BLOB_AFTER_SECONDS = 86400 // 1 day
+
+// Number of seconds during which the browser can serve a stale response while
+// revalidating
+const STALE_WHILE_REVALIDATE_SECONDS = 365 * 86400 // 1 year
+
+async function getBlob(req, res) {
+  await requestBlob('GET', req, res)
+}
+
+async function headBlob(req, res) {
+  await requestBlob('HEAD', req, res)
+}
+
+async function requestBlob(method, req, res) {
+  const { project_id: projectId, hash } = req.params
+
+  // Handle conditional GET request
+  if (req.get('If-None-Match') === hash) {
+    setBlobCacheHeaders(res, hash)
+    return res.status(304).end()
+  }
+
+  const range = req.get('Range')
+  let url, stream, source, contentLength
+  try {
+    ;({ url, stream, source, contentLength } =
+      await HistoryManager.promises.requestBlobWithFallback(
+        projectId,
+        hash,
+        req.query.fallback,
+        method,
+        range
+      ))
+  } catch (err) {
+    if (err instanceof Errors.NotFoundError) return res.status(404).end()
+    throw err
+  }
+  res.appendHeader('X-Served-By', source)
+
+  if (contentLength) res.setHeader('Content-Length', contentLength) // set on HEAD
+  res.setHeader('Content-Type', 'application/octet-stream')
+  setBlobCacheHeaders(res, hash)
+
+  try {
+    await Stream.promises.pipeline(stream, res)
+  } catch (err) {
+    // If the downstream request is cancelled, we get an
+    // ERR_STREAM_PREMATURE_CLOSE, ignore these "errors".
+    if (err?.code === 'ERR_STREAM_PREMATURE_CLOSE') return
+
+    logger.warn({ err, url, method, range }, 'streaming blob error')
+    throw err
+  }
+}
+
+function setBlobCacheHeaders(res, etag) {
+  // Blobs are immutable, so they can in principle be cached indefinitely. Here,
+  // we ask the browser to cache them for some time, but then check back
+  // regularly in case they changed (even though they shouldn't). This is a
+  // precaution in case a bug makes us send bad data through that endpoint.
+  res.set(
+    'Cache-Control',
+    `private, max-age=${REVALIDATE_BLOB_AFTER_SECONDS}, stale-while-revalidate=${STALE_WHILE_REVALIDATE_SECONDS}`
+  )
+  res.set('ETag', etag)
+}
 
 module.exports = HistoryController = {
-  selectHistoryApi(req, res, next) {
-    const { Project_id: projectId } = req.params
-    // find out which type of history service this project uses
-    ProjectDetailsHandler.getDetails(projectId, function (err, project) {
-      if (err) {
-        return next(err)
-      }
-      const history = project.overleaf && project.overleaf.history
-      if (history && history.id && history.display) {
-        req.useProjectHistory = true
-      } else {
-        req.useProjectHistory = false
-      }
-      next()
-    })
-  },
-
-  ensureProjectHistoryEnabled(req, res, next) {
-    if (req.useProjectHistory) {
-      next()
-    } else {
-      res.sendStatus(404)
-    }
-  },
+  getBlob: expressify(getBlob),
+  headBlob: expressify(headBlob),
 
   proxyToHistoryApi(req, res, next) {
     const userId = SessionManager.getLoggedInUserId(req.session)
-    const url =
-      HistoryController.buildHistoryServiceUrl(req.useProjectHistory) + req.url
+    const url = settings.apis.project_history.url + req.url
 
     const getReq = request({
       url,
@@ -65,8 +115,7 @@ module.exports = HistoryController = {
 
   proxyToHistoryApiAndInjectUserDetails(req, res, next) {
     const userId = SessionManager.getLoggedInUserId(req.session)
-    const url =
-      HistoryController.buildHistoryServiceUrl(req.useProjectHistory) + req.url
+    const url = settings.apis.project_history.url + req.url
     HistoryController._makeRequest(
       {
         url,
@@ -90,29 +139,31 @@ module.exports = HistoryController = {
     )
   },
 
-  buildHistoryServiceUrl(useProjectHistory) {
-    // choose a history service, either document-level (trackchanges)
-    // or project-level (project_history)
-    if (useProjectHistory) {
-      return settings.apis.project_history.url
-    } else {
-      return settings.apis.trackchanges.url
-    }
-  },
-
   resyncProjectHistory(req, res, next) {
     // increase timeout to 6 minutes
     res.setTimeout(6 * 60 * 1000)
     const projectId = req.params.Project_id
-    ProjectEntityUpdateHandler.resyncProjectHistory(projectId, function (err) {
-      if (err instanceof Errors.ProjectHistoryDisabledError) {
-        return res.sendStatus(404)
+    const opts = {}
+    const historyRangesMigration = req.body.historyRangesMigration
+    if (historyRangesMigration) {
+      opts.historyRangesMigration = historyRangesMigration
+    }
+    if (req.body.resyncProjectStructureOnly) {
+      opts.resyncProjectStructureOnly = req.body.resyncProjectStructureOnly
+    }
+    ProjectEntityUpdateHandler.resyncProjectHistory(
+      projectId,
+      opts,
+      function (err) {
+        if (err instanceof Errors.ProjectHistoryDisabledError) {
+          return res.sendStatus(404)
+        }
+        if (err) {
+          return next(err)
+        }
+        res.sendStatus(204)
       }
-      if (err) {
-        return next(err)
-      }
-      res.sendStatus(204)
-    })
+    )
   },
 
   restoreFileFromV2(req, res, next) {
@@ -136,25 +187,38 @@ module.exports = HistoryController = {
     )
   },
 
-  restoreDocFromDeletedDoc(req, res, next) {
-    const { project_id: projectId, doc_id: docId } = req.params
-    const { name } = req.body
+  revertFile(req, res, next) {
+    const { project_id: projectId } = req.params
+    const { version, pathname } = req.body
     const userId = SessionManager.getLoggedInUserId(req.session)
-    if (name == null) {
-      return res.sendStatus(400) // Malformed request
-    }
-    RestoreManager.restoreDocFromDeletedDoc(
+    RestoreManager.revertFile(
       userId,
       projectId,
-      docId,
-      name,
-      (err, doc) => {
-        if (err) return next(err)
+      version,
+      pathname,
+      {},
+      function (err, entity) {
+        if (err) {
+          return next(err)
+        }
         res.json({
-          doc_id: doc._id,
+          type: entity.type,
+          id: entity._id,
         })
       }
     )
+  },
+
+  revertProject(req, res, next) {
+    const { project_id: projectId } = req.params
+    const { version } = req.body
+    const userId = SessionManager.getLoggedInUserId(req.session)
+    RestoreManager.revertProject(userId, projectId, version, function (err) {
+      if (err) {
+        return next(err)
+      }
+      res.sendStatus(200)
+    })
   },
 
   getLabels(req, res, next) {
@@ -186,8 +250,8 @@ module.exports = HistoryController = {
     HistoryController._makeRequest(
       {
         method: 'POST',
-        url: `${settings.apis.project_history.url}/project/${projectId}/user/${userId}/labels`,
-        json: { comment, version },
+        url: `${settings.apis.project_history.url}/project/${projectId}/labels`,
+        json: { comment, version, user_id: userId },
       },
       function (err, label) {
         if (err) {
@@ -205,7 +269,9 @@ module.exports = HistoryController = {
 
   _enrichLabel(label, callback) {
     if (!label.user_id) {
-      return callback(null, label)
+      const newLabel = Object.assign({}, label)
+      newLabel.user_display_name = HistoryController._displayNameForUser(null)
+      return callback(null, newLabel)
     }
     UserGetter.getUser(
       label.user_id,
@@ -227,7 +293,8 @@ module.exports = HistoryController = {
     }
     const uniqueUsers = new Set(labels.map(label => label.user_id))
 
-    // For backwards compatibility expect missing user_id fields
+    // For backwards compatibility, and for anonymously created labels in SP
+    // expect missing user_id fields
     uniqueUsers.delete(undefined)
 
     if (!uniqueUsers.size) {
@@ -245,7 +312,6 @@ module.exports = HistoryController = {
 
         labels.forEach(label => {
           const user = users.get(label.user_id)
-          if (!user) return
           label.user_display_name = HistoryController._displayNameForUser(user)
         })
         callback(null, labels)
@@ -276,16 +342,35 @@ module.exports = HistoryController = {
   deleteLabel(req, res, next) {
     const { Project_id: projectId, label_id: labelId } = req.params
     const userId = SessionManager.getLoggedInUserId(req.session)
-    HistoryController._makeRequest(
+
+    ProjectGetter.getProject(
+      projectId,
       {
-        method: 'DELETE',
-        url: `${settings.apis.project_history.url}/project/${projectId}/user/${userId}/labels/${labelId}`,
+        owner_ref: true,
       },
-      function (err) {
+      (err, project) => {
         if (err) {
           return next(err)
         }
-        res.sendStatus(204)
+
+        // If the current user is the project owner, we can use the non-user-specific delete label endpoint.
+        // Otherwise, we have to use the user-specific version (which only deletes the label if it is owned by the user)
+        const deleteEndpointUrl = project.owner_ref.equals(userId)
+          ? `${settings.apis.project_history.url}/project/${projectId}/labels/${labelId}`
+          : `${settings.apis.project_history.url}/project/${projectId}/user/${userId}/labels/${labelId}`
+
+        HistoryController._makeRequest(
+          {
+            method: 'DELETE',
+            url: deleteEndpointUrl,
+          },
+          function (err) {
+            if (err) {
+              return next(err)
+            }
+            res.sendStatus(204)
+          }
+        )
       }
     )
   },
@@ -354,13 +439,34 @@ module.exports = HistoryController = {
     if (!Features.hasFeature('saas')) {
       const getReq = request({ ...options, method: 'get' })
 
-      pipeline(getReq, res, function (err) {
-        // If the downstream request is cancelled, we get an
-        // ERR_STREAM_PREMATURE_CLOSE.
-        if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
-          logger.error({ url, err }, 'history API error')
-          next(err)
+      getReq.on('error', function (err) {
+        logger.warn({ err, v1ProjectId, version }, 'history zip download error')
+        res.sendStatus(500)
+      })
+      getReq.on('response', function (response) {
+        const statusCode = response.statusCode
+        if (statusCode !== 200) {
+          logger.warn(
+            { v1ProjectId, version, statusCode },
+            'history zip download failed'
+          )
+          if (statusCode === 404) {
+            res.sendStatus(404)
+          } else {
+            res.sendStatus(500)
+          }
+          return
         }
+
+        prepareZipAttachment(res, `${name}.zip`)
+        pipeline(response, res, function (err) {
+          // If the downstream request is cancelled, we get an
+          // ERR_STREAM_PREMATURE_CLOSE.
+          if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+            logger.error({ err, v1ProjectId, version }, 'history API error')
+            next(err)
+          }
+        })
       })
       return
     }

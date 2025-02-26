@@ -1,5 +1,6 @@
 const _ = require('lodash')
 const { db, ObjectId } = require('../../infrastructure/mongodb')
+const Modules = require('../../infrastructure/Modules')
 const { callbackify } = require('util')
 const { Project } = require('../../models/Project')
 const { DeletedProject } = require('../../models/DeletedProject')
@@ -16,10 +17,10 @@ const DocstoreManager = require('../Docstore/DocstoreManager')
 const EditorRealTimeController = require('../Editor/EditorRealTimeController')
 const HistoryManager = require('../History/HistoryManager')
 const FilestoreHandler = require('../FileStore/FileStoreHandler')
-const TpdsUpdateSender = require('../ThirdPartyDataStore/TpdsUpdateSender')
 const ChatApiHandler = require('../Chat/ChatApiHandler')
 const moment = require('moment')
-const { promiseMapWithLimit } = require('../../util/promises')
+const { promiseMapWithLimit } = require('@overleaf/promise-utils')
+const { READ_PREFERENCE_SECONDARY } = require('../../infrastructure/mongodb')
 
 const EXPIRE_PROJECTS_AFTER_DAYS = 90
 const PROJECT_EXPIRATION_BATCH_SIZE = 10000
@@ -89,12 +90,12 @@ async function expireDeletedProjectsAfterDuration() {
       'deleterData.deletedAt': {
         $lt: new Date(moment().subtract(EXPIRE_PROJECTS_AFTER_DAYS, 'days')),
       },
-      project: { $ne: null },
+      project: { $type: 'object' },
     },
     { 'deleterData.deletedProjectId': 1 }
   )
     .limit(PROJECT_EXPIRATION_BATCH_SIZE)
-    .read('secondary')
+    .read(READ_PREFERENCE_SECONDARY)
   const projectIds = _.shuffle(
     deletedProjects.map(
       deletedProject => deletedProject.deleterData.deletedProjectId
@@ -126,7 +127,7 @@ async function archiveProject(projectId, userId) {
 
     await Project.updateOne(
       { _id: projectId },
-      { $set: { archived }, $pull: { trashed: ObjectId(userId) } }
+      { $set: { archived }, $pull: { trashed: new ObjectId(userId) } }
     )
   } catch (err) {
     logger.warn({ err }, 'problem archiving project')
@@ -170,7 +171,7 @@ async function trashProject(projectId, userId) {
     await Project.updateOne(
       { _id: projectId },
       {
-        $addToSet: { trashed: ObjectId(userId) },
+        $addToSet: { trashed: new ObjectId(userId) },
         $set: { archived },
       }
     )
@@ -189,7 +190,7 @@ async function untrashProject(projectId, userId) {
 
     await Project.updateOne(
       { _id: projectId },
-      { $pull: { trashed: ObjectId(userId) } }
+      { $pull: { trashed: new ObjectId(userId) } }
     )
   } catch (err) {
     logger.warn({ err }, 'problem untrashing project')
@@ -278,7 +279,7 @@ async function deleteProject(projectId, options = {}) {
 }
 
 async function undeleteProject(projectId, options = {}) {
-  projectId = ObjectId(projectId)
+  projectId = new ObjectId(projectId)
   const deletedProject = await DeletedProject.findOne({
     'deleterData.deletedProjectId': projectId,
   }).exec()
@@ -380,12 +381,10 @@ async function expireDeletedProject(projectId) {
         historyId
       ),
       FilestoreHandler.promises.deleteProject(deletedProject.project._id),
-      TpdsUpdateSender.promises.deleteProject({
-        projectId: deletedProject.project._id,
-      }),
       ChatApiHandler.promises.destroyProject(deletedProject.project._id),
       hardDeleteDeletedFiles(deletedProject.project._id),
       ProjectAuditLogEntry.deleteMany({ projectId }),
+      Modules.promises.hooks.fire('projectExpired', deletedProject.project._id),
     ])
 
     await DeletedProject.updateOne(
@@ -419,9 +418,8 @@ let deletedFilesProjectIdIndexExist
 async function doesDeletedFilesProjectIdIndexExist() {
   if (typeof deletedFilesProjectIdIndexExist !== 'boolean') {
     // Resolve this about once. No need for locking or retry handling.
-    deletedFilesProjectIdIndexExist = await db.deletedFiles.indexExists(
-      'projectId_1'
-    )
+    deletedFilesProjectIdIndexExist =
+      await db.deletedFiles.indexExists('projectId_1')
   }
   return deletedFilesProjectIdIndexExist
 }

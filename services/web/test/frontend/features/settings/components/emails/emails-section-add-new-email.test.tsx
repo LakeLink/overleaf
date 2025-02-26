@@ -10,6 +10,8 @@ import { expect } from 'chai'
 import fetchMock from 'fetch-mock'
 import { UserEmailData } from '../../../../../../types/user-email'
 import { Affiliation } from '../../../../../../types/affiliation'
+import withMarkup from '../../../../helpers/with-markup'
+import getMeta from '@/utils/meta'
 
 const userEmailData: UserEmailData & { affiliation: Affiliation } = {
   affiliation: {
@@ -21,6 +23,7 @@ const userEmailData: UserEmailData & { affiliation: Affiliation } = {
     department: 'Art History',
     institution: {
       commonsAccount: false,
+      writefullCommonsAccount: false,
       confirmed: true,
       id: 1,
       isUniversity: true,
@@ -57,9 +60,22 @@ function resetFetchMock() {
   fetchMock.get('express:/institutions/domains', [])
 }
 
+async function confirmCodeForEmail(email: string) {
+  screen.getByText(`Enter the 6-digit confirmation code sent to ${email}.`)
+  const inputCode = screen.getByLabelText(/6-digit confirmation code/i)
+  fireEvent.change(inputCode, { target: { value: '123456' } })
+  const submitCodeBtn = screen.getByRole<HTMLButtonElement>('button', {
+    name: 'Confirm',
+  })
+  fireEvent.click(submitCodeBtn)
+  await waitForElementToBeRemoved(() =>
+    screen.getByRole('button', { name: /confirming/i })
+  )
+}
+
 describe('<EmailsSection />', function () {
   beforeEach(function () {
-    window.metaAttributesCache.set('ol-ExposedSettings', {
+    Object.assign(getMeta('ol-ExposedSettings'), {
       hasAffiliationsFeature: true,
       hasSamlFeature: true,
       samlInitPath: 'saml/init',
@@ -68,7 +84,6 @@ describe('<EmailsSection />', function () {
   })
 
   afterEach(function () {
-    window.metaAttributesCache = new Map()
     resetFetchMock()
   })
 
@@ -149,6 +164,23 @@ describe('<EmailsSection />', function () {
     screen.getByRole('button', { name: /add new email/i })
   })
 
+  it('prevent users from adding new emails when the limit is reached', async function () {
+    const emails = []
+    for (let i = 0; i < 10; i++) {
+      emails.push({ email: `bar${i}@overleaf.com` })
+    }
+    fetchMock.get('/user/emails?ensureAffiliation=true', emails)
+    render(<EmailsSection />)
+
+    const findByTextWithMarkup = withMarkup(screen.findByText)
+    await findByTextWithMarkup(
+      'You can have a maximum of 10 email addresses on this account. To add another email address, please delete an existing one.'
+    )
+
+    expect(screen.queryByRole('button', { name: /add another email/i })).to.not
+      .exist
+  })
+
   it('adds new email address', async function () {
     fetchMock.get('/user/emails?ensureAffiliation=true', [])
     render(<EmailsSection />)
@@ -162,7 +194,8 @@ describe('<EmailsSection />', function () {
     resetFetchMock()
     fetchMock
       .get('/user/emails?ensureAffiliation=true', [userEmailData])
-      .post('/user/emails', 200)
+      .post('/user/emails/secondary', 200)
+      .post('/user/emails/confirm-secondary', 200)
 
     fireEvent.click(addAnotherEmailBtn)
     const input = screen.getByLabelText(/email/i)
@@ -187,6 +220,7 @@ describe('<EmailsSection />', function () {
       })
     )
 
+    await confirmCodeForEmail(userEmailData.email)
     screen.getByText(userEmailData.email)
   })
 
@@ -203,7 +237,7 @@ describe('<EmailsSection />', function () {
     resetFetchMock()
     fetchMock
       .get('/user/emails?ensureAffiliation=true', [])
-      .post('/user/emails', 400)
+      .post('/user/emails/secondary', 400)
 
     fireEvent.click(addAnotherEmailBtn)
     const input = screen.getByLabelText(/email/i)
@@ -321,7 +355,8 @@ describe('<EmailsSection />', function () {
 
     fetchMock
       .get('/user/emails?ensureAffiliation=true', [userEmailDataCopy])
-      .post(/\/user\/emails/, 200)
+      .post('/user/emails/secondary', 200)
+      .post('/user/emails/confirm-secondary', 200)
 
     await userEvent.click(
       screen.getByRole('button', {
@@ -331,7 +366,7 @@ describe('<EmailsSection />', function () {
 
     const [[, request]] = fetchMock.calls(/\/user\/emails/)
 
-    expect(JSON.parse(request?.body?.toString() || '{}')).to.deep.equal({
+    expect(JSON.parse(request?.body?.toString() || '{}')).to.deep.include({
       email: userEmailData.email,
       university: {
         id: userEmailData.affiliation?.institution.id,
@@ -340,8 +375,12 @@ describe('<EmailsSection />', function () {
       department: customDepartment,
     })
 
-    screen.getByText(userEmailData.email)
-    screen.getByText(userEmailData.affiliation.institution.name)
+    screen.getByText(
+      `Enter the 6-digit confirmation code sent to ${userEmailData.email}.`
+    )
+
+    await confirmCodeForEmail(userEmailData.email)
+
     screen.getByText(userEmailData.affiliation.role!, { exact: false })
     screen.getByText(customDepartment, { exact: false })
   })
@@ -466,7 +505,8 @@ describe('<EmailsSection />', function () {
 
     fetchMock
       .get('/user/emails?ensureAffiliation=true', [userEmailDataCopy])
-      .post(/\/user\/emails/, 200)
+      .post('/user/emails/secondary', 200)
+      .post('/user/emails/confirm-secondary', 200)
 
     await userEvent.click(
       screen.getByRole('button', {
@@ -474,9 +514,11 @@ describe('<EmailsSection />', function () {
       })
     )
 
+    await confirmCodeForEmail(userEmailData.email)
+
     const [[, request]] = fetchMock.calls(/\/user\/emails/)
 
-    expect(JSON.parse(request?.body?.toString() || '{}')).to.deep.equal({
+    expect(JSON.parse(request?.body?.toString() || '{}')).to.deep.include({
       email: userEmailData.email,
       university: {
         name: newUniversity,
@@ -616,7 +658,8 @@ describe('<EmailsSection />', function () {
 
     fetchMock
       .get('/user/emails?ensureAffiliation=true', [userEmailDataCopy])
-      .post('/user/emails', 200)
+      .post('/user/emails/secondary', 200)
+      .post('/user/emails/confirm-secondary', 200)
 
     await userEvent.type(
       screen.getByRole('textbox', { name: /role/i }),
@@ -631,6 +674,8 @@ describe('<EmailsSection />', function () {
         name: /add new email/i,
       })
     )
+
+    await confirmCodeForEmail('user@autocomplete.edu')
 
     await fetchMock.flush(true)
     fetchMock.reset()

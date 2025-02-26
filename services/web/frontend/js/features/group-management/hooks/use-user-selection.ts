@@ -6,8 +6,15 @@ export default function useUserSelection(initialUsers: User[]) {
   const [selectedUsers, setSelectedUsers] = useState<User[]>([])
 
   const selectAllUsers = () => setSelectedUsers(users)
-
   const unselectAllUsers = () => setSelectedUsers([])
+
+  const selectAllNonManagedUsers = useCallback(() => {
+    // Pending: user.enrollment will be `undefined`
+    // Not managed: user.enrollment will be an empty object
+    const nonManagedUsers = users.filter(user => !user.enrollment?.managedBy)
+
+    setSelectedUsers(nonManagedUsers)
+  }, [users])
 
   const selectUser = useCallback((user: User) => {
     setSelectedUsers(users => [...users, user])
@@ -25,5 +32,6 @@ export default function useUserSelection(initialUsers: User[]) {
     unselectUser,
     selectAllUsers,
     unselectAllUsers,
+    selectAllNonManagedUsers,
   }
 }

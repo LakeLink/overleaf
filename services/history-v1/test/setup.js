@@ -4,6 +4,9 @@ const config = require('config')
 const fetch = require('node-fetch')
 const { knex, mongodb } = require('../storage')
 
+// ensure every ObjectId has the id string as a property for correct comparisons
+require('mongodb').ObjectId.cacheHexString = true
+
 chai.use(chaiAsPromised)
 
 async function setupPostgresDatabase() {
@@ -32,6 +35,7 @@ async function createGcsBuckets() {
     config.get('blobStore.projectBucket'),
     config.get('chunkStore.bucket'),
     config.get('zipStore.bucket'),
+    'fake-user-files-gcs',
   ]) {
     await fetch('http://gcs:9090/storage/v1/b', {
       method: 'POST',

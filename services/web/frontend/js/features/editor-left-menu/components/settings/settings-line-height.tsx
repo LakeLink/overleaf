@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
-import type { LineHeight } from '../../../../../../modules/source-editor/frontend/js/extensions/theme'
 import { useProjectSettingsContext } from '../../context/project-settings-context'
 import SettingsMenuSelect from './settings-menu-select'
+import { LineHeight } from '@/shared/utils/styles'
 
 export default function SettingsLineHeight() {
   const { t } = useTranslation()

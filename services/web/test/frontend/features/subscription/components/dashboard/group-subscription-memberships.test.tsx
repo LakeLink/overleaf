@@ -16,6 +16,8 @@ import {
   groupActiveSubscriptionWithPendingLicenseChange,
 } from '../../fixtures/subscriptions'
 import * as useLocationModule from '../../../../../../frontend/js/shared/hooks/use-location'
+import { UserId } from '../../../../../../types/user'
+import { SplitTestProvider } from '@/shared/context/split-test-context'
 
 const userId = 'fff999fff999'
 const memberGroupSubscriptions: MemberGroupSubscription[] = [
@@ -24,7 +26,7 @@ const memberGroupSubscriptions: MemberGroupSubscription[] = [
     userIsGroupManager: false,
     planLevelName: 'Professional',
     admin_id: {
-      id: 'abc123abc123',
+      id: 'abc123abc123' as UserId,
       email: 'you@example.com',
     },
   },
@@ -33,33 +35,32 @@ const memberGroupSubscriptions: MemberGroupSubscription[] = [
     userIsGroupManager: true,
     planLevelName: 'Collaborator',
     admin_id: {
-      id: 'bcd456bcd456',
+      id: 'bcd456bcd456' as UserId,
       email: 'someone@example.com',
     },
   },
-]
+] as MemberGroupSubscription[]
 
 describe('<GroupSubscriptionMemberships />', function () {
   beforeEach(function () {
-    window.metaAttributesCache = new Map()
     window.metaAttributesCache.set(
       'ol-memberGroupSubscriptions',
       memberGroupSubscriptions
     )
-    window.user_id = userId
+    window.metaAttributesCache.set('ol-user_id', userId)
   })
 
   afterEach(function () {
-    window.metaAttributesCache = new Map()
-    delete window.user_id
     fetchMock.reset()
   })
 
   it('renders all group subscriptions not managed', function () {
     render(
-      <SubscriptionDashboardProvider>
-        <GroupSubscriptionMemberships />
-      </SubscriptionDashboardProvider>
+      <SplitTestProvider>
+        <SubscriptionDashboardProvider>
+          <GroupSubscriptionMemberships />
+        </SubscriptionDashboardProvider>
+      </SplitTestProvider>
     )
 
     const elements = screen.getAllByText('You are on our', {
@@ -78,13 +79,17 @@ describe('<GroupSubscriptionMemberships />', function () {
       reloadStub = sinon.stub()
       this.locationStub = sinon.stub(useLocationModule, 'useLocation').returns({
         assign: sinon.stub(),
+        replace: sinon.stub(),
         reload: reloadStub,
+        setHash: sinon.stub(),
       })
 
       render(
-        <SubscriptionDashboardProvider>
-          <GroupSubscriptionMemberships />
-        </SubscriptionDashboardProvider>
+        <SplitTestProvider>
+          <SubscriptionDashboardProvider>
+            <GroupSubscriptionMemberships />
+          </SubscriptionDashboardProvider>
+        </SplitTestProvider>
       )
 
       const leaveGroupButton = screen.getByText('Leave group')
@@ -129,9 +134,11 @@ describe('<GroupSubscriptionMemberships />', function () {
     window.metaAttributesCache.set('ol-memberGroupSubscriptions', undefined)
 
     render(
-      <SubscriptionDashboardProvider>
-        <GroupSubscriptionMemberships />
-      </SubscriptionDashboardProvider>
+      <SplitTestProvider>
+        <SubscriptionDashboardProvider>
+          <GroupSubscriptionMemberships />
+        </SubscriptionDashboardProvider>
+      </SplitTestProvider>
     )
     const elements = screen.queryAllByText('You are on our', {
       exact: false,

@@ -5,16 +5,15 @@ import getMeta from '../../../../utils/meta'
 import SettingsMenuSelect, { Option } from './settings-menu-select'
 import { useProjectSettingsContext } from '../../context/project-settings-context'
 import type { OverallThemeMeta } from '../../../../../../types/project-settings'
-import type { OverallTheme } from '../../../../../../modules/source-editor/frontend/js/extensions/theme'
+import { isIEEEBranded } from '@/utils/is-ieee-branded'
+import { OverallTheme } from '@/shared/utils/styles'
 
 export default function SettingsOverallTheme() {
   const { t } = useTranslation()
   const overallThemes = getMeta('ol-overallThemes') as
     | OverallThemeMeta[]
     | undefined
-  const { loadingStyleSheet } = useLayoutContext() as {
-    loadingStyleSheet: boolean
-  }
+  const { loadingStyleSheet } = useLayoutContext()
   const { overallTheme, setOverallTheme } = useProjectSettingsContext()
 
   const options: Array<Option<OverallTheme>> = useMemo(
@@ -26,10 +25,7 @@ export default function SettingsOverallTheme() {
     [overallThemes]
   )
 
-  // TODO: check for IEEE brand by:
-  // - const brandVariation = getMeta('ol-brandVariation') as any[]
-  // - settings.overleaf != null && !isIEEE(brandVariation)
-  if (!overallThemes) {
+  if (!overallThemes || isIEEEBranded()) {
     return null
   }
 

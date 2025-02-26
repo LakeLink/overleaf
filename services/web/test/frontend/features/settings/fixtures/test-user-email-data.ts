@@ -24,6 +24,7 @@ export const professionalUserData: UserEmailData & {
     department: 'Art History',
     institution: {
       commonsAccount: false,
+      writefullCommonsAccount: false,
       confirmed: true,
       id: 1,
       isUniversity: false,
@@ -44,6 +45,38 @@ export const professionalUserData: UserEmailData & {
   default: true,
 }
 
+export const unconfirmedCommonsUserData: UserEmailData & {
+  affiliation: Affiliation
+} = {
+  affiliation: {
+    cachedConfirmedAt: null,
+    cachedEntitlement: null,
+    cachedLastDayToReconfirm: null,
+    cachedPastReconfirmDate: false,
+    cachedReconfirmedAt: null,
+    department: 'Art History',
+    institution: {
+      commonsAccount: true,
+      writefullCommonsAccount: false,
+      confirmed: true,
+      id: 1,
+      isUniversity: false,
+      maxConfirmationMonths: null,
+      name: 'Overleaf',
+      ssoEnabled: false,
+      ssoBeta: false,
+    },
+    inReconfirmNotificationPeriod: false,
+    inferred: false,
+    licence: 'free',
+    pastReconfirmDate: false,
+    portal: { slug: '', templates_count: 1 },
+    role: 'Reader',
+  },
+  email: 'qux@overleaf.com',
+  default: true,
+}
+
 export const ssoUserData: UserEmailData = {
   affiliation: {
     cachedConfirmedAt: '2022-02-03T11:46:28.249Z',
@@ -54,6 +87,7 @@ export const ssoUserData: UserEmailData = {
     department: 'Art History',
     institution: {
       commonsAccount: true,
+      writefullCommonsAccount: false,
       confirmed: true,
       id: 2,
       isUniversity: true,
@@ -79,4 +113,5 @@ export const fakeUsersData = [
   { ...confirmedUserData },
   { ...unconfirmedUserData },
   { ...professionalUserData },
+  { ...unconfirmedCommonsUserData },
 ]

@@ -1,13 +1,15 @@
-import getMeta from '../../../utils/meta'
 import HumanReadableLogs from '../../../ide/human-readable-logs/HumanReadableLogs'
 import BibLogParser from '../../../ide/log-parser/bib-log-parser'
-import { v4 as uuid } from 'uuid'
 import { enablePdfCaching } from './pdf-caching-flags'
-import { fetchFromCompileDomain, swapDomain } from './fetchFromCompileDomain'
-import { userContentDomainAccessCheckPassed } from '../../user-content-domain-access-check'
+import { debugConsole } from '@/utils/debugging'
+import { dirname, findEntityByPath } from '@/features/file-tree/util/path'
+import '@/utils/readable-stream-async-iterator-polyfill'
 
 // Warnings that may disappear after a second LaTeX pass
 const TRANSIENT_WARNING_REGEX = /^(Reference|Citation).+undefined on input line/
+
+const MAX_LOG_SIZE = 1024 * 1024 // 1MB
+const MAX_BIB_LOG_SIZE_PER_FILE = MAX_LOG_SIZE
 
 export function handleOutputFiles(outputFiles, projectId, data) {
   const outputFile = outputFiles.get('output.pdf')
@@ -29,8 +31,7 @@ export function handleOutputFiles(outputFiles, projectId, data) {
 
   outputFile.pdfUrl = `${buildURL(
     outputFile,
-    data.pdfDownloadDomain,
-    data.enableHybridPdfDownload
+    data.pdfDownloadDomain
   )}?${params}`
 
   // build the URL for downloading the PDF
@@ -39,6 +40,12 @@ export function handleOutputFiles(outputFiles, projectId, data) {
   outputFile.pdfDownloadUrl = `/download/project/${projectId}/build/${outputFile.build}/output/output.pdf?${params}`
 
   return outputFile
+}
+
+let nextEntryId = 1
+
+function generateEntryKey() {
+  return 'compile-log-entry-' + nextEntryId++
 }
 
 export const handleLogFiles = async (outputFiles, data, signal) => {
@@ -61,7 +68,7 @@ export const handleLogFiles = async (outputFiles, data, signal) => {
           if (entry.file) {
             entry.file = normalizeFilePath(entry.file)
           }
-          entry.key = uuid()
+          entry.key = generateEntryKey()
         }
         result.logEntries[key].push(...newEntries[key])
       }
@@ -71,20 +78,16 @@ export const handleLogFiles = async (outputFiles, data, signal) => {
   const logFile = outputFiles.get('output.log')
 
   if (logFile) {
+    result.log = await fetchFileWithSizeLimit(
+      buildURL(logFile, data.pdfDownloadDomain),
+      signal,
+      MAX_LOG_SIZE
+    )
     try {
-      const response = await fetchFromCompileDomain(
-        buildURL(logFile, data.pdfDownloadDomain, data.enableHybridPdfDownload),
-        { signal }
-      )
-
-      result.log = await response.text()
-
       let { errors, warnings, typesetting } = HumanReadableLogs.parse(
         result.log,
         {
           ignoreDuplicates: true,
-          oldRegexes:
-            getMeta('ol-splitTestVariants')?.['latex-log-parser'] !== 'new',
         }
       )
 
@@ -95,31 +98,30 @@ export const handleLogFiles = async (outputFiles, data, signal) => {
 
       accumulateResults({ errors, warnings, typesetting })
     } catch (e) {
-      console.warn(e) // ignore failure to fetch/parse the log file, but log a warning
+      debugConsole.warn(e) // ignore failure to parse the log file, but log a warning
     }
   }
 
-  const blgFile = outputFiles.get('output.blg')
+  const blgFiles = []
 
-  if (blgFile) {
+  for (const [filename, file] of outputFiles) {
+    if (filename.endsWith('.blg')) {
+      blgFiles.push(file)
+    }
+  }
+  for (const blgFile of blgFiles) {
+    const log = await fetchFileWithSizeLimit(
+      buildURL(blgFile, data.pdfDownloadDomain),
+      signal,
+      MAX_BIB_LOG_SIZE_PER_FILE
+    )
     try {
-      const response = await fetchFromCompileDomain(
-        buildURL(blgFile, data.pdfDownloadDomain, data.enableHybridPdfDownload),
-        { signal }
-      )
-
-      const log = await response.text()
-
-      try {
-        const { errors, warnings } = new BibLogParser(log, {
-          maxErrors: 100,
-        }).parse()
-        accumulateResults({ errors, warnings }, 'BibTeX:')
-      } catch (e) {
-        // BibLog parsing errors are ignored
-      }
+      const { errors, warnings } = new BibLogParser(log, {
+        maxErrors: 100,
+      }).parse()
+      accumulateResults({ errors, warnings }, 'BibTeX:')
     } catch (e) {
-      console.warn(e) // ignore failure to fetch/parse the log file, but log a warning
+      // BibLog parsing errors are ignored
     }
   }
 
@@ -132,28 +134,43 @@ export const handleLogFiles = async (outputFiles, data, signal) => {
   return result
 }
 
-export function buildLogEntryAnnotations(entries, fileTreeManager) {
-  const rootDocDirname = fileTreeManager.getRootDocDirname()
+export function buildLogEntryAnnotations(entries, fileTreeData, rootDocId) {
+  const rootDocDirname = dirname(fileTreeData, rootDocId)
 
   const logEntryAnnotations = {}
+  const seenLine = {}
 
   for (const entry of entries) {
     if (entry.file) {
       entry.file = normalizeFilePath(entry.file, rootDocDirname)
 
-      const entity = fileTreeManager.findEntityByPath(entry.file)
+      const entity = findEntityByPath(fileTreeData, entry.file)?.entity
 
       if (entity) {
-        if (!(entity.id in logEntryAnnotations)) {
-          logEntryAnnotations[entity.id] = []
+        if (!(entity._id in logEntryAnnotations)) {
+          logEntryAnnotations[entity._id] = []
         }
 
-        logEntryAnnotations[entity.id].push({
+        const annotation = {
+          id: entry.key,
+          entryIndex: logEntryAnnotations[entity._id].length, // used for maintaining the order of items on the same line
           row: entry.line - 1,
           type: entry.level === 'error' ? 'error' : 'warning',
           text: entry.message,
           source: 'compile', // NOTE: this is used in Ace for filtering the annotations
-        })
+          ruleId: entry.ruleId,
+          command: entry.command,
+        }
+
+        // set firstOnLine for the first non-typesetting annotation on a line
+        if (entry.level !== 'typesetting') {
+          if (!seenLine[entry.line]) {
+            annotation.firstOnLine = true
+            seenLine[entry.line] = true
+          }
+        }
+
+        logEntryAnnotations[entity._id].push(annotation)
       }
     }
   }
@@ -161,20 +178,36 @@ export function buildLogEntryAnnotations(entries, fileTreeManager) {
   return logEntryAnnotations
 }
 
-function buildURL(file, pdfDownloadDomain, enableHybridPdfDownload) {
-  const userContentDomain = getMeta('ol-compilesUserContentDomain')
-  if (
-    enableHybridPdfDownload &&
-    userContentDomainAccessCheckPassed() &&
-    file.build &&
-    userContentDomain
-  ) {
-    // This user is enrolled in the hybrid download of compile output.
-    // The access check passed, so try to use the new user content domain.
-    // Downloads from the compiles domains must include a build id.
-    // The build id is used implicitly for access control.
-    return swapDomain(`${pdfDownloadDomain}${file.url}`, userContentDomain)
+export const buildRuleCounts = (entries = []) => {
+  const counts = {}
+  for (const entry of entries) {
+    const key = `${entry.level}_${entry.ruleId}`
+    counts[key] = counts[key] ? counts[key] + 1 : 1
   }
+  return counts
+}
+
+export const buildRuleDeltas = (ruleCounts, previousRuleCounts) => {
+  const counts = {}
+
+  // keys that are defined in the current log entries
+  for (const [key, value] of Object.entries(ruleCounts)) {
+    const previousValue = previousRuleCounts[key] ?? 0
+    counts[`delta_${key}`] = value - previousValue
+  }
+
+  // keys that are no longer defined in the current log entries
+  for (const [key, value] of Object.entries(previousRuleCounts)) {
+    if (!(key in ruleCounts)) {
+      counts[key] = 0
+      counts[`delta_${key}`] = -value
+    }
+  }
+
+  return counts
+}
+
+function buildURL(file, pdfDownloadDomain) {
   if (file.build && pdfDownloadDomain) {
     // Downloads from the compiles domain must include a build id.
     // The build id is used implicitly for access control.
@@ -202,4 +235,34 @@ function normalizeFilePath(path, rootDocDirname) {
 
 function isTransientWarning(warning) {
   return TRANSIENT_WARNING_REGEX.test(warning.message)
+}
+
+async function fetchFileWithSizeLimit(url, signal, maxSize) {
+  let result = ''
+  try {
+    const abortController = new AbortController()
+    // abort fetching the log file if the main signal is aborted
+    signal.addEventListener('abort', () => {
+      abortController.abort()
+    })
+
+    const response = await fetch(url, {
+      signal: abortController.signal,
+    })
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch log file')
+    }
+
+    const reader = response.body.pipeThrough(new TextDecoderStream())
+    for await (const chunk of reader) {
+      result += chunk
+      if (result.length > maxSize) {
+        abortController.abort()
+      }
+    }
+  } catch (e) {
+    debugConsole.warn(e) // ignore failure to fetch the log file, but log a warning
+  }
+  return result
 }

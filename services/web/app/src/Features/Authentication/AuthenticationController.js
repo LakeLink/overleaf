@@ -11,7 +11,6 @@ const basicAuth = require('basic-auth')
 const tsscmp = require('tsscmp')
 const UserHandler = require('../User/UserHandler')
 const UserSessionsManager = require('../User/UserSessionsManager')
-const SessionStoreManager = require('../../infrastructure/SessionStoreManager')
 const Analytics = require('../Analytics/AnalyticsManager')
 const passport = require('passport')
 const NotificationsBuilder = require('../Notifications/NotificationsBuilder')
@@ -23,9 +22,11 @@ const AnalyticsRegistrationSourceHelper = require('../Analytics/AnalyticsRegistr
 const {
   acceptsJson,
 } = require('../../infrastructure/RequestContentTypeDetection')
-const { ParallelLoginError } = require('./AuthenticationErrors')
 const { hasAdminAccess } = require('../Helpers/AdminAuthorizationHelper')
 const Modules = require('../../infrastructure/Modules')
+const { expressify, promisify } = require('@overleaf/promise-utils')
+const { handleAuthenticateErrors } = require('./AuthenticationErrors')
+const EmailHelper = require('../Helpers/EmailHelper')
 
 function send401WithChallenge(res) {
   res.setHeader('WWW-Authenticate', 'OverleafLogin')
@@ -46,6 +47,21 @@ function checkCredentials(userDetailsMap, user, password) {
   return isValid
 }
 
+function reduceStaffAccess(staffAccess) {
+  const reducedStaffAccess = {}
+  for (const field in staffAccess) {
+    if (staffAccess[field]) {
+      reducedStaffAccess[field] = true
+    }
+  }
+  return reducedStaffAccess
+}
+
+function userHasStaffAccess(user) {
+  return user.staffAccess && Object.values(user.staffAccess).includes(true)
+}
+
+// TODO: Finish making these methods async
 const AuthenticationController = {
   serializeUser(user, callback) {
     if (!user._id || !user.email) {
@@ -57,8 +73,6 @@ const AuthenticationController = {
       _id: user._id,
       first_name: user.first_name,
       last_name: user.last_name,
-      isAdmin: user.isAdmin,
-      staffAccess: user.staffAccess,
       email: user.email,
       referal_id: user.referal_id,
       session_created: new Date().toISOString(),
@@ -66,7 +80,16 @@ const AuthenticationController = {
       must_reconfirm: user.must_reconfirm,
       v1_id: user.overleaf != null ? user.overleaf.id : undefined,
       analyticsId: user.analyticsId || user._id,
+      alphaProgram: user.alphaProgram || undefined, // only store if set
+      betaProgram: user.betaProgram || undefined, // only store if set
     }
+    if (user.isAdmin) {
+      lightUser.isAdmin = true
+    }
+    if (userHasStaffAccess(user)) {
+      lightUser.staffAccess = reduceStaffAccess(user.staffAccess)
+    }
+
     callback(null, lightUser)
   },
 
@@ -78,36 +101,57 @@ const AuthenticationController = {
     // This function is middleware which wraps the passport.authenticate middleware,
     // so we can send back our custom `{message: {text: "", type: ""}}` responses on failure,
     // and send a `{redir: ""}` response on success
-    passport.authenticate('local', function (err, user, info) {
-      if (err) {
-        return next(err)
-      }
-      if (user) {
-        // `user` is either a user object or false
-        AuthenticationController.setAuditInfo(req, { method: 'Password login' })
-        return AuthenticationController.finishLogin(user, req, res, next)
-      } else {
-        if (info.redir != null) {
-          return res.json({ redir: info.redir })
-        } else {
-          res.status(info.status || 200)
-          delete info.status
-          const body = { message: info }
-          const { errorReason } = info
-          if (errorReason) {
-            body.errorReason = errorReason
-            delete info.errorReason
+    passport.authenticate(
+      'local',
+      { keepSessionInfo: true },
+      async function (err, user, info) {
+        if (err) {
+          return next(err)
+        }
+        if (user) {
+          // `user` is either a user object or false
+          AuthenticationController.setAuditInfo(req, {
+            method: 'Password login',
+          })
+
+          try {
+            // We could investigate whether this can be done together with 'preFinishLogin' instead of being its own hook
+            await Modules.promises.hooks.fire(
+              'saasLogin',
+              { email: user.email },
+              req
+            )
+            await AuthenticationController.promises.finishLogin(user, req, res)
+          } catch (err) {
+            return next(err)
           }
-          return res.json(body)
+        } else {
+          if (info.redir != null) {
+            return res.json({ redir: info.redir })
+          } else {
+            res.status(info.status || 200)
+            delete info.status
+            const body = { message: info }
+            const { errorReason } = info
+            if (errorReason) {
+              body.errorReason = errorReason
+              delete info.errorReason
+            }
+            return res.json(body)
+          }
         }
       }
-    })(req, res, next)
+    )(req, res, next)
   },
 
-  finishLogin(user, req, res, next) {
+  async _finishLoginAsync(user, req, res) {
     if (user === false) {
       return AsyncFormHelper.redirect(req, res, '/login')
     } // OAuth2 'state' mismatch
+
+    if (user.suspended) {
+      return AsyncFormHelper.redirect(req, res, '/account-suspended')
+    }
 
     if (Settings.adminOnlyLogin && !hasAdminAccess(user)) {
       return res.status(403).json({
@@ -120,128 +164,151 @@ const AuthenticationController = {
     const anonymousAnalyticsId = req.session.analyticsId
     const isNewUser = req.session.justRegistered || false
 
-    Modules.hooks.fire(
+    const results = await Modules.promises.hooks.fire(
       'preFinishLogin',
       req,
       res,
-      user,
-      function (error, results) {
-        if (error) {
-          return next(error)
-        }
-        if (results.some(result => result && result.doNotFinish)) {
-          return
-        }
+      user
+    )
 
-        if (user.must_reconfirm) {
-          return AuthenticationController._redirectToReconfirmPage(
-            req,
-            res,
-            user
-          )
-        }
+    if (results.some(result => result && result.doNotFinish)) {
+      return
+    }
 
-        const redir =
-          AuthenticationController._getRedirectFromSession(req) || '/project'
-        _loginAsyncHandlers(req, user, anonymousAnalyticsId, isNewUser)
-        const userId = user._id
-        UserAuditLogHandler.addEntry(
-          userId,
-          'login',
-          userId,
-          req.ip,
-          auditInfo,
-          err => {
-            if (err) {
-              return next(err)
-            }
-            _afterLoginSessionSetup(req, user, function (err) {
-              if (err) {
-                return next(err)
-              }
-              AuthenticationController._clearRedirectFromSession(req)
-              AnalyticsRegistrationSourceHelper.clearSource(req.session)
-              AnalyticsRegistrationSourceHelper.clearInbound(req.session)
-              AsyncFormHelper.redirect(req, res, redir)
-            })
-          }
-        )
-      }
+    if (user.must_reconfirm) {
+      return AuthenticationController._redirectToReconfirmPage(req, res, user)
+    }
+
+    const redir =
+      AuthenticationController.getRedirectFromSession(req) || '/project'
+
+    _loginAsyncHandlers(req, user, anonymousAnalyticsId, isNewUser)
+    const userId = user._id
+
+    await UserAuditLogHandler.promises.addEntry(
+      userId,
+      'login',
+      userId,
+      req.ip,
+      auditInfo
+    )
+
+    await _afterLoginSessionSetupAsync(req, user)
+
+    AuthenticationController._clearRedirectFromSession(req)
+    AnalyticsRegistrationSourceHelper.clearSource(req.session)
+    AnalyticsRegistrationSourceHelper.clearInbound(req.session)
+    AsyncFormHelper.redirect(req, res, redir)
+  },
+
+  finishLogin(user, req, res, next) {
+    AuthenticationController._finishLoginAsync(user, req, res).catch(err =>
+      next(err)
     )
   },
 
-  doPassportLogin(req, username, password, done) {
-    const email = username.toLowerCase()
-    Modules.hooks.fire(
-      'preDoPassportLogin',
-      req,
-      email,
-      function (err, infoList) {
-        if (err) {
-          return done(err)
-        }
-        const info = infoList.find(i => i != null)
-        if (info != null) {
-          return done(null, false, info)
-        }
-        LoginRateLimiter.processLoginRequest(email, function (err, isAllowed) {
-          if (err) {
-            return done(err)
-          }
-          if (!isAllowed) {
-            logger.debug({ email }, 'too many login requests')
-            return done(null, null, {
-              text: req.i18n.translate('to_many_login_requests_2_mins'),
-              type: 'error',
-              status: 429,
-            })
-          }
-          const auditLog = {
-            ipAddress: req.ip,
-            info: { method: 'Password login' },
-          }
-          AuthenticationManager.authenticate(
-            { email },
-            password,
-            auditLog,
-            function (error, user) {
-              if (error != null) {
-                if (error instanceof ParallelLoginError) {
-                  return done(null, false, { status: 429 })
-                }
-                return done(error)
-              }
-              if (
-                user &&
-                AuthenticationController.captchaRequiredForLogin(req, user)
-              ) {
-                done(null, false, {
-                  text: req.i18n.translate('cannot_verify_user_not_robot'),
-                  type: 'error',
-                  errorReason: 'cannot_verify_user_not_robot',
-                  status: 400,
-                })
-              } else if (user) {
-                // async actions
-                done(null, user)
-              } else {
-                AuthenticationController._recordFailedLogin()
-                logger.debug({ email }, 'failed log in')
-                done(null, false, {
-                  text: req.i18n.translate('email_or_password_wrong_try_again'),
-                  type: 'error',
-                  status: 401,
-                })
-              }
-            }
-          )
-        })
+  async doPassportLogin(req, username, password, done) {
+    let user, info
+    try {
+      ;({ user, info } = await AuthenticationController._doPassportLogin(
+        req,
+        username,
+        password
+      ))
+    } catch (error) {
+      return done(error)
+    }
+    return done(undefined, user, info)
+  },
+
+  /**
+   *
+   * @param req
+   * @param username
+   * @param password
+   * @returns {Promise<{ user: any, info: any}>}
+   */
+  async _doPassportLogin(req, username, password) {
+    const email = EmailHelper.parseEmail(username)
+    if (!email) {
+      Metrics.inc('login_failure_reason', 1, { status: 'invalid_email' })
+      return {
+        user: null,
+        info: {
+          status: 400,
+          type: 'error',
+          text: req.i18n.translate('email_address_is_invalid'),
+        },
       }
-    )
+    }
+    AuthenticationController.setAuditInfo(req, { method: 'Password login' })
+
+    const { fromKnownDevice } = AuthenticationController.getAuditInfo(req)
+    const auditLog = {
+      ipAddress: req.ip,
+      info: { method: 'Password login', fromKnownDevice },
+    }
+
+    let user, isPasswordReused
+    try {
+      ;({ user, isPasswordReused } =
+        await AuthenticationManager.promises.authenticate(
+          { email },
+          password,
+          auditLog,
+          {
+            enforceHIBPCheck: !fromKnownDevice,
+          }
+        ))
+    } catch (error) {
+      return {
+        user: false,
+        info: handleAuthenticateErrors(error, req),
+      }
+    }
+
+    if (user && AuthenticationController.captchaRequiredForLogin(req, user)) {
+      Metrics.inc('login_failure_reason', 1, { status: 'captcha_missing' })
+      return {
+        user: false,
+        info: {
+          text: req.i18n.translate('cannot_verify_user_not_robot'),
+          type: 'error',
+          errorReason: 'cannot_verify_user_not_robot',
+          status: 400,
+        },
+      }
+    } else if (user) {
+      if (
+        isPasswordReused &&
+        AuthenticationController.getRedirectFromSession(req) == null
+      ) {
+        AuthenticationController.setRedirectInSession(
+          req,
+          '/compromised-password'
+        )
+      }
+
+      // async actions
+      return { user, info: undefined }
+    } else {
+      Metrics.inc('login_failure_reason', 1, { status: 'password_invalid' })
+      AuthenticationController._recordFailedLogin()
+      logger.debug({ email }, 'failed log in')
+      return {
+        user: false,
+        info: {
+          type: 'error',
+          key: 'invalid-password-retry-or-reset',
+          status: 401,
+        },
+      }
+    }
   },
 
   captchaRequiredForLogin(req, user) {
     switch (AuthenticationController.getAuditInfo(req).captcha) {
+      case 'trusted':
       case 'disabled':
         return false
       case 'solved':
@@ -290,6 +357,7 @@ const AuthenticationController = {
         return AuthenticationController._redirectToLoginOrRegisterPage(req, res)
       } else {
         req.user = SessionManager.getSessionUser(req.session)
+        req.logger?.addFields({ userId: req.user._id })
         return next()
       }
     }
@@ -297,64 +365,46 @@ const AuthenticationController = {
     return doRequest
   },
 
-  requireOauth() {
-    // require this here because module may not be included in some versions
-    const Oauth2Server = require('../../../../modules/oauth2-server/app/src/Oauth2Server')
-    return function (req, res, next) {
-      if (next == null) {
-        next = function () {}
-      }
-      const request = new Oauth2Server.Request(req)
-      const response = new Oauth2Server.Response(res)
-      return Oauth2Server.server.authenticate(
-        request,
-        response,
-        {},
-        function (err, token) {
-          if (err) {
-            // use a 401 status code for malformed header for git-bridge
-            if (
-              err.code === 400 &&
-              err.message === 'Invalid request: malformed authorization header'
-            ) {
-              err.code = 401
-            }
-            // send all other errors
-            return res
-              .status(err.code)
-              .json({ error: err.name, error_description: err.message })
-          }
-          req.oauth = { access_token: token.accessToken }
-          req.oauth_token = token
-          req.oauth_user = token.user
-          return next()
-        }
+  /**
+   * @param {string} scope
+   * @return {import('express').Handler}
+   */
+  requireOauth(scope) {
+    if (typeof scope !== 'string' || !scope) {
+      throw new Error(
+        "requireOauth() expects a non-empty string as 'scope' parameter"
       )
     }
-  },
 
-  validateUserSession: function () {
-    // Middleware to check that the user's session is still good on key actions,
-    // such as opening a a project. Could be used to check that session has not
-    // exceeded a maximum lifetime (req.session.session_created), or for session
-    // hijacking checks (e.g. change of ip address, req.session.ip_address). For
-    // now, just check that the session has been loaded from the session store
-    // correctly.
-    return function (req, res, next) {
-      // check that the session store is returning valid results
-      if (req.session && !SessionStoreManager.hasValidationToken(req)) {
-        // force user to update session
-        req.session.regenerate(() => {
-          // need to destroy the existing session and generate a new one
-          // otherwise they will already be logged in when they are redirected
-          // to the login page
-          if (acceptsJson(req)) return send401WithChallenge(res)
-          AuthenticationController._redirectToLoginOrRegisterPage(req, res)
-        })
-      } else {
+    // require this here because module may not be included in some versions
+    const Oauth2Server = require('../../../../modules/oauth2-server/app/src/Oauth2Server')
+    const middleware = async (req, res, next) => {
+      const request = new Oauth2Server.Request(req)
+      const response = new Oauth2Server.Response(res)
+      try {
+        const token = await Oauth2Server.server.authenticate(
+          request,
+          response,
+          { scope }
+        )
+        req.oauth = { access_token: token.accessToken }
+        req.oauth_token = token
+        req.oauth_user = token.user
         next()
+      } catch (err) {
+        if (
+          err.code === 400 &&
+          err.message === 'Invalid request: malformed authorization header'
+        ) {
+          err.code = 401
+        }
+        // send all other errors
+        res
+          .status(err.code)
+          .json({ error: err.name, error_description: err.message })
       }
     }
+    return expressify(middleware)
   },
 
   _globalLoginWhitelist: [],
@@ -471,7 +521,7 @@ const AuthenticationController = {
   _redirectToLoginOrRegisterPage(req, res) {
     if (
       req.query.zipUrl != null ||
-      req.query.project_name != null ||
+      req.session.sharedProjectData ||
       req.path === '/user/subscription/new'
     ) {
       AuthenticationController._redirectToRegisterPage(req, res)
@@ -537,7 +587,7 @@ const AuthenticationController = {
     if (callback) callback()
   },
 
-  _getRedirectFromSession(req) {
+  getRedirectFromSession(req) {
     let safePath
     const value = _.get(req, ['session', 'postLoginRedirect'])
     if (value) {
@@ -554,61 +604,42 @@ const AuthenticationController = {
 }
 
 function _afterLoginSessionSetup(req, user, callback) {
-  if (callback == null) {
-    callback = function () {}
-  }
-  req.login(user, function (err) {
+  req.login(user, { keepSessionInfo: true }, function (err) {
     if (err) {
       OError.tag(err, 'error from req.login', {
         user_id: user._id,
       })
       return callback(err)
     }
-    // Regenerate the session to get a new sessionID (cookie value) to
-    // protect against session fixation attacks
-    const oldSession = req.session
-    req.session.destroy(function (err) {
+    delete req.session.__tmp
+    delete req.session.csrfSecret
+    req.session.save(function (err) {
       if (err) {
-        OError.tag(err, 'error when trying to destroy old session', {
+        OError.tag(err, 'error saving regenerated session after login', {
           user_id: user._id,
         })
         return callback(err)
       }
-      req.sessionStore.generate(req)
-      // Note: the validation token is not writable, so it does not get
-      // transferred to the new session below.
-      for (const key in oldSession) {
-        const value = oldSession[key]
-        if (key !== '__tmp' && key !== 'csrfSecret') {
-          req.session[key] = value
-        }
+      UserSessionsManager.trackSession(user, req.sessionID, function () {})
+      if (!req.deviceHistory) {
+        // Captcha disabled or SSO-based login.
+        return callback()
       }
-      req.session.save(function (err) {
-        if (err) {
-          OError.tag(err, 'error saving regenerated session after login', {
-            user_id: user._id,
-          })
-          return callback(err)
-        }
-        UserSessionsManager.trackSession(user, req.sessionID, function () {})
-        if (!req.deviceHistory) {
-          // Captcha disabled or SSO-based login.
-          return callback()
-        }
-        req.deviceHistory.add(user.email)
-        req.deviceHistory
-          .serialize(req.res)
-          .catch(err => {
-            logger.err({ err }, 'cannot serialize deviceHistory')
-          })
-          .finally(() => callback())
-      })
+      req.deviceHistory.add(user.email)
+      req.deviceHistory
+        .serialize(req.res)
+        .catch(err => {
+          logger.err({ err }, 'cannot serialize deviceHistory')
+        })
+        .finally(() => callback())
     })
   })
 }
 
+const _afterLoginSessionSetupAsync = promisify(_afterLoginSessionSetup)
+
 function _loginAsyncHandlers(req, user, anonymousAnalyticsId, isNewUser) {
-  UserHandler.setupLoginData(user, err => {
+  UserHandler.populateTeamInvites(user, err => {
     if (err != null) {
       logger.warn({ err }, 'error setting up login data')
     }
@@ -616,7 +647,7 @@ function _loginAsyncHandlers(req, user, anonymousAnalyticsId, isNewUser) {
   LoginRateLimiter.recordSuccessfulLogin(user.email, () => {})
   AuthenticationController._recordSuccessfulLogin(user._id, () => {})
   AuthenticationController.ipMatchCheck(req, user)
-  Analytics.recordEventForUser(user._id, 'user-logged-in', {
+  Analytics.recordEventForUserInBackground(user._id, 'user-logged-in', {
     source: req.session.saml
       ? 'saml'
       : req.user_info?.auth_provider || 'email-password',
@@ -631,6 +662,10 @@ function _loginAsyncHandlers(req, user, anonymousAnalyticsId, isNewUser) {
   req.session.justLoggedIn = true
   // capture the request ip for use when creating the session
   return (user._login_req_ip = req.ip)
+}
+
+AuthenticationController.promises = {
+  finishLogin: AuthenticationController._finishLoginAsync,
 }
 
 module.exports = AuthenticationController

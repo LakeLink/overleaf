@@ -1,7 +1,7 @@
 import { MongoUser } from './user'
 import { Folder } from './folder'
 
-type ProjectMember = {
+export type ProjectMember = {
   _id: string
   type: 'user'
   privileges: 'readOnly' | 'readAndWrite'
@@ -25,6 +25,7 @@ export type Project = {
   owner: MongoUser
   members: ProjectMember[]
   invites: ProjectInvite[]
-  rootDocId?: string
+  rootDoc_id?: string
   rootFolder?: Folder[]
+  deletedByExternalDataSource?: boolean
 }

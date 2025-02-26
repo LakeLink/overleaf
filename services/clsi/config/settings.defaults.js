@@ -1,4 +1,11 @@
-const Path = require('path')
+const Path = require('node:path')
+const os = require('node:os')
+const http = require('node:http')
+const https = require('node:https')
+
+http.globalAgent.keepAlive = false
+https.globalAgent.keepAlive = false
+const isPreEmptible = os.hostname().includes('pre-emp')
 
 module.exports = {
   compileSizeLimit: process.env.COMPILE_SIZE_LIMIT || '7mb',
@@ -23,24 +30,28 @@ module.exports = {
   internal: {
     clsi: {
       port: 3013,
-      host: process.env.LISTEN_ADDRESS || 'localhost',
+      host: process.env.LISTEN_ADDRESS || '127.0.0.1',
     },
 
     load_balancer_agent: {
-      report_load: true,
+      report_load: process.env.LOAD_BALANCER_AGENT_REPORT_LOAD !== 'false',
       load_port: 3048,
       local_port: 3049,
+      allow_maintenance:
+        (
+          process.env.LOAD_BALANCER_AGENT_ALLOW_MAINTENANCE ?? ''
+        ).toLowerCase() !== 'false',
     },
   },
   apis: {
     clsi: {
       // Internal requests (used by tests only at the time of writing).
-      url: `http://${process.env.CLSI_HOST || 'localhost'}:3013`,
+      url: `http://${process.env.CLSI_HOST || '127.0.0.1'}:3013`,
       // External url prefix for output files, e.g. for requests via load-balancers.
       outputUrlPrefix: `${process.env.ZONE ? `/zone/${process.env.ZONE}` : ''}`,
     },
     clsiPerf: {
-      host: `${process.env.CLSI_PERF_HOST || 'localhost'}:${
+      host: `${process.env.CLSI_PERF_HOST || '127.0.0.1'}:${
         process.env.CLSI_PERF_PORT || '3043'
       }`,
     },
@@ -53,10 +64,6 @@ module.exports = {
   texliveImageNameOveride: process.env.TEX_LIVE_IMAGE_NAME_OVERRIDE,
   texliveOpenoutAny: process.env.TEXLIVE_OPENOUT_ANY,
   texliveMaxPrintLine: process.env.TEXLIVE_MAX_PRINT_LINE,
-  sentry: {
-    dsn: process.env.SENTRY_DSN,
-  },
-
   enablePdfCaching: process.env.ENABLE_PDF_CACHING === 'true',
   enablePdfCachingDark: process.env.ENABLE_PDF_CACHING_DARK === 'true',
   pdfCachingMinChunkSize:
@@ -69,6 +76,7 @@ module.exports = {
     parseInt(process.env.PDF_CACHING_WORKER_POOL_SIZE, 10) || 4,
   pdfCachingWorkerPoolBackLogLimit:
     parseInt(process.env.PDF_CACHING_WORKER_POOL_BACK_LOG_LIMIT, 10) || 40,
+  compileConcurrencyLimit: isPreEmptible ? 32 : 64,
 }
 
 if (process.env.ALLOWED_COMPILE_GROUPS) {
@@ -127,7 +135,7 @@ if (process.env.DOCKER_RUNNER) {
   try {
     seccompProfilePath = Path.resolve(__dirname, '../seccomp/clsi-profile.json')
     module.exports.clsi.docker.seccomp_profile = JSON.stringify(
-      JSON.parse(require('fs').readFileSync(seccompProfilePath))
+      JSON.parse(require('node:fs').readFileSync(seccompProfilePath))
     )
   } catch (error) {
     console.error(
@@ -159,6 +167,4 @@ if (process.env.DOCKER_RUNNER) {
   module.exports.path.synctexBaseDir = () => '/compile'
 
   module.exports.path.sandboxedCompilesHostDir = process.env.COMPILES_HOST_DIR
-
-  module.exports.path.synctexBinHostPath = process.env.SYNCTEX_BIN_HOST_PATH
 }

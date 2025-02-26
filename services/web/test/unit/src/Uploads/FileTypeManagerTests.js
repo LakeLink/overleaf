@@ -38,6 +38,18 @@ describe('FileTypeManager', function () {
     this.fs.readFile
       .withArgs('utf8-control-chars.tex')
       .yields(null, Buffer.from(`${fileContents}\x0c${fileContents}`))
+    this.fs.readFile
+      .withArgs('text-short.tex')
+      .yields(null, Buffer.from('a'.repeat(0.5 * 1024 * 1024), 'utf-8'))
+    this.fs.readFile
+      .withArgs('text-smaller.tex')
+      .yields(null, Buffer.from('a'.repeat(2 * 1024 * 1024 - 1), 'utf-8'))
+    this.fs.readFile
+      .withArgs('text-exact.tex')
+      .yields(null, Buffer.from('a'.repeat(2 * 1024 * 1024), 'utf-8'))
+    this.fs.readFile
+      .withArgs('text-long.tex')
+      .yields(null, Buffer.from('a'.repeat(3 * 1024 * 1024), 'utf-8'))
     this.callback = sinon.stub()
     this.DocumentHelper = { getEncodingFromTexContent: sinon.stub() }
     this.FileTypeManager = SandboxedModule.require(modulePath, {
@@ -90,6 +102,15 @@ describe('FileTypeManager', function () {
         '/file.m',
         '/something/file.m',
         '/file.TEX',
+        '/file.lhs',
+        '/file.xmpdata',
+        '/file.cfg',
+        '/file.Rnw',
+        '/file.ltx',
+        '/file.inc',
+        '/makefile',
+        '/Makefile',
+        '/GNUMakefile',
       ]
       TEXT_FILENAMES.forEach(filename => {
         it(`should classify ${filename} as text`, function (done) {
@@ -108,8 +129,72 @@ describe('FileTypeManager', function () {
         })
       })
 
+      it('should not classify short text files as binary', function (done) {
+        this.stats.size = 2 * 1024 * 1024 // 2MB
+        this.FileTypeManager.getType(
+          '/file.tex',
+          'text-short.tex',
+          null,
+          (err, { binary }) => {
+            if (err) {
+              return done(err)
+            }
+            binary.should.equal(false)
+            done()
+          }
+        )
+      })
+
+      it('should not classify text files just under the size limit as binary', function (done) {
+        this.stats.size = 2 * 1024 * 1024 // 2MB
+        this.FileTypeManager.getType(
+          '/file.tex',
+          'text-smaller.tex',
+          null,
+          (err, { binary }) => {
+            if (err) {
+              return done(err)
+            }
+            binary.should.equal(false)
+            done()
+          }
+        )
+      })
+
+      it('should classify text files at the size limit as binary', function (done) {
+        this.stats.size = 2 * 1024 * 1024 // 2MB
+        this.FileTypeManager.getType(
+          '/file.tex',
+          'text-exact.tex',
+          null,
+          (err, { binary }) => {
+            if (err) {
+              return done(err)
+            }
+            binary.should.equal(true)
+            done()
+          }
+        )
+      })
+
+      it('should classify long text files as binary', function (done) {
+        this.stats.size = 2 * 1024 * 1024 // 2MB
+        this.FileTypeManager.getType(
+          '/file.tex',
+          'text-long.tex',
+          null,
+          (err, { binary }) => {
+            if (err) {
+              return done(err)
+            }
+            binary.should.equal(true)
+            done()
+          }
+        )
+      })
+
       it('should classify large text files as binary', function (done) {
-        this.stats.size = 2 * 1024 * 1024 // 2Mb
+        this.stats.size = 8 * 1024 * 1024 // 8MB
         this.FileTypeManager.getType(
           '/file.tex',
           'utf8.tex',
@@ -125,7 +210,7 @@ describe('FileTypeManager', function () {
       })
 
       it('should not try to determine the encoding of large files', function (done) {
-        this.stats.size = 2 * 1024 * 1024 // 2Mb
+        this.stats.size = 8 * 1024 * 1024 // 8MB
         this.FileTypeManager.getType('/file.tex', 'utf8.tex', null, err => {
           if (err) {
             return done(err)

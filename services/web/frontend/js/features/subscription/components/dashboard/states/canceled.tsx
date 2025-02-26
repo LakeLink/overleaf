@@ -1,7 +1,7 @@
 import { useTranslation, Trans } from 'react-i18next'
 import { RecurlySubscription } from '../../../../../../../types/subscription/dashboard/subscription'
-import PremiumFeaturesLink from '../premium-features-link'
 import ReactivateSubscription from '../reactivate-subscription'
+import OLButton from '@/features/ui/components/ol/ol-button'
 
 export function CanceledSubscription({
   subscription,
@@ -18,6 +18,8 @@ export function CanceledSubscription({
           values={{
             planName: subscription.plan.name,
           }}
+          shouldUnescape
+          tOptions={{ interpolation: { escapeValue: true } }}
           components={[
             // eslint-disable-next-line react/jsx-key
             <strong />,
@@ -30,22 +32,23 @@ export function CanceledSubscription({
           values={{
             terminateDate: subscription.recurly.nextPaymentDueAt,
           }}
+          shouldUnescape
+          tOptions={{ interpolation: { escapeValue: true } }}
           components={[
             // eslint-disable-next-line react/jsx-key
             <strong />,
           ]}
         />
       </p>
-      <PremiumFeaturesLink />
       <p>
-        <a
+        <OLButton
           href={subscription.recurly.accountManagementLink}
           target="_blank"
+          variant="secondary"
           rel="noopener noreferrer"
-          className="btn btn-secondary-info btn-secondary"
         >
           {t('view_your_invoices')}
-        </a>
+        </OLButton>
       </p>
       <ReactivateSubscription />
     </>

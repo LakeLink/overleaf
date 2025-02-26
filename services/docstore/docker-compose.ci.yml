@@ -17,18 +17,11 @@ services:
   test_acceptance:
     build: .
     image: ci/$PROJECT_NAME:$BRANCH_NAME-$BUILD_NUMBER
-    extends:
-      file: docker-compose-config.yml
-      service: ci
     environment:
       ELASTIC_SEARCH_DSN: es:9200
-      REDIS_HOST: redis
-      QUEUES_REDIS_HOST: redis
-      ANALYTICS_QUEUES_REDIS_HOST: redis
       MONGO_HOST: mongo
       POSTGRES_HOST: postgres
-      GCS_API_ENDPOINT: gcs:9090
-      GCS_API_SCHEME: http
+      GCS_API_ENDPOINT: http://gcs:9090
       GCS_PROJECT_ID: fake
       STORAGE_EMULATOR_HOST: http://gcs:9090/storage/v1
       MOCHA_GREP: ${MOCHA_GREP}
@@ -40,7 +33,7 @@ services:
       gcs:
         condition: service_healthy
     user: node
-    command: npm run test:acceptance:_run
+    command: npm run test:acceptance
 
 
   tar:
@@ -51,13 +44,14 @@ services:
     command: tar -czf /tmp/build/build.tar.gz --exclude=build.tar.gz --exclude-vcs .
     user: root
   mongo:
-    image: mongo:4.4.16
+    image: mongo:6.0.13
+    command: --replSet overleaf
     healthcheck:
-      test: "mongo --quiet localhost/test --eval 'quit(db.runCommand({ ping: 1 }).ok ? 0 : 1)'"
+      test: "mongosh --quiet localhost/test --eval 'quit(db.runCommand({ ping: 1 }).ok ? 0 : 1)'"
       interval: 1s
       retries: 20
   gcs:
-    image: fsouza/fake-gcs-server:v1.21.2
+    image: fsouza/fake-gcs-server:1.45.2
     command: ["--port=9090", "--scheme=http"]
     healthcheck:
       test: wget --quiet --output-document=/dev/null http://localhost:9090/storage/v1/b

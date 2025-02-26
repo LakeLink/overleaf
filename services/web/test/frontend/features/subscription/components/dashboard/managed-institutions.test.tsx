@@ -1,10 +1,10 @@
 import { expect } from 'chai'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import ManagedInstitutions, {
-  Institution,
-} from '../../../../../../frontend/js/features/subscription/components/dashboard/managed-institutions'
+import ManagedInstitutions from '../../../../../../frontend/js/features/subscription/components/dashboard/managed-institutions'
 import { SubscriptionDashboardProvider } from '../../../../../../frontend/js/features/subscription/context/subscription-dashboard-context'
 import fetchMock from 'fetch-mock'
+import { SplitTestProvider } from '@/shared/context/split-test-context'
+import { ManagedInstitution } from '../../../../../../types/subscription/dashboard/managed-institution'
 
 const userId = 'fff999fff999'
 const institution1 = {
@@ -25,29 +25,28 @@ const institution2 = {
   },
   name: 'Inst 2',
 }
-const managedInstitutions: Institution[] = [institution1, institution2]
+const managedInstitutions: ManagedInstitution[] = [institution1, institution2]
 
 describe('<ManagedInstitutions />', function () {
   beforeEach(function () {
-    window.metaAttributesCache = new Map()
     window.metaAttributesCache.set(
       'ol-managedInstitutions',
       managedInstitutions
     )
-    window.user_id = userId
+    window.metaAttributesCache.set('ol-user_id', userId)
   })
 
   afterEach(function () {
-    window.metaAttributesCache = new Map()
-    delete window.user_id
     fetchMock.reset()
   })
 
   it('renders all managed institutions', function () {
     render(
-      <SubscriptionDashboardProvider>
-        <ManagedInstitutions />
-      </SubscriptionDashboardProvider>
+      <SplitTestProvider>
+        <SubscriptionDashboardProvider>
+          <ManagedInstitutions />
+        </SubscriptionDashboardProvider>
+      </SplitTestProvider>
     )
 
     const elements = screen.getAllByText('You are a', {
@@ -61,32 +60,15 @@ describe('<ManagedInstitutions />', function () {
       'You are a manager of the Overleaf Commons subscription at Inst 2'
     )
 
-    const viewMetricsLinks = screen.getAllByText('View metrics')
-    expect(viewMetricsLinks.length).to.equal(2)
-    expect(viewMetricsLinks[0].getAttribute('href')).to.equal(
-      '/metrics/institutions/123'
-    )
-    expect(viewMetricsLinks[1].getAttribute('href')).to.equal(
-      '/metrics/institutions/456'
-    )
-
-    const viewHubLinks = screen.getAllByText('View hub')
-    expect(viewHubLinks.length).to.equal(2)
-    expect(viewHubLinks[0].getAttribute('href')).to.equal(
-      '/institutions/123/hub'
-    )
-    expect(viewHubLinks[1].getAttribute('href')).to.equal(
-      '/institutions/456/hub'
-    )
-
-    const manageGroupManagersLinks = screen.getAllByText(
-      'Manage institution managers'
-    )
-    expect(manageGroupManagersLinks.length).to.equal(2)
-    expect(manageGroupManagersLinks[0].getAttribute('href')).to.equal(
+    const links = screen.getAllByRole('link')
+    expect(links[0].getAttribute('href')).to.equal('/metrics/institutions/123')
+    expect(links[1].getAttribute('href')).to.equal('/institutions/123/hub')
+    expect(links[2].getAttribute('href')).to.equal(
       '/manage/institutions/123/managers'
     )
-    expect(manageGroupManagersLinks[1].getAttribute('href')).to.equal(
+    expect(links[3].getAttribute('href')).to.equal('/metrics/institutions/456')
+    expect(links[4].getAttribute('href')).to.equal('/institutions/456/hub')
+    expect(links[5].getAttribute('href')).to.equal(
       '/manage/institutions/456/managers'
     )
 
@@ -107,9 +89,11 @@ describe('<ManagedInstitutions />', function () {
     })
 
     render(
-      <SubscriptionDashboardProvider>
-        <ManagedInstitutions />
-      </SubscriptionDashboardProvider>
+      <SplitTestProvider>
+        <SubscriptionDashboardProvider>
+          <ManagedInstitutions />
+        </SubscriptionDashboardProvider>
+      </SplitTestProvider>
     )
 
     const unsubscribeLink = screen.getByText('Unsubscribe')
@@ -131,9 +115,11 @@ describe('<ManagedInstitutions />', function () {
     })
 
     render(
-      <SubscriptionDashboardProvider>
-        <ManagedInstitutions />
-      </SubscriptionDashboardProvider>
+      <SplitTestProvider>
+        <SubscriptionDashboardProvider>
+          <ManagedInstitutions />
+        </SubscriptionDashboardProvider>
+      </SplitTestProvider>
     )
 
     const subscribeLink = screen.getByText('Subscribe')
@@ -149,9 +135,11 @@ describe('<ManagedInstitutions />', function () {
     window.metaAttributesCache.set('ol-managedInstitutions', undefined)
 
     render(
-      <SubscriptionDashboardProvider>
-        <ManagedInstitutions />
-      </SubscriptionDashboardProvider>
+      <SplitTestProvider>
+        <SubscriptionDashboardProvider>
+          <ManagedInstitutions />
+        </SubscriptionDashboardProvider>
+      </SplitTestProvider>
     )
     const elements = screen.queryAllByText('You are a', {
       exact: false,

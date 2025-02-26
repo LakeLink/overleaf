@@ -10,8 +10,8 @@ describe('Sending a message', async function () {
   })
 
   describe('globally', async function () {
-    const projectId = ObjectId().toString()
-    const userId = ObjectId().toString()
+    const projectId = new ObjectId().toString()
+    const userId = new ObjectId().toString()
     const content = 'global message'
     before(async function () {
       const { response, body } = await ChatClient.sendGlobalMessage(
@@ -26,9 +26,8 @@ describe('Sending a message', async function () {
     })
 
     it('should then list the message in the project messages', async function () {
-      const { response, body: messages } = await ChatClient.getGlobalMessages(
-        projectId
-      )
+      const { response, body: messages } =
+        await ChatClient.getGlobalMessages(projectId)
       expect(response.statusCode).to.equal(200)
       expect(messages.length).to.equal(1)
       expect(messages[0].content).to.equal(content)
@@ -36,9 +35,9 @@ describe('Sending a message', async function () {
   })
 
   describe('to a thread', async function () {
-    const projectId = ObjectId().toString()
-    const userId = ObjectId().toString()
-    const threadId = ObjectId().toString()
+    const projectId = new ObjectId().toString()
+    const userId = new ObjectId().toString()
+    const threadId = new ObjectId().toString()
     const content = 'thread message'
     before(async function () {
       const { response, body } = await ChatClient.sendMessage(
@@ -61,18 +60,17 @@ describe('Sending a message', async function () {
     })
 
     it('should not appear in the global messages', async function () {
-      const { response, body: messages } = await ChatClient.getGlobalMessages(
-        projectId
-      )
+      const { response, body: messages } =
+        await ChatClient.getGlobalMessages(projectId)
       expect(response.statusCode).to.equal(200)
       expect(messages.length).to.equal(0)
     })
   })
 
   describe('failure cases', async function () {
-    const projectId = ObjectId().toString()
-    const userId = ObjectId().toString()
-    const threadId = ObjectId().toString()
+    const projectId = new ObjectId().toString()
+    const userId = new ObjectId().toString()
+    const threadId = new ObjectId().toString()
 
     describe('with a malformed userId', async function () {
       it('should return a graceful error', async function () {

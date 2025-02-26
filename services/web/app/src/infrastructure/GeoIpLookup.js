@@ -1,9 +1,11 @@
 const request = require('request')
 const settings = require('@overleaf/settings')
-const _ = require('underscore')
+const _ = require('lodash')
 const logger = require('@overleaf/logger')
 const { URL } = require('url')
-const { promisify, promisifyMultiResult } = require('../util/promises')
+const { promisify, promisifyMultiResult } = require('@overleaf/promise-utils')
+
+const DEFAULT_CURRENCY_CODE = 'USD'
 
 const currencyMappings = {
   GB: 'GBP',
@@ -16,9 +18,23 @@ const currencyMappings = {
   CA: 'CAD',
   SE: 'SEK',
   SG: 'SGD',
+  IN: 'INR',
+  BR: 'BRL',
+  MX: 'MXN',
+  CO: 'COP',
+  CL: 'CLP',
+  PE: 'PEN',
 }
 
-const validCurrencyParams = Object.values(currencyMappings).concat(['EUR'])
+const validCurrencyParams = Object.values(currencyMappings).concat([
+  'EUR',
+  'INR',
+  'BRL',
+  'MXN',
+  'COP',
+  'CLP',
+  'PEN',
+])
 
 // Countries which would likely prefer Euro's
 const EuroCountries = [
@@ -49,7 +65,7 @@ const EuroCountries = [
   'ES',
 ]
 
-_.each(EuroCountries, country => (currencyMappings[country] = 'EUR'))
+_.forEach(EuroCountries, country => (currencyMappings[country] = 'EUR'))
 
 function isValidCurrencyParam(currency) {
   if (!currency) {
@@ -82,15 +98,15 @@ function getCurrencyCode(ip, callback) {
     if (err || !ipDetails) {
       logger.err(
         { err, ip },
-        'problem getting currencyCode for ip, defaulting to USD'
+        `problem getting currencyCode for ip, defaulting to ${DEFAULT_CURRENCY_CODE}`
       )
-      return callback(null, 'USD')
+      return callback(null, DEFAULT_CURRENCY_CODE)
     }
     const countryCode =
       ipDetails && ipDetails.country_code
         ? ipDetails.country_code.toUpperCase()
         : undefined
-    const currencyCode = currencyMappings[countryCode] || 'USD'
+    const currencyCode = currencyMappings[countryCode] || DEFAULT_CURRENCY_CODE
     logger.debug({ ip, currencyCode, ipDetails }, 'got currencyCode for ip')
     callback(err, currencyCode, countryCode)
   })
@@ -107,4 +123,5 @@ module.exports = {
       'countryCode',
     ]),
   },
+  DEFAULT_CURRENCY_CODE,
 }

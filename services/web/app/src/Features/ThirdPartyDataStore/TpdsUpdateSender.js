@@ -1,15 +1,16 @@
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 const _ = require('lodash')
 const { callbackify } = require('util')
 const logger = require('@overleaf/logger')
 const metrics = require('@overleaf/metrics')
 const Path = require('path')
-const fetch = require('node-fetch')
+const { fetchNothing } = require('@overleaf/fetch-utils')
 const settings = require('@overleaf/settings')
+const HistoryURLHelper = require('../History/HistoryURLHelper')
 
 const CollaboratorsGetter =
   require('../Collaborators/CollaboratorsGetter').promises
-const UserGetter = require('../User/UserGetter.js').promises
+const UserGetter = require('../User/UserGetter').promises
 
 const tpdsUrl = _.get(settings, ['apis', 'thirdPartyDataStore', 'url'])
 
@@ -41,6 +42,7 @@ async function addEntity(params) {
     rev,
     folderId,
     streamOrigin,
+    streamFallback,
     entityId,
     entityType,
   } = params
@@ -51,17 +53,16 @@ async function addEntity(params) {
     const job = {
       method: 'post',
       headers: {
-        sl_entity_id: entityId,
-        sl_entity_type: entityType,
-        sl_entity_rev: rev,
-        sl_project_id: projectId,
-        sl_all_user_ids: JSON.stringify([userId]),
-        sl_project_owner_user_id: projectUserIds[0],
-        sl_folder_id: folderId,
+        'x-entity-id': entityId,
+        'x-entity-rev': rev,
+        'x-entity-type': entityType,
+        'x-folder-id': folderId,
+        'x-project-id': projectId,
       },
       uri: buildTpdsUrl(userId, projectName, path),
       title: 'addFile',
       streamOrigin,
+      streamFallback,
     }
 
     await enqueue(userId, 'pipeStreamFrom', job)
@@ -70,10 +71,25 @@ async function addEntity(params) {
 
 async function addFile(params) {
   metrics.inc('tpds.add-file')
-  const { projectId, fileId, path, projectName, rev, folderId } = params
-  const streamOrigin =
-    settings.apis.filestore.url +
-    Path.join(`/project/${projectId}`, `/file/${fileId}`)
+  const {
+    projectId,
+    historyId,
+    fileId,
+    hash,
+    path,
+    projectName,
+    rev,
+    folderId,
+  } = params
+  // Go through project-history to avoid the need for handling history-v1 authentication.
+  const { url, fallbackURL } =
+    HistoryURLHelper.projectHistoryURLWithFilestoreFallback(
+      settings,
+      projectId,
+      historyId,
+      { _id: fileId, hash },
+      'tpdsAddFile'
+    )
 
   await addEntity({
     projectId,
@@ -81,7 +97,8 @@ async function addFile(params) {
     projectName,
     rev,
     folderId,
-    streamOrigin,
+    streamOrigin: url,
+    streamFallback: fallbackURL,
     entityId: fileId,
     entityType: 'file',
   })
@@ -123,11 +140,9 @@ async function deleteEntity(params) {
     const job = {
       method: 'delete',
       headers: {
-        sl_project_id: projectId,
-        sl_all_user_ids: JSON.stringify([userId]),
-        sl_project_owner_user_id: projectUserIds[0],
-        sl_entity_id: entityId,
-        sl_entity_type: entityType,
+        'x-entity-id': entityId,
+        'x-entity-type': entityType,
+        'x-project-id': projectId,
       },
       uri: buildTpdsUrl(userId, projectName, path),
       // We're sending a body with the DELETE request. This is unconventional,
@@ -135,7 +150,6 @@ async function deleteEntity(params) {
       // would be moved to a POST endpoint.
       json: { subtreeEntityIds },
       title: 'deleteEntity',
-      sl_all_user_ids: JSON.stringify([userId]),
     }
 
     await enqueue(userId, 'standardHttpRequest', job)
@@ -143,16 +157,14 @@ async function deleteEntity(params) {
 }
 
 async function createProject(params) {
-  if (!tpdsUrl) return // Server CE/Pro
+  if (!tpdsUrl) return // Overleaf Community Edition/Server Pro
 
-  const { projectId, projectName, ownerId, userId } = params
+  const { projectId, projectName, userId } = params
 
   const job = {
     method: 'post',
     headers: {
-      sl_project_id: projectId.toString(),
-      sl_all_user_ids: JSON.stringify([userId.toString()]),
-      sl_project_owner_user_id: ownerId.toString(),
+      'x-project-id': projectId,
     },
     uri: Path.join(
       tpdsUrl,
@@ -163,46 +175,9 @@ async function createProject(params) {
       encodeURIComponent(projectName)
     ),
     title: 'createProject',
-    sl_all_user_ids: JSON.stringify([userId]),
   }
 
   await enqueue(userId, 'standardHttpRequest', job)
-}
-
-async function deleteProject(params) {
-  const { projectId } = params
-  // deletion only applies to project archiver
-  const projectArchiverUrl = _.get(settings, [
-    'apis',
-    'project_archiver',
-    'url',
-  ])
-  // silently do nothing if project archiver url is not in settings
-  if (!projectArchiverUrl) {
-    return
-  }
-  metrics.inc('tpds.delete-project')
-  // send the request directly to project archiver, bypassing third-party-datastore
-  try {
-    const response = await fetch(
-      `${settings.apis.project_archiver.url}/project/${projectId}`,
-      { method: 'DELETE' }
-    )
-    if (!response.ok) {
-      logger.error(
-        { statusCode: response.status, projectId },
-        'error deleting project in third party datastore (project_archiver)'
-      )
-      return false
-    }
-    return true
-  } catch (err) {
-    logger.error(
-      { err, projectId },
-      'error deleting project in third party datastore (project_archiver)'
-    )
-    return false
-  }
 }
 
 async function enqueue(group, method, job) {
@@ -213,19 +188,11 @@ async function enqueue(group, method, job) {
   }
   try {
     const url = new URL('/enqueue/web_to_tpds_http_requests', tpdsWorkerUrl)
-    const response = await fetch(url, {
+    await fetchNothing(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ group, job, method }),
+      json: { group, job, method },
       signal: AbortSignal.timeout(5 * 1000),
     })
-    if (!response.ok) {
-      // log error and continue
-      logger.error(
-        { statusCode: response.status, group, job, method },
-        'error enqueueing tpdsworker job'
-      )
-    }
   } catch (err) {
     // log error and continue
     logger.error({ err, group, job, method }, 'error enqueueing tpdsworker job')
@@ -239,7 +206,7 @@ async function getProjectUsersIds(projectId) {
   // filter invited users to only return those with dropbox linked
   const dropboxUsers = await UserGetter.getUsers(
     {
-      _id: { $in: userIds.map(id => ObjectId(id)) },
+      _id: { $in: userIds.map(id => new ObjectId(id)) },
       'dropbox.access_token.uid': { $ne: null },
     },
     {
@@ -259,19 +226,17 @@ async function moveEntity(params) {
 
   for (const userId of projectUserIds) {
     const headers = {
-      sl_project_id: projectId,
-      sl_entity_rev: rev,
-      sl_all_user_ids: JSON.stringify([userId]),
-      sl_project_owner_user_id: projectUserIds[0],
+      'x-project-id': projectId,
+      'x-entity-rev': rev,
     }
     if (entityId != null) {
-      headers.sl_entity_id = entityId
+      headers['x-entity-id'] = entityId
     }
     if (entityType != null) {
-      headers.sl_entity_type = entityType
+      headers['x-entity-type'] = entityType
     }
     if (folderId != null) {
-      headers.sl_folder_id = folderId
+      headers['x-folder-id'] = folderId
     }
     const job = {
       method: 'put',
@@ -311,7 +276,6 @@ const TpdsUpdateSender = {
   addFile: callbackify(addFile),
   deleteEntity: callbackify(deleteEntity),
   createProject: callbackify(createProject),
-  deleteProject: callbackify(deleteProject),
   enqueue: callbackify(enqueue),
   moveEntity: callbackify(moveEntity),
   pollDropboxForUser: callbackify(pollDropboxForUser),
@@ -321,7 +285,6 @@ const TpdsUpdateSender = {
     addFile,
     deleteEntity,
     createProject,
-    deleteProject,
     enqueue,
     moveEntity,
     pollDropboxForUser,

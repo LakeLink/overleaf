@@ -1,4 +1,5 @@
-import PublisherManagers from '../../../../../frontend/js/features/group-management/components/publisher-managers'
+import '../../../helpers/bootstrap-3'
+import PublisherManagers from '@/features/group-management/components/publisher-managers'
 
 const JOHN_DOE = {
   _id: 'abc123def456',
@@ -25,7 +26,6 @@ const PATHS = {
 describe('publisher managers', function () {
   beforeEach(function () {
     cy.window().then(win => {
-      win.metaAttributesCache = new Map()
       win.metaAttributesCache.set('ol-users', [JOHN_DOE, BOBBY_LAPOINTE])
       win.metaAttributesCache.set('ol-groupId', GROUP_ID)
       win.metaAttributesCache.set('ol-groupName', 'My Awesome Publisher')

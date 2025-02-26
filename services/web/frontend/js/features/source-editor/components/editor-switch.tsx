@@ -1,146 +1,79 @@
 import { ChangeEvent, FC, memo, useCallback } from 'react'
-import useScopeValue from '../../../shared/hooks/use-scope-value'
-import Tooltip from '../../../shared/components/tooltip'
+import useScopeValue from '@/shared/hooks/use-scope-value'
+import OLTooltip from '@/features/ui/components/ol/ol-tooltip'
+import useTutorial from '@/shared/hooks/promotions/use-tutorial'
 import { sendMB } from '../../../infrastructure/event-tracking'
-import getMeta from '../../../utils/meta'
-import SplitTestBadge from '../../../shared/components/split-test-badge'
-import isValidTeXFile from '../../../main/is-valid-tex-file'
+import { isValidTeXFile } from '../../../main/is-valid-tex-file'
 import { useTranslation } from 'react-i18next'
-
-function Badge() {
-  const content = (
-    <>
-      Overleaf has upgraded the source editor. You can still use the old editor
-      by selecting "Source (legacy)".
-      <br />
-      <br />
-      Click to learn more and give feedback
-    </>
-  )
-
-  return (
-    <Tooltip
-      id="editor-switch"
-      description={content}
-      overlayProps={{
-        placement: 'bottom',
-        delayHide: 100,
-      }}
-      tooltipProps={{ className: 'tooltip-wide' }}
-    >
-      <a
-        href="https://forms.gle/GmSs6odZRKRp3VX98"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="badge info-badge"
-      >
-        <span className="sr-only">{content}</span>
-      </a>
-    </Tooltip>
-  )
-}
-
-const showLegacySourceEditor: boolean = getMeta('ol-showLegacySourceEditor')
-const hasNewSourceEditor: boolean = getMeta('ol-hasNewSourceEditor')
+import {
+  EditorSwitchBeginnerTooltip,
+  codeEditorModePrompt,
+} from './editor-switch-beginner-tooltip'
+import { useEditorManagerContext } from '@/features/ide-react/context/editor-manager-context'
 
 function EditorSwitch() {
-  const [newSourceEditor, setNewSourceEditor] = useScopeValue(
-    'editor.newSourceEditor'
-  )
-  const [richText, setRichText] = useScopeValue('editor.showRichText')
-
+  const { t } = useTranslation()
   const [visual, setVisual] = useScopeValue('editor.showVisual')
+  const [codeEditorOpened] = useScopeValue('editor.codeEditorOpened')
+  const { openDocName } = useEditorManagerContext()
 
-  const [docName] = useScopeValue('editor.open_doc_name')
-  const richTextAvailable = isValidTeXFile(docName)
-  const richTextOrVisual = richText || (richTextAvailable && visual)
+  const richTextAvailable = openDocName ? isValidTeXFile(openDocName) : false
+  const { completeTutorial } = useTutorial(codeEditorModePrompt, {
+    location: 'logs',
+    name: codeEditorModePrompt,
+  })
 
   const handleChange = useCallback(
     event => {
       const editorType = event.target.value
 
       switch (editorType) {
-        case 'ace':
-          setRichText(false)
-          setVisual(false)
-          setNewSourceEditor(false)
-          break
-
         case 'cm6':
-          setRichText(false)
           setVisual(false)
-          setNewSourceEditor(true)
+          if (!codeEditorOpened) {
+            completeTutorial({ event: 'promo-click', action: 'complete' })
+          }
           break
 
         case 'rich-text':
-          if (getMeta('ol-richTextVariant') === 'cm6') {
-            setRichText(false)
-            setVisual(true)
-            setNewSourceEditor(true)
-          } else {
-            setRichText(true)
-            setVisual(false)
-          }
-
+          setVisual(true)
           break
       }
 
       sendMB('editor-switch-change', { editorType })
     },
-    [setRichText, setVisual, setNewSourceEditor]
+    [codeEditorOpened, completeTutorial, setVisual]
   )
 
   return (
-    <div className="editor-toggle-switch">
-      {showLegacySourceEditor ? <Badge /> : null}
-
+    <div
+      className="editor-toggle-switch"
+      aria-label={t('toolbar_code_visual_editor_switch')}
+    >
       <fieldset className="toggle-switch">
         <legend className="sr-only">Editor mode.</legend>
 
-        {hasNewSourceEditor && (
-          <>
-            <input
-              type="radio"
-              name="editor"
-              value="cm6"
-              id="editor-switch-cm6"
-              className="toggle-switch-input"
-              checked={!richTextOrVisual && !!newSourceEditor}
-              onChange={handleChange}
-            />
-            <label htmlFor="editor-switch-cm6" className="toggle-switch-label">
-              <span>Source</span>
-            </label>
-          </>
-        )}
-
-        {showLegacySourceEditor ? (
-          <>
-            <input
-              type="radio"
-              name="editor"
-              value="ace"
-              id="editor-switch-ace"
-              className="toggle-switch-input"
-              checked={!richTextOrVisual && !newSourceEditor}
-              onChange={handleChange}
-            />
-            <label htmlFor="editor-switch-ace" className="toggle-switch-label">
-              <span>{hasNewSourceEditor ? 'Source (legacy)' : 'Source'}</span>
-            </label>
-          </>
-        ) : null}
+        <input
+          type="radio"
+          name="editor"
+          value="cm6"
+          id="editor-switch-cm6"
+          className="toggle-switch-input"
+          checked={!richTextAvailable || !visual}
+          onChange={handleChange}
+        />
+        <EditorSwitchBeginnerTooltip>
+          <label htmlFor="editor-switch-cm6" className="toggle-switch-label">
+            <span>{t('code_editor')}</span>
+          </label>
+        </EditorSwitchBeginnerTooltip>
 
         <RichTextToggle
-          checked={!!richTextOrVisual}
+          checked={richTextAvailable && visual}
           disabled={!richTextAvailable}
           handleChange={handleChange}
         />
       </fieldset>
-
-      {!!richTextOrVisual && (
-        <SplitTestBadge splitTestName="rich-text" displayOnVariants={['cm6']} />
-      )}
     </div>
   )
 }
@@ -165,21 +98,21 @@ const RichTextToggle: FC<{
         disabled={disabled}
       />
       <label htmlFor="editor-switch-rich-text" className="toggle-switch-label">
-        <span>Rich Text</span>
+        <span>{t('visual_editor')}</span>
       </label>
     </span>
   )
 
   if (disabled) {
     return (
-      <Tooltip
-        description={t('rich_text_is_only_available_for_tex_files')}
+      <OLTooltip
+        description={t('visual_editor_is_only_available_for_tex_files')}
         id="rich-text-toggle-tooltip"
         overlayProps={{ placement: 'bottom' }}
         tooltipProps={{ className: 'tooltip-wide' }}
       >
         {toggle}
-      </Tooltip>
+      </OLTooltip>
     )
   }
 

@@ -2,11 +2,11 @@ import { expect } from 'chai'
 import { fireEvent, screen, render } from '@testing-library/react'
 import fetchMock from 'fetch-mock'
 import PasswordSection from '../../../../../frontend/js/features/settings/components/password-section'
+import getMeta from '@/utils/meta'
 
 describe('<PasswordSection />', function () {
   beforeEach(function () {
-    window.metaAttributesCache = window.metaAttributesCache || new Map()
-    window.metaAttributesCache.set('ol-ExposedSettings', {
+    Object.assign(getMeta('ol-ExposedSettings'), {
       isOverleaf: true,
     })
     window.metaAttributesCache.set(
@@ -17,12 +17,11 @@ describe('<PasswordSection />', function () {
   })
 
   afterEach(function () {
-    window.metaAttributesCache = new Map()
     fetchMock.reset()
   })
 
   it('shows password managed externally message', async function () {
-    window.metaAttributesCache.set('ol-ExposedSettings', {
+    Object.assign(getMeta('ol-ExposedSettings'), {
       isOverleaf: false,
     })
     window.metaAttributesCache.set(
@@ -76,23 +75,23 @@ describe('<PasswordSection />', function () {
     }) as HTMLButtonElement
     expect(button.disabled).to.be.true
 
-    fireEvent.change(screen.getByLabelText('Current Password'), {
+    fireEvent.change(screen.getByLabelText('Current password'), {
       target: { value: 'foobar' },
     })
     expect(button.disabled).to.be.true
 
-    fireEvent.change(screen.getByLabelText('New Password'), {
+    fireEvent.change(screen.getByLabelText('New password'), {
       target: { value: 'barbaz' },
     })
     expect(button.disabled).to.be.true
 
-    fireEvent.change(screen.getByLabelText('Confirm New Password'), {
+    fireEvent.change(screen.getByLabelText('Confirm new password'), {
       target: { value: 'bar' },
     })
     screen.getByText('Doesn’t match')
     expect(button.disabled).to.be.true
 
-    fireEvent.change(screen.getByLabelText('Confirm New Password'), {
+    fireEvent.change(screen.getByLabelText('Confirm new password'), {
       target: { value: 'barbaz' },
     })
     expect(button.disabled).to.be.false
@@ -107,13 +106,13 @@ describe('<PasswordSection />', function () {
     render(<PasswordSection />)
 
     const currentPasswordInput = screen.getByLabelText(
-      'Current Password'
+      'Current password'
     ) as HTMLInputElement
     const newPassword1Input = screen.getByLabelText(
-      'New Password'
+      'New password'
     ) as HTMLInputElement
     const newPassword2Input = screen.getByLabelText(
-      'Confirm New Password'
+      'Confirm new password'
     ) as HTMLInputElement
 
     expect(newPassword1Input.minLength).to.equal(3)
@@ -183,16 +182,27 @@ describe('<PasswordSection />', function () {
 
     await screen.findByText('Your old password is wrong')
   })
+
+  it('shows message when user cannot use password log in', async function () {
+    window.metaAttributesCache.set('ol-cannot-change-password', true)
+    render(<PasswordSection />)
+    await screen.findByRole('heading', { name: 'Change Password' })
+    screen.getByText(
+      'You can’t add or change your password because your group or organization uses',
+      { exact: false }
+    )
+    screen.getByRole('link', { name: 'single sign-on (SSO)' })
+  })
 })
 
 function submitValidForm() {
-  fireEvent.change(screen.getByLabelText('Current Password'), {
+  fireEvent.change(screen.getByLabelText('Current password'), {
     target: { value: 'foobar' },
   })
-  fireEvent.change(screen.getByLabelText('New Password'), {
+  fireEvent.change(screen.getByLabelText('New password'), {
     target: { value: 'barbaz' },
   })
-  fireEvent.change(screen.getByLabelText('Confirm New Password'), {
+  fireEvent.change(screen.getByLabelText('Confirm new password'), {
     target: { value: 'barbaz' },
   })
   fireEvent.click(

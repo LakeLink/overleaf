@@ -13,12 +13,14 @@
   "repository": "github:overleaf/redis-wrapper",
   "license": "ISC",
   "scripts": {
-    "lint": "eslint --max-warnings 0 --format unix .",
-    "lint:fix": "eslint --fix .",
-    "format": "prettier --list-different $PWD/'**/*.js'",
-    "format:fix": "prettier --write $PWD/'**/*.js'",
-    "test": "mocha --recursive test/unit/src/",
-    "test:ci": "npm run test"
+    "lint": "eslint --ext .js --ext .cjs --ext .ts --max-warnings 0 --format unix .",
+    "lint:fix": "eslint --fix --ext .js --ext .cjs --ext .ts .",
+    "format": "prettier --list-different $PWD/'**/*.{js,cjs,ts}'",
+    "format:fix": "prettier --write $PWD/'**/*.{js,cjs,ts}'",
+    "test": "npm run lint && npm run format && npm run types:check && npm run test:unit",
+    "test:ci": "npm run test:unit",
+    "test:unit": "mocha --exit test/**/*.{js,cjs}",
+    "types:check": "tsc --noEmit"
   },
   "peerDependencies": {
     "@overleaf/logger": "*",
@@ -26,7 +28,7 @@
     "@overleaf/o-error": "*"
   },
   "dependencies": {
-    "async": "^3.2.2",
+    "async": "^3.2.5",
     "ioredis": "~4.27.1"
   },
   "devDependencies": {
@@ -35,6 +37,7 @@
     "chai": "^4.3.6",
     "mocha": "^10.2.0",
     "sandboxed-module": "^2.0.4",
-    "sinon": "^9.2.4"
+    "sinon": "^9.2.4",
+    "typescript": "^5.0.4"
   }
 }

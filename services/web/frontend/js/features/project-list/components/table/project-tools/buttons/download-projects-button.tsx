@@ -1,10 +1,11 @@
 import { memo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import Icon from '../../../../../../shared/components/icon'
-import Tooltip from '../../../../../../shared/components/tooltip'
+import OLTooltip from '@/features/ui/components/ol/ol-tooltip'
+import OLIconButton from '@/features/ui/components/ol/ol-icon-button'
 import * as eventTracking from '../../../../../../infrastructure/event-tracking'
 import { useProjectListContext } from '../../../../context/project-list-context'
 import { useLocation } from '../../../../../../shared/hooks/use-location'
+import { isSmallDevice } from '../../../../../../infrastructure/event-tracking'
 
 function DownloadProjectsButton() {
   const { selectedProjects, selectOrUnselectAllProjects } =
@@ -16,11 +17,10 @@ function DownloadProjectsButton() {
   const projectIds = selectedProjects.map(p => p.id)
 
   const handleDownloadProjects = useCallback(() => {
-    eventTracking.send(
-      'project-list-page-interaction',
-      'project action',
-      'Download Zip'
-    )
+    eventTracking.sendMB('project-list-page-interaction', {
+      action: 'downloadZips',
+      isSmallDevice,
+    })
 
     location.assign(`/project/download/zip?project_ids=${projectIds.join(',')}`)
 
@@ -29,19 +29,18 @@ function DownloadProjectsButton() {
   }, [projectIds, selectOrUnselectAllProjects, location])
 
   return (
-    <Tooltip
+    <OLTooltip
       id="tooltip-download-projects"
       description={text}
       overlayProps={{ placement: 'bottom', trigger: ['hover', 'focus'] }}
     >
-      <button
-        className="btn btn-secondary"
-        aria-label={text}
+      <OLIconButton
         onClick={handleDownloadProjects}
-      >
-        <Icon type="cloud-download" />
-      </button>
-    </Tooltip>
+        variant="secondary"
+        accessibilityLabel={text}
+        icon="download"
+      />
+    </OLTooltip>
   )
 }
 

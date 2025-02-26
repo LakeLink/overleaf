@@ -8,7 +8,7 @@ const ProjectDeleter = require('../Project/ProjectDeleter')
 const EditorRealTimeController = require('./EditorRealTimeController')
 const async = require('async')
 const PublicAccessLevels = require('../Authorization/PublicAccessLevels')
-const { promisifyAll } = require('../../util/promises')
+const { promisifyAll } = require('@overleaf/promise-utils')
 
 const EditorController = {
   addDoc(projectId, folderId, docName, docLines, source, userId, callback) {
@@ -104,6 +104,26 @@ const EditorController = {
           userId
         )
         callback(err, fileRef)
+      }
+    )
+  },
+
+  appendToDoc(projectId, docId, docLines, source, userId, callback) {
+    ProjectEntityUpdateHandler.appendToDoc(
+      projectId,
+      docId,
+      docLines,
+      source,
+      userId,
+      function (err, doc) {
+        if (err) {
+          OError.tag(err, 'error appending to doc', {
+            projectId,
+            docId,
+          })
+          return callback(err)
+        }
+        callback(err, doc)
       }
     )
   },
@@ -568,37 +588,31 @@ const EditorController = {
   },
 
   setPublicAccessLevel(projectId, newAccessLevel, callback) {
-    ProjectDetailsHandler.setPublicAccessLevel(
-      projectId,
-      newAccessLevel,
-      function (err) {
-        if (err) {
-          return callback(err)
-        }
-        EditorRealTimeController.emitToRoom(
-          projectId,
-          'project:publicAccessLevel:changed',
-          { newAccessLevel }
-        )
-        if (newAccessLevel === PublicAccessLevels.TOKEN_BASED) {
-          ProjectDetailsHandler.ensureTokensArePresent(
+    async.series(
+      [
+        cb => {
+          if (newAccessLevel === PublicAccessLevels.TOKEN_BASED) {
+            ProjectDetailsHandler.ensureTokensArePresent(projectId, cb)
+          } else {
+            cb()
+          }
+        },
+        cb =>
+          ProjectDetailsHandler.setPublicAccessLevel(
             projectId,
-            function (err, tokens) {
-              if (err) {
-                return callback(err)
-              }
-              EditorRealTimeController.emitToRoom(
-                projectId,
-                'project:tokens:changed',
-                { tokens }
-              )
-              callback()
-            }
+            newAccessLevel,
+            cb
+          ),
+        cb => {
+          EditorRealTimeController.emitToRoom(
+            projectId,
+            'project:publicAccessLevel:changed',
+            { newAccessLevel }
           )
-        } else {
-          callback()
-        }
-      }
+          cb()
+        },
+      ],
+      callback
     )
   },
 
@@ -614,6 +628,24 @@ const EditorController = {
           projectId,
           'rootDocUpdated',
           newRootDocID
+        )
+        callback()
+      }
+    )
+  },
+
+  setMainBibliographyDoc(projectId, newBibliographyDocId, callback) {
+    ProjectEntityUpdateHandler.setMainBibliographyDoc(
+      projectId,
+      newBibliographyDocId,
+      function (err) {
+        if (err) {
+          return callback(err)
+        }
+        EditorRealTimeController.emitToRoom(
+          projectId,
+          'mainBibliographyDocUpdated',
+          newBibliographyDocId
         )
         callback()
       }

@@ -43,7 +43,11 @@ async function recordRegistrationEvent(user) {
     if (user.thirdPartyIdentifiers && user.thirdPartyIdentifiers.length > 0) {
       segmentation.provider = user.thirdPartyIdentifiers[0].providerId
     }
-    Analytics.recordEventForUser(user._id, 'user-registered', segmentation)
+    Analytics.recordEventForUserInBackground(
+      user._id,
+      'user-registered',
+      segmentation
+    )
   } catch (err) {
     logger.warn({ err }, 'there was an error recording `user-registered` event')
   }
@@ -59,9 +63,6 @@ async function createNewUser(attributes, options = {}) {
   Object.assign(user, attributes)
 
   user.ace.syntaxValidation = true
-  if (user.featureSwitches != null) {
-    user.featureSwitches.pdfng = true
-  }
 
   const reversedHostname = user.email.split('@')[1].split('').reverse().join('')
 
@@ -81,19 +82,26 @@ async function createNewUser(attributes, options = {}) {
     emailData.samlProviderId = attributes.samlIdentifiers[0].providerId
   }
 
+  const affiliationOptions = options.affiliationOptions || {}
+
+  if (options.confirmedAt) {
+    emailData.confirmedAt = options.confirmedAt
+    affiliationOptions.confirmedAt = options.confirmedAt
+  }
   user.emails = [emailData]
 
   user = await user.save()
 
   if (Features.hasFeature('affiliations')) {
     try {
-      user = await _addAffiliation(user, options.affiliationOptions || {})
+      user = await _addAffiliation(user, affiliationOptions)
     } catch (error) {
       if (options.requireAffiliation) {
         await UserDeleter.promises.deleteMongoUser(user._id)
         throw OError.tag(error)
       } else {
-        logger.error(OError.tag(error))
+        const err = OError.tag(error, 'adding affiliations failed')
+        logger.error({ err, userId: user._id }, err.message)
       }
     }
   }

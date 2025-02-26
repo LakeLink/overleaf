@@ -1,6 +1,5 @@
 .input-switch {
   display: inline-block;
-  vertical-align: middle;
   padding-left: 5px;
 }
 .input-switch-hidden-input {
@@ -19,7 +18,9 @@
     padding: 1px;
     background-color: @rp-highlight-blue;
     border-radius: 0.875em;
-    transition: background 0.15s ease, border-color 0.15s ease;
+    transition:
+      background 0.15s ease,
+      border-color 0.15s ease;
 
     &::before {
       content: '';
@@ -31,7 +32,10 @@
       top: 1px;
       background-color: #fff;
       border-radius: 0.875em;
-      transition: background-color 0.15s ease, color 0.15s ease, left 0.15s ease;
+      transition:
+        background-color 0.15s ease,
+        color 0.15s ease,
+        left 0.15s ease;
     }
   }
 

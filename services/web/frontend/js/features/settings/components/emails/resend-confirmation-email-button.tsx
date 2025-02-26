@@ -1,11 +1,11 @@
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import Icon from '../../../../shared/components/icon'
-import { Button } from 'react-bootstrap'
-import { postJSON } from '../../../../infrastructure/fetch-json'
+import { FetchError, postJSON } from '../../../../infrastructure/fetch-json'
 import useAsync from '../../../../shared/hooks/use-async'
 import { UserEmailData } from '../../../../../../types/user-email'
 import { useUserEmailsContext } from '../../context/user-email-context'
+import OLButton from '@/features/ui/components/ol/ol-button'
 
 type ResendConfirmationEmailButtonProps = {
   email: UserEmailData['email']
@@ -15,7 +15,7 @@ function ResendConfirmationEmailButton({
   email,
 }: ResendConfirmationEmailButtonProps) {
   const { t } = useTranslation()
-  const { isLoading, isError, runAsync } = useAsync()
+  const { error, isLoading, isError, runAsync } = useAsync()
   const { state, setLoading: setUserEmailsContextLoading } =
     useUserEmailsContext()
 
@@ -37,23 +37,31 @@ function ResendConfirmationEmailButton({
   if (isLoading) {
     return (
       <>
-        <Icon type="refresh" spin fw /> {t('sending')}...
+        <Icon type="refresh" spin fw /> {t('sending')}&hellip;
       </>
     )
   }
 
+  const rateLimited =
+    error && error instanceof FetchError && error.response?.status === 429
+
   return (
     <>
-      <Button
-        className="btn-inline-link"
-        disabled={state.isLoading}
+      <OLButton
+        variant="link"
+        disabled={state.isLoading || isLoading}
         onClick={handleResendConfirmationEmail}
+        className="btn-inline-link"
       >
         {t('resend_confirmation_email')}
-      </Button>
+      </OLButton>
       <br />
       {isError && (
-        <div className="text-danger">{t('generic_something_went_wrong')}</div>
+        <div className="text-danger">
+          {rateLimited
+            ? t('too_many_requests')
+            : t('generic_something_went_wrong')}
+        </div>
       )}
     </>
   )

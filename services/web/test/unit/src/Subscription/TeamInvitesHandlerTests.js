@@ -4,7 +4,7 @@ const { expect } = require('chai')
 const modulePath =
   '../../../../app/src/Features/Subscription/TeamInvitesHandler'
 
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 const Errors = require('../../../../app/src/Features/Errors/Errors')
 
 describe('TeamInvitesHandler', function () {
@@ -33,21 +33,28 @@ describe('TeamInvitesHandler', function () {
       groupPlan: true,
       member_ids: [],
       teamInvites: [this.teamInvite],
-      save: sinon.stub().yields(null),
+      save: sinon.stub().resolves(),
     }
 
     this.SubscriptionLocator = {
-      getUsersSubscription: sinon.stub(),
-      getSubscription: sinon.stub().yields(null, this.subscription),
+      promises: {
+        getUsersSubscription: sinon.stub(),
+        getSubscription: sinon.stub().resolves(this.subscription),
+      },
     }
 
     this.UserGetter = {
-      getUser: sinon.stub().yields(),
-      getUserByAnyEmail: sinon.stub().yields(),
+      promises: {
+        getUser: sinon.stub().resolves(),
+        getUserByAnyEmail: sinon.stub().resolves(),
+        getUserByMainEmail: sinon.stub().resolves(),
+      },
     }
 
     this.SubscriptionUpdater = {
-      addUserToGroup: sinon.stub().yields(),
+      promises: {
+        addUserToGroup: sinon.stub().resolves(),
+      },
     }
 
     this.LimitationsManager = {
@@ -55,12 +62,18 @@ describe('TeamInvitesHandler', function () {
     }
 
     this.Subscription = {
-      findOne: sinon.stub().yields(),
-      updateOne: sinon.stub().yields(),
+      findOne: sinon.stub().resolves(),
+      updateOne: sinon.stub().resolves(),
+    }
+
+    this.SSOConfig = {
+      findById: sinon.stub().resolves(),
     }
 
     this.EmailHandler = {
-      sendEmail: sinon.stub().yields(null),
+      promises: {
+        sendEmail: sinon.stub().resolves(null),
+      },
     }
 
     this.newToken = 'bbbbbbbbb'
@@ -71,31 +84,48 @@ describe('TeamInvitesHandler', function () {
       },
     }
 
-    this.UserGetter.getUser
+    this.UserGetter.promises.getUser
       .withArgs(this.manager._id)
-      .yields(null, this.manager)
-    this.UserGetter.getUserByAnyEmail
+      .resolves(this.manager)
+    this.UserGetter.promises.getUserByAnyEmail
       .withArgs(this.manager.email)
-      .yields(null, this.manager)
+      .resolves(this.manager)
+    this.UserGetter.promises.getUserByMainEmail
+      .withArgs(this.manager.email)
+      .resolves(this.manager)
 
-    this.SubscriptionLocator.getUsersSubscription.yields(
-      null,
+    this.SubscriptionLocator.promises.getUsersSubscription.resolves(
       this.subscription
     )
-    this.Subscription.findOne.yields(null, this.subscription)
+
+    this.NotificationsBuilder = {
+      promises: {
+        groupInvitation: sinon.stub().returns({
+          create: sinon.stub().resolves(),
+          read: sinon.stub().resolves(),
+        }),
+      },
+    }
+
+    this.Subscription.findOne.resolves(this.subscription)
 
     this.TeamInvitesHandler = SandboxedModule.require(modulePath, {
       requires: {
-        mongodb: { ObjectId },
+        'mongodb-legacy': { ObjectId },
         crypto: this.crypto,
         '@overleaf/settings': { siteUrl: 'http://example.com' },
         '../../models/TeamInvite': { TeamInvite: (this.TeamInvite = {}) },
         '../../models/Subscription': { Subscription: this.Subscription },
+        '../../models/SSOConfig': { SSOConfig: this.SSOConfig },
         '../User/UserGetter': this.UserGetter,
         './SubscriptionLocator': this.SubscriptionLocator,
         './SubscriptionUpdater': this.SubscriptionUpdater,
         './LimitationsManager': this.LimitationsManager,
         '../Email/EmailHandler': this.EmailHandler,
+        '../Notifications/NotificationsBuilder': this.NotificationsBuilder,
+        '../../infrastructure/Modules': (this.Modules = {
+          promises: { hooks: { fire: sinon.stub().resolves() } },
+        }),
       },
     })
   })
@@ -114,7 +144,7 @@ describe('TeamInvitesHandler', function () {
     })
 
     it("returns teamNotFound if there's none", function (done) {
-      this.Subscription.findOne = sinon.stub().yields(null, null)
+      this.Subscription.findOne = sinon.stub().resolves(null)
 
       this.TeamInvitesHandler.getInvite(
         this.token,
@@ -152,7 +182,7 @@ describe('TeamInvitesHandler', function () {
         this.subscription,
         'John.Snow@example.com',
         (err, invite) => {
-          this.EmailHandler.sendEmail
+          this.EmailHandler.promises.sendEmail
             .calledWith(
               'verifyEmailToJoinTeam',
               sinon.match({
@@ -214,7 +244,7 @@ describe('TeamInvitesHandler', function () {
         this.manager.email,
         (err, invite) => {
           sinon.assert.calledWith(
-            this.SubscriptionUpdater.addUserToGroup,
+            this.SubscriptionUpdater.promises.addUserToGroup,
             this.subscription._id,
             this.manager._id
           )
@@ -224,6 +254,73 @@ describe('TeamInvitesHandler', function () {
           expect(invite.first_name).to.eq(this.manager.first_name)
           expect(invite.last_name).to.eq(this.manager.last_name)
           expect(invite.invite).to.be.false
+          done(err)
+        }
+      )
+    })
+
+    it('sends an SSO invite if SSO is enabled and inviting self', function (done) {
+      this.subscription.ssoConfig = new ObjectId('abc123abc123abc123abc123')
+      this.SSOConfig.findById
+        .withArgs(this.subscription.ssoConfig)
+        .resolves({ enabled: true })
+
+      this.TeamInvitesHandler.createInvite(
+        this.manager._id,
+        this.subscription,
+        this.manager.email,
+        (err, invite) => {
+          sinon.assert.calledWith(
+            this.Modules.promises.hooks.fire,
+            'sendGroupSSOReminder',
+            this.manager._id,
+            this.subscription._id
+          )
+          done(err)
+        }
+      )
+    })
+
+    it('does not send an SSO invite if SSO is disabled and inviting self', function (done) {
+      this.subscription.ssoConfig = new ObjectId('abc123abc123abc123abc123')
+      this.SSOConfig.findById
+        .withArgs(this.subscription.ssoConfig)
+        .resolves({ enabled: false })
+
+      this.TeamInvitesHandler.createInvite(
+        this.manager._id,
+        this.subscription,
+        this.manager.email,
+        (err, invite) => {
+          sinon.assert.notCalled(this.Modules.promises.hooks.fire)
+          done(err)
+        }
+      )
+    })
+
+    it('sends a notification if inviting registered user', function (done) {
+      const id = new ObjectId('6a6b3a8014829a865bbf700d')
+      const managedUsersEnabled = false
+
+      this.UserGetter.promises.getUserByMainEmail
+        .withArgs('john.snow@example.com')
+        .resolves({
+          _id: id,
+        })
+
+      this.TeamInvitesHandler.createInvite(
+        this.manager._id,
+        this.subscription,
+        'John.Snow@example.com',
+        (err, invite) => {
+          this.NotificationsBuilder.promises
+            .groupInvitation(
+              id.toString(),
+              this.subscription._id,
+              managedUsersEnabled
+            )
+            .create.calledWith(invite)
+            .should.eq(true)
           done(err)
         }
       )
@@ -266,9 +363,9 @@ describe('TeamInvitesHandler', function () {
         email: 'tyrion@example.com',
       }
 
-      this.UserGetter.getUserByAnyEmail
+      this.UserGetter.promises.getUserByAnyEmail
         .withArgs(this.user.email)
-        .yields(null, this.user)
+        .resolves(this.user)
 
       this.subscription.teamInvites.push({
         email: 'john.snow@example.com',
@@ -277,24 +374,83 @@ describe('TeamInvitesHandler', function () {
       })
     })
 
-    it('adds the user to the team', function (done) {
-      this.TeamInvitesHandler.acceptInvite('dddddddd', this.user.id, () => {
-        this.SubscriptionUpdater.addUserToGroup
-          .calledWith(this.subscription._id, this.user.id)
-          .should.eq(true)
-        done()
+    describe('with standard group', function () {
+      it('adds the user to the team', function (done) {
+        this.TeamInvitesHandler.acceptInvite('dddddddd', this.user.id, () => {
+          this.SubscriptionUpdater.promises.addUserToGroup
+            .calledWith(this.subscription._id, this.user.id)
+            .should.eq(true)
+          done()
+        })
+      })
+
+      it('removes the invite from the subscription', function (done) {
+        this.TeamInvitesHandler.acceptInvite('dddddddd', this.user.id, () => {
+          this.Subscription.updateOne
+            .calledWith(
+              { _id: new ObjectId('55153a8014829a865bbf700d') },
+              { $pull: { teamInvites: { email: 'john.snow@example.com' } } }
+            )
+            .should.eq(true)
+          done()
+        })
+      })
+
+      it('removes dashboard notification after they accepted group invitation', function (done) {
+        const managedUsersEnabled = false
+
+        this.TeamInvitesHandler.acceptInvite('dddddddd', this.user.id, () => {
+          sinon.assert.called(
+            this.NotificationsBuilder.promises.groupInvitation(
+              this.user.id,
+              this.subscription._id,
+              managedUsersEnabled
+            ).read
+          )
+          done()
+        })
+      })
+
+      it('should not schedule an SSO invite reminder', function (done) {
+        this.TeamInvitesHandler.acceptInvite('dddddddd', this.user.id, () => {
+          sinon.assert.notCalled(this.Modules.promises.hooks.fire)
+          done()
+        })
       })
     })
 
-    it('removes the invite from the subscription', function (done) {
-      this.TeamInvitesHandler.acceptInvite('dddddddd', this.user.id, () => {
-        this.Subscription.updateOne
-          .calledWith(
-            { _id: new ObjectId('55153a8014829a865bbf700d') },
-            { $pull: { teamInvites: { email: 'john.snow@example.com' } } }
+    describe('with managed group', function () {
+      it('should enroll the group member', function (done) {
+        this.subscription.managedUsersEnabled = true
+
+        this.TeamInvitesHandler.acceptInvite('dddddddd', this.user.id, () => {
+          sinon.assert.calledWith(
+            this.Modules.promises.hooks.fire,
+            'enrollInManagedSubscription',
+            this.user.id,
+            this.subscription
           )
-          .should.eq(true)
-        done()
+          done()
+        })
+      })
+    })
+
+    describe('with group SSO enabled', function () {
+      it('should schedule an SSO invite reminder', function (done) {
+        this.subscription.ssoConfig = 'ssoconfig1'
+        this.SSOConfig.findById
+          .withArgs('ssoconfig1')
+          .resolves({ enabled: true })
+
+        this.TeamInvitesHandler.acceptInvite('dddddddd', this.user.id, () => {
+          sinon.assert.calledWith(
+            this.Modules.promises.hooks.fire,
+            'scheduleGroupSSOReminder',
+            this.user.id,
+            this.subscription._id
+          )
+          done()
+        })
       })
     })
   })
@@ -323,6 +479,36 @@ describe('TeamInvitesHandler', function () {
         }
       )
     })
+
+    it('removes dashboard notification for pending group invitation', function (done) {
+      const managedUsersEnabled = false
+
+      const pendingUser = {
+        id: '1a2b',
+        email: 'tyrion@example.com',
+      }
+
+      this.UserGetter.promises.getUserByAnyEmail
+        .withArgs(pendingUser.email)
+        .resolves(pendingUser)
+
+      this.TeamInvitesHandler.revokeInvite(
+        this.manager._id,
+        this.subscription,
+        pendingUser.email,
+        () => {
+          sinon.assert.called(
+            this.NotificationsBuilder.promises.groupInvitation(
+              pendingUser.id,
+              this.subscription._id,
+              managedUsersEnabled
+            ).read
+          )
+
+          done()
+        }
+      )
+    })
   })
 
   describe('createTeamInvitesForLegacyInvitedEmail', function (done) {
@@ -331,27 +517,27 @@ describe('TeamInvitesHandler', function () {
         'eddard@example.com',
         'robert@example.com',
       ]
-      this.TeamInvitesHandler.createInvite = sinon.stub().yields(null)
-      this.SubscriptionLocator.getGroupsWithEmailInvite = sinon
+      this.TeamInvitesHandler.createInvite = sinon.stub().resolves(null)
+      this.SubscriptionLocator.promises.getGroupsWithEmailInvite = sinon
         .stub()
-        .yields(null, [this.subscription])
+        .resolves([this.subscription])
     })
 
     it('sends an invitation email to addresses in the legacy invited_emails field', function (done) {
       this.TeamInvitesHandler.createTeamInvitesForLegacyInvitedEmail(
         'eddard@example.com',
-        (err, invite) => {
+        (err, invites) => {
           expect(err).not.to.exist
+          expect(invites.length).to.eq(1)
 
-          this.TeamInvitesHandler.createInvite
-            .calledWith(
-              this.subscription.admin_id,
-              this.subscription,
-              'eddard@example.com'
-            )
-            .should.eq(true)
-
-          this.TeamInvitesHandler.createInvite.callCount.should.eq(1)
+          const [invite] = invites
+          expect(invite.token).to.eq(this.newToken)
+          expect(invite.email).to.eq('eddard@example.com')
+          expect(invite.inviterName).to.eq(
+            'Daenerys Targaryen (daenerys@example.com)'
+          )
+          expect(invite.invite).to.be.true
+          expect(this.subscription.teamInvites).to.deep.include(invite)
 
           done()
         }
@@ -396,9 +582,9 @@ describe('TeamInvitesHandler', function () {
       }
 
       this.subscription.member_ids = [member.id]
-      this.UserGetter.getUserByAnyEmail
+      this.UserGetter.promises.getUserByAnyEmail
         .withArgs(member.email)
-        .yields(null, member)
+        .resolves(member)
 
       this.TeamInvitesHandler.createInvite(
         this.manager._id,

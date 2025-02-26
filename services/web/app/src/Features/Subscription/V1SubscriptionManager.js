@@ -3,42 +3,16 @@ const UserGetter = require('../User/UserGetter')
 const request = require('requestretry')
 const settings = require('@overleaf/settings')
 const { V1ConnectionError, NotFoundError } = require('../Errors/Errors')
-const { promisifyAll } = require('../../util/promises')
+const { promisifyAll } = require('@overleaf/promise-utils')
 
 module.exports = V1SubscriptionManager = {
-  getSubscriptionsFromV1(userId, callback) {
-    V1SubscriptionManager._v1Request(
-      userId,
-      {
-        method: 'GET',
-        url(v1Id) {
-          return `/api/v1/sharelatex/users/${v1Id}/subscriptions`
-        },
-      },
-      callback
-    )
-  },
-
-  getSubscriptionStatusFromV1(userId, callback) {
-    V1SubscriptionManager._v1Request(
-      userId,
-      {
-        method: 'GET',
-        url(v1Id) {
-          return `/api/v1/sharelatex/users/${v1Id}/subscription_status`
-        },
-      },
-      callback
-    )
-  },
-
   cancelV1Subscription(userId, callback) {
     V1SubscriptionManager._v1Request(
       userId,
       {
         method: 'DELETE',
         url(v1Id) {
-          return `/api/v1/sharelatex/users/${v1Id}/subscription`
+          return `/api/v1/overleaf/users/${v1Id}/subscription`
         },
       },
       callback

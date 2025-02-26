@@ -7,18 +7,23 @@
 @import './editor/error-boundary.less';
 @import './editor/share.less';
 @import './editor/chat.less';
+@import './editor/toast.less';
 @import './editor/file-view.less';
 @import './editor/search.less';
 @import './editor/publish-template.less';
 @import './editor/online-users.less';
+@import './editor/math-preview.less';
 @import './editor/hotkeys.less';
 @import './editor/review-panel.less';
-@import './editor/rich-text.less';
+@import './editor/review-panel-new.less';
 @import './editor/publish-modal.less';
 @import './editor/outline.less';
 @import './editor/logs.less';
 @import './editor/dictionary.less';
 @import './editor/compile-button.less';
+@import './editor/figure-modal.less';
+@import './editor/table-generator-column-width-modal.less';
+@import './editor/ide-react.less';
 
 @ui-layout-toggler-def-height: 50px;
 @ui-resizer-size: 7px;
@@ -86,15 +91,10 @@
   background-color: @pdf-bg;
   .full-size;
   top: @ide-body-top-offset;
-  &.ide-history-open {
-    top: @ide-body-top-offset + @editor-toolbar-height;
-  }
 }
 
-#editor,
-#editor-rich-text {
+#editor {
   .full-size;
-  top: @editor-toolbar-height;
 }
 
 .pdf-empty,
@@ -270,104 +270,6 @@
     a.rename {
       visibility: visible;
     }
-  }
-}
-
-/**************************************
-Ace
-***************************************/
-
-// The internal components of the aceEditor directive
-.ace-editor-wrapper {
-  .full-size;
-  .undo-conflict-warning {
-    position: absolute;
-    top: 0;
-    right: 0;
-    left: 0;
-    z-index: 10;
-  }
-  .ace-editor-body {
-    width: 100%;
-    height: 100%;
-  }
-  .spelling-highlight {
-    z-index: 3;
-    position: absolute;
-    background-image: url(../../../public/img/spellcheck-underline.png);
-    @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
-      background-image: url(../../../public/img/spellcheck-underline@2x.png);
-      background-size: 5px 4px;
-    }
-    background-repeat: repeat-x;
-    background-position: bottom left;
-  }
-  .remote-cursor {
-    position: absolute;
-    border-left: 2px solid transparent;
-    // Adds "nubbin" top right of cursor, which inherits the injected color
-    &::before {
-      content: '';
-      position: absolute;
-      left: -2px;
-      top: -5px;
-      height: 5px;
-      width: 5px;
-      border-top-width: 3px;
-      border-right-width: 3px;
-      border-bottom-width: 2px;
-      border-left-width: 2px;
-      border-style: solid;
-      border-color: inherit;
-    }
-  }
-  .annotation-label {
-    padding: (@line-height-computed / 4) (@line-height-computed / 2);
-    font-size: 0.8rem;
-    z-index: 100;
-    font-family: @font-family-sans-serif;
-    color: white;
-    font-weight: 700;
-    white-space: nowrap;
-  }
-  .annotation {
-    position: absolute;
-    z-index: 2;
-  }
-  .highlights-before-label,
-  .highlights-after-label {
-    position: absolute;
-    right: @line-height-computed;
-    z-index: 1;
-  }
-  .highlights-before-label {
-    top: @line-height-computed / 2;
-  }
-  .highlights-after-label {
-    bottom: @line-height-computed / 2;
-  }
-}
-
-.strike-through-foreground::after {
-  content: '';
-  position: absolute;
-  width: 100%;
-  top: 50%;
-  margin-top: -1px;
-  height: 2px;
-  background: currentColor;
-}
-
-// Hack to solve an issue where scrollbars aren't visible in Safari.
-// Safari seems to clip part of the scrollbar element. By giving the
-// element a background, we're telling Safari that it *really* needs to
-// paint the whole area. See https://github.com/ajaxorg/ace/issues/2872
-.ace_scrollbar-inner {
-  background-color: #fff;
-  opacity: 0.01;
-
-  .ace_dark & {
-    background-color: #000;
   }
 }
 
@@ -567,8 +469,7 @@ CodeMirror
   }
 }
 
-.bibtex-hint-banner,
-.references-search-banner {
+.bibtex-hint-banner {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -577,10 +478,6 @@ CodeMirror
   display: flex;
   justify-content: space-between;
   padding: 5px 10px;
-}
-
-.references-search-banner {
-  align-items: center;
 }
 
 .bibtex-hint-banner {
@@ -622,8 +519,7 @@ CodeMirror
       padding-left: 38px;
       padding-right: 38px;
       margin: auto;
-      background: white;
-      opacity: 0.95;
+      background: rgba(255, 255, 255, 0.95);
       border-radius: 8px;
       .message {
         margin-top: 15px;
@@ -633,9 +529,6 @@ CodeMirror
         ul.list-unstyled {
           text-align: left;
         }
-      }
-      a.btn {
-        opacity: 1;
       }
     }
   }
@@ -694,6 +587,9 @@ CodeMirror
     background-color: @gray-lightest;
   }
 }
+.teaser-feature-icon {
+  vertical-align: sub;
+}
 
 .teaser-title,
 .dropbox-teaser-title {
@@ -746,11 +642,13 @@ CodeMirror
 // rule is added automatically (inline and not configurable), the only workaround is to use `!important`.
 .editor-container {
   overflow: visible !important;
+  container-type: inline-size;
 }
 
 .pdf-preview-messages {
   position: absolute;
   right: @margin-sm;
+  left: @margin-sm;
   top: @margin-xl;
   z-index: @zindex-popover;
 }
@@ -758,24 +656,24 @@ CodeMirror
 .compile-time-warning {
   padding: @padding-sm;
   background-color: @ol-green;
-  width: 420px;
+  max-width: 420px;
   box-shadow: 5px 5px 6px rgba(0, 0, 0, 0.3);
 
   .warning-content {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-right: 32px;
+    flex-wrap: wrap;
+    gap: @alert-padding;
   }
 
   .warning-text {
-    max-width: 300px;
-    padding-right: @alert-padding;
     display: inline-block;
     font-size: @font-size-small;
   }
   .upgrade-prompt {
     display: inline-flex;
+    margin-left: auto;
   }
 
   button.btn {
@@ -817,7 +715,7 @@ CodeMirror
   }
 }
 
-.grammarly-warning {
+.legacy-editor-warning {
   width: 500px;
 
   &.alert.alert-info {
@@ -848,4 +746,10 @@ CodeMirror
 
 grammarly-extension[data-grammarly-shadow-root='true'] {
   z-index: 1;
+}
+
+.editor-notification {
+  margin: 48px 64px;
+  width: 80%;
+  max-width: 560px;
 }

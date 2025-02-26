@@ -10,11 +10,11 @@
  * DS207: Consider shorter variations of null checks
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
  */
-let UserMembershipViewModel
 const UserGetter = require('../User/UserGetter')
 const { isObjectIdInstance } = require('../Helpers/Mongo')
+const { promisify } = require('@overleaf/promise-utils')
 
-module.exports = UserMembershipViewModel = {
+const UserMembershipViewModel = {
   build(userOrEmail) {
     if (userOrEmail._id) {
       return buildUserViewModel(userOrEmail)
@@ -39,6 +39,7 @@ module.exports = UserMembershipViewModel = {
       last_name: 1,
       lastLoggedIn: 1,
       lastActive: 1,
+      enrollment: 1,
     }
     return UserGetter.getUser(userId, projection, function (error, user) {
       if (error != null || user == null) {
@@ -61,9 +62,22 @@ function buildUserViewModel(user, isInvite) {
     last_active_at: user.lastActive || user.lastLoggedIn || null,
     last_logged_in_at: user.lastLoggedIn || null,
     invite: isInvite,
+    enrollment: user.enrollment
+      ? {
+          managedBy: user.enrollment.managedBy,
+          enrolledAt: user.enrollment.enrolledAt,
+          sso: user.enrollment.sso,
+        }
+      : undefined,
   }
 }
 
 const buildUserViewModelWithEmail = email => buildUserViewModel({ email }, true)
 
 const buildUserViewModelWithId = id => buildUserViewModel({ _id: id }, false)
+
+UserMembershipViewModel.promises = {
+  buildAsync: promisify(UserMembershipViewModel.buildAsync),
+}
+
+module.exports = UserMembershipViewModel

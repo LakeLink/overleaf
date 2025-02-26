@@ -1,4 +1,4 @@
-import { promisify } from 'util'
+import { promisify } from 'node:util'
 import logger from '@overleaf/logger'
 import async from 'async'
 import metrics from '@overleaf/metrics'
@@ -15,6 +15,7 @@ import * as WebApiManager from './WebApiManager.js'
 import * as SyncManager from './SyncManager.js'
 import * as Versions from './Versions.js'
 import * as Errors from './Errors.js'
+import * as Metrics from './Metrics.js'
 import { Profiler } from './Profiler.js'
 
 const keys = Settings.redis.lock.key_schema
@@ -59,8 +60,49 @@ export function getRawUpdates(projectId, batchSize, callback) {
   })
 }
 
+// Trigger resync and start processing under lock to avoid other operations to
+// flush the resync updates.
+export function startResyncAndProcessUpdatesUnderLock(
+  projectId,
+  opts,
+  callback
+) {
+  const startTimeMs = Date.now()
+  LockManager.runWithLock(
+    keys.projectHistoryLock({ project_id: projectId }),
+    (extendLock, releaseLock) => {
+      SyncManager.startResyncWithoutLock(projectId, opts, err => {
+        if (err) return callback(OError.tag(err))
+        extendLock(err => {
+          if (err) return callback(OError.tag(err))
+          _countAndProcessUpdates(
+            projectId,
+            extendLock,
+            REDIS_READ_BATCH_SIZE,
+            releaseLock
+          )
+        })
+      })
+    },
+    (error, queueSize) => {
+      if (error) {
+        OError.tag(error)
+      }
+      ErrorRecorder.record(projectId, queueSize, error, callback)
+      if (queueSize > 0) {
+        const duration = (Date.now() - startTimeMs) / 1000
+        Metrics.historyFlushDurationSeconds.observe(duration)
+        Metrics.historyFlushQueueSize.observe(queueSize)
+      }
+      // clear the timestamp in the background if the queue is now empty
+      RedisManager.clearDanglingFirstOpTimestamp(projectId, () => {})
+    }
+  )
+}
+
 // Process all updates for a project, only check project-level information once
 export function processUpdatesForProject(projectId, callback) {
+  const startTimeMs = Date.now()
   LockManager.runWithLock(
     keys.projectHistoryLock({ project_id: projectId }),
     (extendLock, releaseLock) => {
@@ -76,6 +118,11 @@ export function processUpdatesForProject(projectId, callback) {
         OError.tag(error)
       }
       ErrorRecorder.record(projectId, queueSize, error, callback)
+      if (queueSize > 0) {
+        const duration = (Date.now() - startTimeMs) / 1000
+        Metrics.historyFlushDurationSeconds.observe(duration)
+        Metrics.historyFlushQueueSize.observe(queueSize)
+      }
       // clear the timestamp in the background if the queue is now empty
       RedisManager.clearDanglingFirstOpTimestamp(projectId, () => {})
     }
@@ -170,10 +217,11 @@ _mocks._countAndProcessUpdates = (
           _processUpdatesBatch(projectId, updates, extendLock, cb)
         },
         error => {
-          if (error) {
-            return callback(error)
-          }
-          callback(null, queueSize)
+          // Unconventional callback signature. The caller needs the queue size
+          // even when an error is thrown in order to record the queue size in
+          // the projectHistoryFailures collection. We'll have to find another
+          // way to achieve this when we promisify.
+          callback(error, queueSize)
         }
       )
     } else {
@@ -221,23 +269,18 @@ export function _getHistoryId(projectId, updates, callback) {
         idFromUpdates = update.projectHistoryId.toString()
       } else if (idFromUpdates !== update.projectHistoryId.toString()) {
         metrics.inc('updates.batches.project-history-id.inconsistent-update')
-        logger.warn(
-          {
+        return callback(
+          new OError('inconsistent project history id between updates', {
             projectId,
-            updates,
             idFromUpdates,
             currentId: update.projectHistoryId,
-          },
-          'inconsistent project history id between updates'
-        )
-        return callback(
-          new OError('inconsistent project history id between updates')
+          })
         )
       }
     }
   }
 
-  WebApiManager.getHistoryId(projectId, (error, idFromWeb, cached) => {
+  WebApiManager.getHistoryId(projectId, (error, idFromWeb) => {
     if (error != null && idFromUpdates != null) {
       // present only on updates
       // 404s from web are an error
@@ -266,7 +309,6 @@ export function _getHistoryId(projectId, updates, callback) {
           projectId,
           idFromWeb,
           idFromUpdates,
-          idWasCached: cached,
           updates,
         },
         'inconsistent project history id between updates and web'
@@ -293,15 +335,11 @@ function _handleOpsOutOfOrderError(projectId, projectHistoryId, err, ...rest) {
     // Bypass ops-out-of-order errors in the stored chunk when in forceDebug mode
     if (failureRecord != null && failureRecord.forceDebug === true) {
       logger.warn(
-        { projectId, projectHistoryId },
+        { err, projectId, projectHistoryId },
         'ops out of order in chunk, forced continue'
       )
       callback(null, ...results) // return results without error
     } else {
-      logger.warn(
-        { projectId, projectHistoryId },
-        'ops out of order in chunk, returning error'
-      )
       callback(err, ...results)
     }
   })
@@ -327,7 +365,7 @@ function _getMostRecentVersionWithDebug(projectId, projectHistoryId, callback) {
   )
 }
 
-function _processUpdates(
+export function _processUpdates(
   projectId,
   projectHistoryId,
   updates,
@@ -355,7 +393,13 @@ function _processUpdates(
       _getMostRecentVersionWithDebug(
         projectId,
         projectHistoryId,
-        (error, baseVersion, projectStructureAndDocVersions) => {
+        (
+          error,
+          baseVersion,
+          projectStructureAndDocVersions,
+          _lastChange,
+          mostRecentChunk
+        ) => {
           if (projectStructureAndDocVersions == null) {
             projectStructureAndDocVersions = { project: null, docs: {} }
           }
@@ -370,6 +414,7 @@ function _processUpdates(
                 SyncManager.expandSyncUpdates(
                   projectId,
                   projectHistoryId,
+                  mostRecentChunk,
                   filteredUpdates,
                   extendLock,
                   cb
@@ -408,15 +453,20 @@ function _processUpdates(
                 )
               },
               (updatesWithBlobs, cb) => {
-                cb = profile.wrap('convertToChanges', cb)
-                UpdateTranslator.convertToChanges(
-                  projectId,
-                  updatesWithBlobs,
-                  cb
-                )
+                let changes
+                try {
+                  changes = UpdateTranslator.convertToChanges(
+                    projectId,
+                    updatesWithBlobs
+                  ).map(change => change.toRaw())
+                } catch (err) {
+                  return cb(err)
+                } finally {
+                  profile.log('convertToChanges')
+                }
+                cb(null, changes)
               },
               (changes, cb) => {
-                changes = changes.map(change => change.toRaw())
                 let change
                 const numChanges = changes.length
                 const byteLength = Buffer.byteLength(
@@ -612,5 +662,10 @@ function _sanitizeUpdate(update) {
 }
 
 export const promises = {
+  /** @type {(projectId: string) => Promise<number>} */
   processUpdatesForProject: promisify(processUpdatesForProject),
+  /** @type {(projectId: string, opts: any) => Promise<number>} */
+  startResyncAndProcessUpdatesUnderLock: promisify(
+    startResyncAndProcessUpdatesUnderLock
+  ),
 }

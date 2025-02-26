@@ -1,9 +1,9 @@
 const mongoose = require('../infrastructure/Mongoose')
-const _ = require('underscore')
+const _ = require('lodash')
 const { FolderSchema } = require('./Folder')
 const Errors = require('../Features/Errors/Errors')
 
-const concreteObjectId = mongoose.Types.ObjectId
+const ConcreteObjectId = mongoose.Types.ObjectId
 const { Schema } = mongoose
 const { ObjectId } = Schema
 
@@ -38,9 +38,12 @@ const ProjectSchema = new Schema(
     active: { type: Boolean, default: true },
     owner_ref: { type: ObjectId, ref: 'User' },
     collaberator_refs: [{ type: ObjectId, ref: 'User' }],
+    reviewer_refs: [{ type: ObjectId, ref: 'User' }],
     readOnly_refs: [{ type: ObjectId, ref: 'User' }],
+    pendingEditor_refs: [{ type: ObjectId, ref: 'User' }],
     rootDoc_id: { type: ObjectId },
     rootFolder: [FolderSchema],
+    mainBibliographyDoc_id: { type: ObjectId },
     version: { type: Number }, // incremented for every change in the project structure (folders and filenames)
     publicAccesLevel: { type: String, default: 'private' },
     compiler: { type: String, default: 'pdflatex' },
@@ -94,6 +97,7 @@ const ProjectSchema = new Schema(
         upgradedAt: { type: Date },
         allowDowngrade: { type: Boolean },
         zipFileArchivedInProject: { type: Boolean },
+        rangesSupportEnabled: { type: Boolean },
       },
     },
     collabratecUsers: [
@@ -119,7 +123,8 @@ ProjectSchema.statics.getProject = function (projectOrId, fields, callback) {
     callback(null, projectOrId)
   } else {
     try {
-      concreteObjectId(projectOrId.toString())
+      // eslint-disable-next-line no-new
+      new ConcreteObjectId(projectOrId.toString())
     } catch (e) {
       return callback(new Errors.NotFoundError(e.message))
     }
@@ -128,8 +133,8 @@ ProjectSchema.statics.getProject = function (projectOrId, fields, callback) {
 }
 
 function applyToAllFilesRecursivly(folder, fun) {
-  _.each(folder.fileRefs, file => fun(file))
-  _.each(folder.folders, folder => applyToAllFilesRecursivly(folder, fun))
+  _.forEach(folder.fileRefs, file => fun(file))
+  _.forEach(folder.folders, folder => applyToAllFilesRecursivly(folder, fun))
 }
 ProjectSchema.statics.applyToAllFilesRecursivly = applyToAllFilesRecursivly
 

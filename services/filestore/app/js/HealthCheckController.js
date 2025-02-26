@@ -1,9 +1,9 @@
-const fs = require('fs')
-const path = require('path')
+const fs = require('node:fs')
+const path = require('node:path')
 const Settings = require('@overleaf/settings')
-const streamBuffers = require('stream-buffers')
-const { promisify } = require('util')
-const Stream = require('stream')
+const { WritableBuffer } = require('@overleaf/stream-utils')
+const { promisify } = require('node:util')
+const Stream = require('node:stream')
 
 const pipeline = promisify(Stream.pipeline)
 const fsCopy = promisify(fs.copyFile)
@@ -23,9 +23,7 @@ async function checkCanGetFiles() {
   const key = `${projectId}/${fileId}`
   const bucket = Settings.filestore.stores.user_files
 
-  const buffer = new streamBuffers.WritableStreamBuffer({
-    initialSize: 100,
-  })
+  const buffer = new WritableBuffer({ initialSize: 100 })
 
   const sourceStream = await FileHandler.getFile(bucket, key, {})
   try {

@@ -1,18 +1,17 @@
 import { useTranslation } from 'react-i18next'
 import { putJSON } from '../../../../../../../infrastructure/fetch-json'
 import { extendTrialUrl } from '../../../../../data/subscription-url'
-import ActionButtonText from '../../../action-button-text'
 import { useLocation } from '../../../../../../../shared/hooks/use-location'
+import { debugConsole } from '@/utils/debugging'
+import OLButton from '@/features/ui/components/ol/ol-button'
 
 export default function ExtendTrialButton({
   isButtonDisabled,
-  isLoadingSecondaryAction,
-  isSuccessSecondaryAction,
+  isLoading,
   runAsyncSecondaryAction,
 }: {
   isButtonDisabled: boolean
-  isLoadingSecondaryAction: boolean
-  isSuccessSecondaryAction: boolean
+  isLoading: boolean
   runAsyncSecondaryAction: (promise: Promise<unknown>) => Promise<unknown>
 }) {
   const { t } = useTranslation()
@@ -24,22 +23,21 @@ export default function ExtendTrialButton({
       await runAsyncSecondaryAction(putJSON(extendTrialUrl))
       location.reload()
     } catch (e) {
-      console.error(e)
+      debugConsole.error(e)
     }
   }
 
   return (
-    <>
-      <button
-        className="btn btn-primary"
-        onClick={handleExtendTrial}
-        disabled={isButtonDisabled}
-      >
-        <ActionButtonText
-          inflight={isLoadingSecondaryAction || isSuccessSecondaryAction}
-          buttonText={buttonText}
-        />
-      </button>
-    </>
+    <OLButton
+      variant="primary"
+      onClick={handleExtendTrial}
+      disabled={isButtonDisabled}
+      isLoading={isLoading}
+      bs3Props={{
+        loading: isLoading ? t('processing_uppercase') + '…' : buttonText,
+      }}
+    >
+      {buttonText}
+    </OLButton>
   )
 }

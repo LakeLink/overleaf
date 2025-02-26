@@ -23,15 +23,16 @@ import { renderActiveSubscription } from '../../../../../helpers/render-active-s
 import * as useLocationModule from '../../../../../../../../../frontend/js/shared/hooks/use-location'
 
 describe('<ChangePlanModal />', function () {
-  const plansMetaTag = { name: 'ol-plans', value: plans }
-
   let reloadStub: sinon.SinonStub
 
   beforeEach(function () {
     reloadStub = sinon.stub()
     this.locationStub = sinon.stub(useLocationModule, 'useLocation').returns({
       assign: sinon.stub(),
+      replace: sinon.stub(),
       reload: reloadStub,
+      setHash: sinon.stub(),
+      toString: sinon.stub(),
     })
   })
 
@@ -51,16 +52,17 @@ describe('<ChangePlanModal />', function () {
     const changeToPlanButtons = screen.queryAllByRole('button', {
       name: 'Change to this plan',
     })
-    expect(changeToPlanButtons.length).to.equal(plans.length - 1)
+    expect(changeToPlanButtons.length).to.equal(plans.length - 3) // excludes paid-personal and paid-personal-annual
     screen.getByText('Your plan')
 
     const annualPlans = plans.filter(plan => plan.annual)
     expect(screen.getAllByText('/ year', { exact: false }).length).to.equal(
-      annualPlans.length
-    )
+      annualPlans.length - 1
+    ) // excludes paid-personal-annual
+
     expect(screen.getAllByText('/ month', { exact: false }).length).to.equal(
-      plans.length - annualPlans.length
-    )
+      plans.length - annualPlans.length - 1
+    ) // excludes paid-personal
 
     expect(screen.queryByText('loading', { exact: false })).to.be.null
   })
@@ -81,7 +83,7 @@ describe('<ChangePlanModal />', function () {
       {
         metaTags: [
           { name: 'ol-subscription', value: annualActiveSubscription },
-          plansMetaTag,
+          { name: 'ol-plans', value: plans },
         ],
       }
     )
@@ -320,7 +322,7 @@ describe('<ChangePlanModal />', function () {
     const standardPlanCollaboratorText = '10 collaborators per project'
     const professionalPlanCollaboratorText = 'Unlimited collaborators'
     const educationInputLabel =
-      'This license is for educational purposes (applies to students or faculty using Overleaf for teaching)'
+      '40% educational discountI confirm this subscription is for educational purposes (applies to students or faculty using Overleaf for teaching)'
 
     let modal: HTMLElement
     async function openModal() {
@@ -340,9 +342,8 @@ describe('<ChangePlanModal />', function () {
       await openModal()
 
       within(modal).getByText('Customize your group subscription')
-      within(modal).getByText('Save 30% or more')
 
-      within(modal).getByText('$1290 per year')
+      within(modal).getByText('$1,290 per year')
       expect(within(modal).getAllByText('$129 per user').length).to.equal(2)
 
       within(modal).getByText('Each user will have access to:')
@@ -367,16 +368,14 @@ describe('<ChangePlanModal />', function () {
       expect(sizeSelect.value).to.equal('10')
       const sizeOption = within(sizeSelect).getAllByRole('option')
       expect(sizeOption.length).to.equal(groupPlans.sizes.length)
-      within(modal).getByText(
-        'Overleaf offers a 40% educational discount for groups of 10 or more.'
-      )
+      within(modal).getByText('40% educational discount')
 
       const educationalCheckbox = within(modal).getByRole(
         'checkbox'
       ) as HTMLInputElement
       expect(educationalCheckbox.checked).to.be.false
       within(modal).getByText(
-        'This license is for educational purposes (applies to students or faculty using Overleaf for teaching)'
+        'I confirm this subscription is for educational purposes (applies to students or faculty using Overleaf for teaching)'
       )
 
       within(modal).getByText(
@@ -385,7 +384,7 @@ describe('<ChangePlanModal />', function () {
 
       expect(within(modal).queryByText('tax', { exact: false })).to.be.null
 
-      within(modal).getByRole('button', { name: 'Upgrade Now' })
+      within(modal).getByRole('button', { name: 'Upgrade now' })
 
       within(modal).getByRole('button', {
         name: 'Need more than 50 licenses? Please get in touch',
@@ -404,10 +403,8 @@ describe('<ChangePlanModal />', function () {
       expect(within(modal).queryByText(standardPlanCollaboratorText)).to.be.null
     })
 
-    it('shows educational discount applied when input checked and also notes if not enough users to get discount', async function () {
+    it('shows educational discount applied when input checked', async function () {
       const discountAppliedText = '40% educational discount applied!'
-      const discountNotAppliedText =
-        'The educational discount is available for groups of 10 or more'
       renderActiveSubscription(annualActiveSubscription)
 
       await openModal()
@@ -415,12 +412,10 @@ describe('<ChangePlanModal />', function () {
       const educationInput = within(modal).getByLabelText(educationInputLabel)
       fireEvent.click(educationInput)
       await within(modal).findByText(discountAppliedText)
-      expect(within(modal).queryByText(discountNotAppliedText)).to.be.null
 
       const sizeSelect = within(modal).getByRole('combobox') as HTMLInputElement
       await userEvent.selectOptions(sizeSelect, [screen.getByText('5')])
-      await within(modal).findByText(discountNotAppliedText)
-      expect(within(modal).queryByText(discountAppliedText)).to.be.null
+      await within(modal).findByText(discountAppliedText)
     })
 
     it('shows total with tax when tax applied', async function () {
@@ -430,9 +425,9 @@ describe('<ChangePlanModal />', function () {
 
       within(modal).getByText('Total:', { exact: false })
       expect(
-        within(modal).getAllByText('€1438.40', { exact: false }).length
+        within(modal).getAllByText('€1,438.40', { exact: false }).length
       ).to.equal(3)
-      within(modal).getByText('(€1160.00 + €278.40 tax) per year', {
+      within(modal).getByText('(€1,160.00 + €278.40 tax) per year', {
         exact: false,
       })
     })
@@ -442,7 +437,7 @@ describe('<ChangePlanModal />', function () {
 
       await openModal()
 
-      within(modal).getByText('$1290 per year')
+      within(modal).getByText('$1,290 per year')
       within(modal).getAllByText('$129 per user')
 
       // plan type (pro collab)
@@ -466,7 +461,7 @@ describe('<ChangePlanModal />', function () {
       ) as HTMLInputElement
       expect(professionalPlanRadioInput.checked).to.be.true
 
-      await within(modal).findByText('$2590 per year')
+      await within(modal).findByText('$2,590 per year')
       await within(modal).findAllByText('$259 per user')
 
       // user count
@@ -476,7 +471,7 @@ describe('<ChangePlanModal />', function () {
       sizeSelect = within(modal).getByRole('combobox') as HTMLInputElement
       expect(sizeSelect.value).to.equal('5')
 
-      await within(modal).findByText('$1395 per year')
+      await within(modal).findByText('$1,395 per year')
       await within(modal).findAllByText('$279 per user')
 
       // usage (enterprise or educational)
@@ -491,12 +486,12 @@ describe('<ChangePlanModal />', function () {
       expect(educationInput.checked).to.be.true
 
       // make sure doesn't change price until back at min user to qualify
-      await within(modal).findByText('$1395 per year')
+      await within(modal).findByText('$1,395 per year')
       await within(modal).findAllByText('$279 per user')
 
       await userEvent.selectOptions(sizeSelect, [screen.getByText('10')])
 
-      await within(modal).findByText('$1550 per year')
+      await within(modal).findByText('$1,550 per year')
       await within(modal).findAllByText('$155 per user')
     })
 
@@ -521,7 +516,7 @@ describe('<ChangePlanModal />', function () {
 
       await openModal()
 
-      const buttonConfirm = screen.getByRole('button', { name: 'Upgrade Now' })
+      const buttonConfirm = screen.getByRole('button', { name: 'Upgrade now' })
       fireEvent.click(buttonConfirm)
 
       screen.getByText('processing', { exact: false })
@@ -542,7 +537,7 @@ describe('<ChangePlanModal />', function () {
 
       await openModal()
 
-      const buttonConfirm = screen.getByRole('button', { name: 'Upgrade Now' })
+      const buttonConfirm = screen.getByRole('button', { name: 'Upgrade now' })
       fireEvent.click(buttonConfirm)
 
       screen.getByText('processing', { exact: false })

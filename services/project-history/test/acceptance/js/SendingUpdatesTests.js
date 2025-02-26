@@ -1,16 +1,17 @@
 import { expect } from 'chai'
 import Settings from '@overleaf/settings'
-import assert from 'assert'
+import assert from 'node:assert'
 import async from 'async'
-import crypto from 'crypto'
-import { ObjectId } from 'mongodb'
+import crypto from 'node:crypto'
+import mongodb from 'mongodb-legacy'
 import nock from 'nock'
 import * as ProjectHistoryClient from './helpers/ProjectHistoryClient.js'
 import * as ProjectHistoryApp from './helpers/ProjectHistoryApp.js'
+const { ObjectId } = mongodb
 
-const MockHistoryStore = () => nock('http://localhost:3100')
-const MockFileStore = () => nock('http://localhost:3009')
-const MockWeb = () => nock('http://localhost:3000')
+const MockHistoryStore = () => nock('http://127.0.0.1:3100')
+const MockFileStore = () => nock('http://127.0.0.1:3009')
+const MockWeb = () => nock('http://127.0.0.1:3000')
 
 // Some helper methods to make the tests more compact
 function slTextUpdate(historyId, doc, userId, v, ts, op) {
@@ -29,10 +30,11 @@ function slTextUpdate(historyId, doc, userId, v, ts, op) {
   }
 }
 
-function slAddDocUpdate(historyId, doc, userId, ts, docLines) {
+function slAddDocUpdate(historyId, doc, userId, ts, docLines, ranges = {}) {
   return {
     projectHistoryId: historyId,
     pathname: doc.pathname,
+    ranges,
     docLines,
     doc: doc.id,
     meta: { user_id: userId, ts: ts.getTime() },
@@ -45,9 +47,10 @@ function slAddDocUpdateWithVersion(
   userId,
   ts,
   docLines,
-  projectVersion
+  projectVersion,
+  ranges = {}
 ) {
-  const result = slAddDocUpdate(historyId, doc, userId, ts, docLines)
+  const result = slAddDocUpdate(historyId, doc, userId, ts, docLines, ranges)
   result.version = projectVersion
   return result
 }
@@ -56,8 +59,22 @@ function slAddFileUpdate(historyId, file, userId, ts, projectId) {
   return {
     projectHistoryId: historyId,
     pathname: file.pathname,
-    url: `http://localhost:3009/project/${projectId}/file/${file.id}`,
+    url: `http://127.0.0.1:3009/project/${projectId}/file/${file.id}`,
     file: file.id,
+    ranges: undefined,
+    meta: { user_id: userId, ts: ts.getTime() },
+  }
+}
+
+function createdBlobFileUpdate(historyId, file, userId, ts, projectId) {
+  return {
+    projectHistoryId: historyId,
+    pathname: file.pathname,
+    createdBlob: true,
+    url: null,
+    file: file.id,
+    hash: file.hash,
+    ranges: undefined,
     meta: { user_id: userId, ts: ts.getTime() },
   }
 }
@@ -72,19 +89,12 @@ function slRenameUpdate(historyId, doc, userId, ts, pathname, newPathname) {
   }
 }
 
-function olTextUpdate(doc, userId, ts, textOperation, v) {
+function olUpdate(doc, userId, ts, operations, v) {
   return {
     v2Authors: [userId],
     timestamp: ts.toJSON(),
     authors: [],
-
-    operations: [
-      {
-        pathname: doc.pathname.replace(/^\//, ''), // Strip leading /
-        textOperation,
-      },
-    ],
-
+    operations,
     v2DocVersions: {
       [doc.id]: {
         pathname: doc.pathname.replace(/^\//, ''), // Strip leading /
@@ -94,26 +104,33 @@ function olTextUpdate(doc, userId, ts, textOperation, v) {
   }
 }
 
-function olTextUpdates(doc, userId, ts, textOperations, v) {
+function olTextOperation(doc, textOperation) {
   return {
-    v2Authors: [userId],
-    timestamp: ts.toJSON(),
-    authors: [],
-
-    operations: textOperations.map(textOperation => ({
-      // Strip leading /
-      pathname: doc.pathname.replace(/^\//, ''),
-
-      textOperation,
-    })),
-
-    v2DocVersions: {
-      [doc.id]: {
-        pathname: doc.pathname.replace(/^\//, ''), // Strip leading /
-        v: v || 1,
-      },
-    },
+    pathname: doc.pathname.replace(/^\//, ''), // Strip leading /
+    textOperation,
   }
+}
+
+function olAddCommentOperation(doc, commentId, pos, length) {
+  return {
+    pathname: doc.pathname.replace(/^\//, ''), // Strip leading /
+    commentId,
+    ranges: [{ pos, length }],
+  }
+}
+
+function olTextUpdate(doc, userId, ts, textOperation, v) {
+  return olUpdate(doc, userId, ts, [olTextOperation(doc, textOperation)], v)
+}
+
+function olTextUpdates(doc, userId, ts, textOperations, v) {
+  return olUpdate(
+    doc,
+    userId,
+    ts,
+    textOperations.map(textOperation => olTextOperation(doc, textOperation)),
+    v
+  )
 }
 
 function olRenameUpdate(doc, userId, ts, pathname, newPathname) {
@@ -131,8 +148,8 @@ function olRenameUpdate(doc, userId, ts, pathname, newPathname) {
   }
 }
 
-function olAddDocUpdate(doc, userId, ts, fileHash) {
-  return {
+function olAddDocUpdate(doc, userId, ts, fileHash, rangesHash = undefined) {
+  const update = {
     v2Authors: [userId],
     timestamp: ts.toJSON(),
     authors: [],
@@ -146,10 +163,21 @@ function olAddDocUpdate(doc, userId, ts, fileHash) {
       },
     ],
   }
+  if (rangesHash) {
+    update.operations[0].file.rangesHash = rangesHash
+  }
+  return update
 }
 
-function olAddDocUpdateWithVersion(doc, userId, ts, fileHash, version) {
-  const result = olAddDocUpdate(doc, userId, ts, fileHash)
+function olAddDocUpdateWithVersion(
+  doc,
+  userId,
+  ts,
+  fileHash,
+  version,
+  rangesHash = undefined
+) {
+  const result = olAddDocUpdate(doc, userId, ts, fileHash, rangesHash)
   result.projectVersion = version
   return result
 }
@@ -172,7 +200,7 @@ function olAddFileUpdate(file, userId, ts, fileHash) {
 }
 
 describe('Sending Updates', function () {
-  const historyId = ObjectId().toString()
+  const historyId = new ObjectId().toString()
 
   beforeEach(function (done) {
     this.timestamp = new Date()
@@ -181,9 +209,9 @@ describe('Sending Updates', function () {
       if (error) {
         return done(error)
       }
-      this.userId = ObjectId().toString()
-      this.projectId = ObjectId().toString()
-      this.docId = ObjectId().toString()
+      this.userId = new ObjectId().toString()
+      this.projectId = new ObjectId().toString()
+      this.docId = new ObjectId().toString()
 
       this.doc = {
         id: this.docId,
@@ -270,6 +298,115 @@ describe('Sending Updates', function () {
           assert(
             createBlob.isDone(),
             '/api/projects/:historyId/blobs/:hash should have been called'
+          )
+          assert(
+            addFile.isDone(),
+            `/api/projects/${historyId}/changes should have been called`
+          )
+          done()
+        }
+      )
+    })
+
+    it('should send ranges to the history store', function (done) {
+      const fileHash = '49e886093b3eacbc12b99a1eb5aeaa44a6b9d90e'
+      const rangesHash = 'fa9a429ff518bc9e5b2507a96ff0646b566eca65'
+
+      const historyRanges = {
+        trackedChanges: [
+          {
+            range: { pos: 4, length: 3 },
+            tracking: {
+              type: 'delete',
+              userId: 'user-id-1',
+              ts: '2024-01-01T00:00:00.000Z',
+            },
+          },
+        ],
+        comments: [
+          {
+            ranges: [{ pos: 0, length: 3 }],
+            id: 'comment-id-1',
+          },
+        ],
+      }
+
+      // We need to set up the ranges mock first, as we will call it last..
+      const createRangesBlob = MockHistoryStore()
+        .put(`/api/projects/${historyId}/blobs/${rangesHash}`, historyRanges)
+        .reply(201)
+
+      const createBlob = MockHistoryStore()
+        .put(`/api/projects/${historyId}/blobs/${fileHash}`, 'foo barbaz')
+        .reply(201)
+
+      const addFile = MockHistoryStore()
+        .post(`/api/projects/${historyId}/legacy_changes`, body => {
+          expect(body).to.deep.equal([
+            olAddDocUpdate(
+              this.doc,
+              this.userId,
+              this.timestamp,
+              fileHash,
+              rangesHash
+            ),
+          ])
+          return true
+        })
+        .query({ end_version: 0 })
+        .reply(204)
+
+      async.series(
+        [
+          cb => {
+            ProjectHistoryClient.pushRawUpdate(
+              this.projectId,
+              slAddDocUpdate(
+                historyId,
+                this.doc,
+                this.userId,
+                this.timestamp,
+                'foo barbaz',
+                {
+                  changes: [
+                    {
+                      op: { p: 4, d: 'bar' },
+                      metadata: {
+                        ts: 1704067200000,
+                        user_id: 'user-id-1',
+                      },
+                    },
+                  ],
+                  comments: [
+                    {
+                      op: {
+                        p: 0,
+                        c: 'foo',
+                        t: 'comment-id-1',
+                      },
+                      metadata: { resolved: false },
+                    },
+                  ],
+                }
+              ),
+              cb
+            )
+          },
+          cb => {
+            ProjectHistoryClient.flushProject(this.projectId, cb)
+          },
+        ],
+        error => {
+          if (error) {
+            return done(error)
+          }
+          assert(
+            createBlob.isDone(),
+            '/api/projects/:historyId/blobs/:hash should have been called to create content blob'
+          )
+          assert(
+            createRangesBlob.isDone(),
+            '/api/projects/:historyId/blobs/:hash should have been called to create ranges blob'
           )
           assert(
             addFile.isDone(),
@@ -430,9 +567,76 @@ describe('Sending Updates', function () {
       )
     })
 
+    it('should not get file from filestore if no url provided', function (done) {
+      const file = {
+        id: new ObjectId().toString(),
+        pathname: '/test.png',
+        contents: Buffer.from([1, 2, 3]),
+        hash: 'aed2973e4b8a7ff1b30ff5c4751e5a2b38989e74',
+      }
+
+      const fileStoreRequest = MockFileStore()
+        .get(`/project/${this.projectId}/file/${file.id}`)
+        .reply(200, file.contents)
+
+      const checkBlob = MockHistoryStore()
+        .head(`/api/projects/${historyId}/blobs/${file.hash}`)
+        .reply(200)
+
+      const addFile = MockHistoryStore()
+        .post(`/api/projects/${historyId}/legacy_changes`, body => {
+          expect(body).to.deep.equal([
+            olAddFileUpdate(file, this.userId, this.timestamp, file.hash),
+          ])
+          return true
+        })
+        .query({ end_version: 0 })
+        .reply(204)
+
+      async.series(
+        [
+          cb => {
+            ProjectHistoryClient.pushRawUpdate(
+              this.projectId,
+              createdBlobFileUpdate(
+                historyId,
+                file,
+                this.userId,
+                this.timestamp,
+                this.projectId
+              ),
+              cb
+            )
+          },
+          cb => {
+            ProjectHistoryClient.flushProject(this.projectId, cb)
+          },
+        ],
+        error => {
+          if (error) {
+            return done(error)
+          }
+          assert(
+            !fileStoreRequest.isDone(),
+            'filestore should not have been called'
+          )
+
+          assert(
+            checkBlob.isDone(),
+            `HEAD /api/projects/${historyId}/blobs/${file.hash} should have been called`
+          )
+          assert(
+            addFile.isDone(),
+            `/api/projects/${historyId}/latest/files should have been called`
+          )
+          done()
+        }
+      )
+    })
+
     it('should send add file updates to the history store', function (done) {
       const file = {
-        id: ObjectId().toString(),
+        id: new ObjectId().toString(),
         pathname: '/test.png',
         contents: Buffer.from([1, 2, 3]),
         hash: 'aed2973e4b8a7ff1b30ff5c4751e5a2b38989e74',
@@ -507,7 +711,7 @@ describe('Sending Updates', function () {
         .digest('hex')
 
       const file = {
-        id: ObjectId().toString(),
+        id: new ObjectId().toString(),
         pathname: '/large.png',
         contents: fileContents,
         hash: fileHash,
@@ -593,11 +797,21 @@ describe('Sending Updates', function () {
       )
     })
 
-    it('should ignore comment ops', function (done) {
+    it('should handle comment ops', function (done) {
       const createChange = MockHistoryStore()
         .post(`/api/projects/${historyId}/legacy_changes`, body => {
           expect(body).to.deep.equal([
-            olTextUpdate(this.doc, this.userId, this.timestamp, [3, '\nc', 2]),
+            olUpdate(this.doc, this.userId, this.timestamp, [
+              olTextOperation(this.doc, [3, '\nc', 2]),
+              olAddCommentOperation(this.doc, 'comment-id-1', 3, 2),
+            ]),
+            olUpdate(
+              this.doc,
+              this.userId,
+              this.timestamp,
+              [olAddCommentOperation(this.doc, 'comment-id-2', 2, 1)],
+              2
+            ),
           ])
           return true
         })
@@ -617,7 +831,7 @@ describe('Sending Updates', function () {
                 this.timestamp,
                 [
                   { p: 3, i: '\nc' },
-                  { p: 3, c: '\nc' },
+                  { p: 3, c: '\nc', t: 'comment-id-1' },
                 ]
               ),
               cb
@@ -632,7 +846,7 @@ describe('Sending Updates', function () {
                 this.userId,
                 2,
                 this.timestamp,
-                [{ p: 2, c: 'b' }]
+                [{ p: 2, c: 'b', t: 'comment-id-2' }]
               ),
               cb
             )
@@ -940,8 +1154,8 @@ describe('Sending Updates', function () {
     })
 
     it('should not concat updates with different user_ids', function (done) {
-      const userId1 = ObjectId().toString()
-      const userId2 = ObjectId().toString()
+      const userId1 = new ObjectId().toString()
+      const userId2 = new ObjectId().toString()
 
       const createChange = MockHistoryStore()
         .post(`/api/projects/${historyId}/legacy_changes`, body => {
@@ -994,12 +1208,12 @@ describe('Sending Updates', function () {
 
     it('should not concat updates with different docs', function (done) {
       const doc1 = {
-        id: ObjectId().toString(),
+        id: new ObjectId().toString(),
         pathname: '/doc1.tex',
         length: 10,
       }
       const doc2 = {
-        id: ObjectId().toString(),
+        id: new ObjectId().toString(),
         pathname: '/doc2.tex',
         length: 10,
       }
@@ -1224,7 +1438,7 @@ describe('Sending Updates', function () {
 
     it('should not concat text updates across project structure ops', function (done) {
       const newDoc = {
-        id: ObjectId().toString(),
+        id: new ObjectId().toString(),
         pathname: '/main.tex',
         hash: '0a207c060e61f3b88eaee0a8cd0696f46fb155eb',
         docLines: 'a\nb',
@@ -1628,7 +1842,7 @@ describe('Sending Updates', function () {
 
     it('should return a 500 if the filestore returns a 500', function (done) {
       const file = {
-        id: ObjectId().toString(),
+        id: new ObjectId().toString(),
         pathname: '/test.png',
         contents: Buffer.from([1, 2, 3]),
         hash: 'aed2973e4b8a7ff1b30ff5c4751e5a2b38989e74',
@@ -1704,7 +1918,7 @@ describe('Sending Updates', function () {
 
     it('should return a 500 if the filestore request errors', function (done) {
       const file = {
-        id: ObjectId().toString(),
+        id: new ObjectId().toString(),
         pathname: '/test.png',
         contents: Buffer.from([1, 2, 3]),
         hash: 'aed2973e4b8a7ff1b30ff5c4751e5a2b38989e74',
@@ -1798,7 +2012,7 @@ describe('Sending Updates', function () {
       const newDoc = []
       for (let i = 0; i <= 2; i++) {
         newDoc[i] = {
-          id: ObjectId().toString(),
+          id: new ObjectId().toString(),
           pathname: `/main${i}.tex`,
           hash: '0a207c060e61f3b88eaee0a8cd0696f46fb155eb',
           docLines: 'a\nb',

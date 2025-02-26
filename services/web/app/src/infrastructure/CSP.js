@@ -6,6 +6,7 @@ module.exports = function ({
   reportPercentage,
   reportOnly = false,
   exclude = [],
+  viewDirectives = {},
 }) {
   const header = reportOnly
     ? 'Content-Security-Policy-Report-Only'
@@ -16,6 +17,9 @@ module.exports = function ({
   return function (req, res, next) {
     // set the default policy
     res.set(header, defaultPolicy)
+    if (reportUri) {
+      res.set('Reporting-Endpoints', `csp-endpoint="${reportUri}"`)
+    }
 
     const originalRender = res.render
 
@@ -25,6 +29,7 @@ module.exports = function ({
       if (exclude.includes(view)) {
         // remove the default policy
         res.removeHeader(header)
+        res.removeHeader('Reporting-Endpoints')
       } else {
         // set the view policy
         res.locals.cspEnabled = true
@@ -33,7 +38,12 @@ module.exports = function ({
 
         res.locals.scriptNonce = scriptNonce
 
-        const policy = buildViewPolicy(scriptNonce, reportPercentage, reportUri)
+        const policy = buildViewPolicy(
+          scriptNonce,
+          reportPercentage,
+          reportUri,
+          viewDirectives[view]
+        )
 
         // Note: https://csp-evaluator.withgoogle.com/ is useful for checking the policy
 
@@ -47,7 +57,7 @@ module.exports = function ({
   }
 }
 
-const buildDefaultPolicy = reportUri => {
+const buildDefaultPolicy = (reportUri, styleSrc) => {
   const directives = [
     `base-uri 'none'`, // forbid setting a "base" element
     `default-src 'none'`, // forbid loading anything from a "src" attribute
@@ -58,17 +68,27 @@ const buildDefaultPolicy = reportUri => {
 
   if (reportUri) {
     directives.push(`report-uri ${reportUri}`)
-    // NOTE: implement report-to once it's more widely supported
+    directives.push(`report-to csp-endpoint`)
+  }
+
+  if (styleSrc) {
+    directives.push(`style-src ${styleSrc}`)
   }
 
   return directives.join('; ')
 }
 
-const buildViewPolicy = (scriptNonce, reportPercentage, reportUri) => {
+const buildViewPolicy = (
+  scriptNonce,
+  reportPercentage,
+  reportUri,
+  viewDirectives
+) => {
   const directives = [
     `script-src 'nonce-${scriptNonce}' 'unsafe-inline' 'strict-dynamic' https: 'report-sample'`, // only allow scripts from certain sources
     `object-src 'none'`, // forbid loading an "object" element
     `base-uri 'none'`, // forbid setting a "base" element
+    ...(viewDirectives ?? []),
   ]
 
   if (reportUri) {
@@ -77,7 +97,7 @@ const buildViewPolicy = (scriptNonce, reportPercentage, reportUri) => {
 
     if (belowReportCutoff) {
       directives.push(`report-uri ${reportUri}`)
-      // NOTE: implement report-to once it's more widely supported
+      directives.push(`report-to csp-endpoint`)
     }
   }
 
@@ -98,5 +118,17 @@ function removeCSPHeaders(res) {
   res.removeHeader('Content-Security-Policy-Report-Only')
 }
 
+/**
+ * WARNING: allowing inline styles can open a security hole;
+ * this is intended only for use in specific circumstances, such as Safari's built-in PDF viewer.
+ */
+function allowUnsafeInlineStyles(res) {
+  res.set(
+    'Content-Security-Policy',
+    buildDefaultPolicy(undefined, "'unsafe-inline'")
+  )
+}
+
 module.exports.buildDefaultPolicy = buildDefaultPolicy
 module.exports.removeCSPHeaders = removeCSPHeaders
+module.exports.allowUnsafeInlineStyles = allowUnsafeInlineStyles

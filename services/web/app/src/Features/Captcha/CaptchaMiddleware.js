@@ -1,11 +1,11 @@
-const fetch = require('node-fetch')
+const { fetchJson } = require('@overleaf/fetch-utils')
 const logger = require('@overleaf/logger')
 const Settings = require('@overleaf/settings')
 const Metrics = require('@overleaf/metrics')
 const OError = require('@overleaf/o-error')
 const DeviceHistory = require('./DeviceHistory')
 const AuthenticationController = require('../Authentication/AuthenticationController')
-const { expressify } = require('../../util/promises')
+const { expressify } = require('@overleaf/promise-utils')
 
 function respondInvalidCaptcha(req, res) {
   res.status(400).json({
@@ -26,6 +26,11 @@ async function initializeDeviceHistory(req) {
 }
 
 async function canSkipCaptcha(req, res) {
+  const trustedUser =
+    req.body?.email && Settings.recaptcha.trustedUsers.includes(req.body.email)
+  if (trustedUser) {
+    return res.json(true)
+  }
   await initializeDeviceHistory(req)
   const canSkip = req.deviceHistory.has(req.body?.email)
   Metrics.inc('captcha_pre_flight', 1, {
@@ -36,6 +41,9 @@ async function canSkipCaptcha(req, res) {
 
 function validateCaptcha(action) {
   return expressify(async function (req, res, next) {
+    const trustedUser =
+      req.body?.email &&
+      Settings.recaptcha.trustedUsers.includes(req.body.email)
     if (!Settings.recaptcha?.siteKey || Settings.recaptcha.disabled[action]) {
       if (action === 'login') {
         AuthenticationController.setAuditInfo(req, { captcha: 'disabled' })
@@ -43,10 +51,17 @@ function validateCaptcha(action) {
       Metrics.inc('captcha', 1, { path: action, status: 'disabled' })
       return next()
     }
+    if (trustedUser && action === 'login') {
+      AuthenticationController.setAuditInfo(req, { captcha: 'trusted' })
+      Metrics.inc('captcha', 1, { path: action, status: 'trusted' })
+      return next()
+    }
     const reCaptchaResponse = req.body['g-recaptcha-response']
     if (action === 'login') {
       await initializeDeviceHistory(req)
-      if (!reCaptchaResponse && req.deviceHistory.has(req.body?.email)) {
+      const fromKnownDevice = req.deviceHistory.has(req.body?.email)
+      AuthenticationController.setAuditInfo(req, { fromKnownDevice })
+      if (!reCaptchaResponse && fromKnownDevice) {
         // The user has previously logged in from this device, which required
         //  solving a captcha or keeping the device history alive.
         // We can skip checking the (missing) captcha response.
@@ -60,24 +75,22 @@ function validateCaptcha(action) {
       return respondInvalidCaptcha(req, res)
     }
 
-    const response = await fetch(Settings.recaptcha.endpoint, {
-      method: 'POST',
-      body: new URLSearchParams([
-        ['secret', Settings.recaptcha.secretKey],
-        ['response', reCaptchaResponse],
-      ]),
-      headers: {
-        Accept: 'application/json',
-      },
-    })
-    const body = await response.json()
-    if (!response.ok) {
+    let body
+    try {
+      body = await fetchJson(Settings.recaptcha.endpoint, {
+        method: 'POST',
+        body: new URLSearchParams([
+          ['secret', Settings.recaptcha.secretKey],
+          ['response', reCaptchaResponse],
+        ]),
+      })
+    } catch (err) {
       Metrics.inc('captcha', 1, { path: action, status: 'error' })
-      throw new OError('failed recaptcha siteverify request', {
-        statusCode: response.status,
-        body,
+      throw OError.tag(err, 'failed recaptcha siteverify request', {
+        body: err.body,
       })
     }
+
     if (!body.success) {
       logger.warn(
         { statusCode: 200, body },

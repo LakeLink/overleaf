@@ -1,142 +1,122 @@
-/* eslint-disable
-    no-return-assign,
-    no-unused-vars,
-    n/no-deprecated-api,
-*/
-// TODO: This file was created by bulk-decaffeinate.
-// Fix any style issues and re-enable lint.
-/*
- * decaffeinate suggestions:
- * DS102: Remove unnecessary code created because of implicit returns
- * DS207: Consider shorter variations of null checks
- * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
- */
-let UrlFetcher
-const request = require('request').defaults({ jar: false })
-const fs = require('fs')
+const fs = require('node:fs')
 const logger = require('@overleaf/logger')
-const settings = require('@overleaf/settings')
-const async = require('async')
-const { URL } = require('url')
-const { promisify } = require('util')
+const Settings = require('@overleaf/settings')
+const {
+  CustomHttpAgent,
+  CustomHttpsAgent,
+  fetchStream,
+  RequestFailedError,
+} = require('@overleaf/fetch-utils')
+const { URL } = require('node:url')
+const { pipeline } = require('node:stream/promises')
+const Metrics = require('./Metrics')
 
-const oneMinute = 60 * 1000
+const MAX_CONNECT_TIME = 1000
+const httpAgent = new CustomHttpAgent({ connectTimeout: MAX_CONNECT_TIME })
+const httpsAgent = new CustomHttpsAgent({ connectTimeout: MAX_CONNECT_TIME })
 
-module.exports = UrlFetcher = {
-  pipeUrlToFileWithRetry(url, filePath, callback) {
-    const doDownload = function (cb) {
-      UrlFetcher.pipeUrlToFile(url, filePath, cb)
-    }
-    async.retry(3, doDownload, callback)
-  },
-
-  pipeUrlToFile(url, filePath, _callback) {
-    if (_callback == null) {
-      _callback = function () {}
-    }
-    const callbackOnce = function (error) {
-      if (timeoutHandler != null) {
-        clearTimeout(timeoutHandler)
-      }
-      _callback(error)
-      return (_callback = function () {})
-    }
-
-    const u = new URL(url)
-    if (
-      settings.filestoreDomainOveride &&
-      u.host !== settings.apis.clsiPerf.host
-    ) {
-      url = `${settings.filestoreDomainOveride}${u.pathname}${u.search}`
-    }
-    let timeoutHandler = setTimeout(
-      function () {
-        timeoutHandler = null
-        logger.error({ url, filePath }, 'Timed out downloading file to cache')
-        return callbackOnce(
-          new Error(`Timed out downloading file to cache ${url}`)
-        )
-      },
-      // FIXME: maybe need to close fileStream here
-      3 * oneMinute
-    )
-
-    logger.debug({ url, filePath }, 'started downloading url to cache')
-    const urlStream = request.get({ url, timeout: oneMinute })
-    urlStream.pause() // stop data flowing until we are ready
-
-    // attach handlers before setting up pipes
-    urlStream.on('error', function (error) {
-      logger.error({ err: error, url, filePath }, 'error downloading url')
-      return callbackOnce(
-        error || new Error(`Something went wrong downloading the URL ${url}`)
+async function pipeUrlToFileWithRetry(url, fallbackURL, filePath) {
+  let remainingAttempts = 3
+  let lastErr
+  while (remainingAttempts-- > 0) {
+    const timer = new Metrics.Timer('url_fetcher', {
+      path: lastErr ? ' retry' : 'fetch',
+    })
+    try {
+      await pipeUrlToFile(url, fallbackURL, filePath)
+      timer.done({ status: 'success' })
+      return
+    } catch (err) {
+      timer.done({ status: 'error' })
+      logger.warn(
+        { err, url, filePath, remainingAttempts },
+        'error downloading url'
       )
+      lastErr = err
+    }
+  }
+  throw lastErr
+}
+
+async function pipeUrlToFile(url, fallbackURL, filePath) {
+  const u = new URL(url)
+  if (
+    Settings.filestoreDomainOveride &&
+    u.host !== Settings.apis.clsiPerf.host
+  ) {
+    url = `${Settings.filestoreDomainOveride}${u.pathname}${u.search}`
+  }
+  if (fallbackURL) {
+    const u2 = new URL(fallbackURL)
+    if (
+      Settings.filestoreDomainOveride &&
+      u2.host !== Settings.apis.clsiPerf.host
+    ) {
+      fallbackURL = `${Settings.filestoreDomainOveride}${u2.pathname}${u2.search}`
+    }
+  }
+
+  let stream
+  try {
+    stream = await fetchStream(url, {
+      signal: AbortSignal.timeout(60 * 1000),
+      // provide a function to get the agent for each request
+      // as there may be multiple requests with different protocols
+      // due to redirects.
+      agent: _url => (_url.protocol === 'https:' ? httpsAgent : httpAgent),
     })
+  } catch (err) {
+    if (
+      fallbackURL &&
+      err instanceof RequestFailedError &&
+      err.response.status === 404
+    ) {
+      stream = await fetchStream(fallbackURL, {
+        signal: AbortSignal.timeout(60 * 1000),
+        // provide a function to get the agent for each request
+        // as there may be multiple requests with different protocols
+        // due to redirects.
+        agent: _url => (_url.protocol === 'https:' ? httpsAgent : httpAgent),
+      })
+      url = fallbackURL
+    } else {
+      throw err
+    }
+  }
 
-    urlStream.on('end', () =>
-      logger.debug({ url, filePath }, 'finished downloading file into cache')
-    )
+  const source = inferSource(url)
+  Metrics.inc('url_source', 1, { path: source })
 
-    return urlStream.on('response', function (res) {
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        const atomicWrite = filePath + '~'
-        const fileStream = fs.createWriteStream(atomicWrite)
-
-        // attach handlers before setting up pipes
-        fileStream.on('error', function (error) {
-          logger.error(
-            { err: error, url, filePath },
-            'error writing file into cache'
-          )
-          return fs.unlink(atomicWrite, function (err) {
-            if (err != null) {
-              logger.err({ err, filePath }, 'error deleting file from cache')
-            }
-            return callbackOnce(error)
-          })
-        })
-
-        fileStream.on('finish', function () {
-          logger.debug({ url, filePath }, 'finished writing file into cache')
-          fs.rename(atomicWrite, filePath, error => {
-            if (error) {
-              fs.unlink(atomicWrite, () => callbackOnce(error))
-            } else {
-              callbackOnce()
-            }
-          })
-        })
-
-        fileStream.on('pipe', () =>
-          logger.debug({ url, filePath }, 'piping into filestream')
-        )
-
-        urlStream.pipe(fileStream)
-        return urlStream.resume() // now we are ready to handle the data
-      } else {
-        logger.error(
-          { statusCode: res.statusCode, url, filePath },
-          'unexpected status code downloading url to cache'
-        )
-        // https://nodejs.org/api/http.html#http_class_http_clientrequest
-        // If you add a 'response' event handler, then you must consume
-        // the data from the response object, either by calling
-        // response.read() whenever there is a 'readable' event, or by
-        // adding a 'data' handler, or by calling the .resume()
-        // method. Until the data is consumed, the 'end' event will not
-        // fire. Also, until the data is read it will consume memory
-        // that can eventually lead to a 'process out of memory' error.
-        urlStream.resume() // discard the data
-        return callbackOnce(
-          new Error(
-            `URL returned non-success status code: ${res.statusCode} ${url}`
-          )
-        )
-      }
+  const atomicWrite = filePath + '~'
+  try {
+    const output = fs.createWriteStream(atomicWrite)
+    await pipeline(stream, output)
+    await fs.promises.rename(atomicWrite, filePath)
+    Metrics.count('UrlFetcher.downloaded_bytes', output.bytesWritten, {
+      path: source,
     })
-  },
+  } catch (err) {
+    try {
+      await fs.promises.unlink(atomicWrite)
+    } catch (e) {}
+    throw err
+  }
+}
+
+const BUCKET_REGEX = /\/bucket\/([^/]+)\/key\//
+
+function inferSource(url) {
+  if (url.includes(Settings.apis.clsiPerf.host)) {
+    return 'clsi-perf'
+  } else if (url.includes('/project/') && url.includes('/file/')) {
+    return 'user-files'
+  } else if (url.includes('/key/')) {
+    const match = url.match(BUCKET_REGEX)
+    if (match) return match[1]
+  }
+  return 'unknown'
 }
 
 module.exports.promises = {
-  pipeUrlToFileWithRetry: promisify(UrlFetcher.pipeUrlToFileWithRetry),
+  pipeUrlToFileWithRetry,
 }

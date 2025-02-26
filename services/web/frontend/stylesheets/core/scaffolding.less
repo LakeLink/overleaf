@@ -43,8 +43,10 @@ body {
     padding-top: @header-height + @content-margin-vertical;
   }
 
-  .thin-footer {
-    padding-bottom: @footer-height;
+  &.thin-footer {
+    .container {
+      padding-bottom: @footer-height;
+    }
   }
 }
 
@@ -181,4 +183,8 @@ hr {
 
 .row-spaced-large {
   margin-top: @line-height-computed * 2;
+}
+
+.row-spaced-extra-large {
+  margin-top: @line-height-computed * 4;
 }

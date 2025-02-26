@@ -1,6 +1,7 @@
 // Run babel on tests to allow support for import/export statements in Node
 require('@babel/register')({
-  extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs'],
+  extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.svg'],
+  plugins: [['module-resolver', { alias: { '^@/(.+)': './frontend/js/\\1' } }]],
 })
 
 // Load JSDOM to mock the DOM in Node
@@ -11,7 +12,7 @@ require('jsdom-global')(undefined, {
 })
 
 const path = require('path')
-process.env.SHARELATEX_CONFIG = path.resolve(
+process.env.OVERLEAF_CONFIG = path.resolve(
   __dirname,
   '../../config/settings.webpack.js'
 )
@@ -22,49 +23,10 @@ const chai = require('chai')
 chai.use(require('sinon-chai'))
 chai.use(require('chai-as-promised'))
 
-// Mock global settings
-window.ExposedSettings = {
-  appName: 'Overleaf',
-  maxEntitiesPerProject: 10,
-  maxUploadSize: 5 * 1024 * 1024,
-  siteUrl: 'https://www.dev-overleaf.com',
-  hasLinkUrlFeature: true,
-  hasLinkedProjectFileFeature: true,
-  hasLinkedProjectOutputFileFeature: true,
-  textExtensions: [
-    'tex',
-    'latex',
-    'sty',
-    'cls',
-    'bst',
-    'bib',
-    'bibtex',
-    'txt',
-    'tikz',
-    'mtx',
-    'rtex',
-    'md',
-    'asy',
-    'latexmkrc',
-    'lbx',
-    'bbx',
-    'cbx',
-    'm',
-    'lco',
-    'dtx',
-    'ins',
-    'ist',
-    'def',
-    'clo',
-    'ldf',
-    'rmd',
-    'lua',
-    'gv',
-    'mf',
-  ],
-}
-
-window.i18n = { currentLangCode: 'en' }
+// Populate meta for top-level access in modules on import
+const { resetMeta } = require('./helpers/reset-meta')
+resetMeta()
+// i18n requires access to 'ol-i18n' as defined above
 require('../../frontend/js/i18n')
 
 const moment = require('moment')
@@ -108,13 +70,28 @@ globalThis.BroadcastChannel =
       postMessage(message) {}
     }
 
+// add stub for WebSocket state enum
+globalThis.WebSocket = class WebSocket {
+  static CONNECTING = 0
+  static OPEN = 1
+  static CLOSING = 2
+  static CLOSED = 3
+}
+
 // node-fetch doesn't accept relative URL's: https://github.com/node-fetch/node-fetch/blob/master/docs/v2-LIMITS.md#known-differences
 const fetch = require('node-fetch')
 globalThis.fetch =
   global.fetch =
   window.fetch =
-    (url, ...options) => fetch(new URL(url, 'http://localhost'), ...options)
+    (url, ...options) => fetch(new URL(url, 'http://127.0.0.1'), ...options)
 
-// ignore CSS files
+// ignore CSS/LESS files
 const { addHook } = require('pirates')
-addHook(() => '', { exts: ['.css'], ignoreNodeModules: false })
+addHook(() => '', { exts: ['.css', '.less'], ignoreNodeModules: false })
+
+globalThis.HTMLElement.prototype.scrollIntoView = () => {}
+
+globalThis.DOMParser = window.DOMParser
+
+// Polyfill for IndexedDB
+require('fake-indexeddb/auto')

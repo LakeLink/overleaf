@@ -1,11 +1,20 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Alert, Button, Modal } from 'react-bootstrap'
-import Icon from '../../../shared/components/icon'
-import Tooltip from '../../../shared/components/tooltip'
 import useAsync from '../../../shared/hooks/use-async'
 import { postJSON } from '../../../infrastructure/fetch-json'
-import ignoredWords from '../ignored-words'
+import { debugConsole } from '@/utils/debugging'
+import {
+  OLModalBody,
+  OLModalFooter,
+  OLModalHeader,
+  OLModalTitle,
+} from '@/features/ui/components/ol/ol-modal'
+import OLTooltip from '@/features/ui/components/ol/ol-tooltip'
+import OLNotification from '@/features/ui/components/ol/ol-notification'
+import OLButton from '@/features/ui/components/ol/ol-button'
+import OLIconButton from '@/features/ui/components/ol/ol-icon-button'
+import { bsVersion } from '@/features/utils/bootstrap-5'
+import { learnedWords as initialLearnedWords } from '@/features/source-editor/extensions/spelling/learned-words'
 
 type DictionaryModalContentProps = {
   handleHide: () => void
@@ -18,71 +27,83 @@ export default function DictionaryModalContent({
 }: DictionaryModalContentProps) {
   const { t } = useTranslation()
 
+  const [learnedWords, setLearnedWords] = useState<Set<string>>(
+    initialLearnedWords.global
+  )
+
   const { isError, runAsync } = useAsync()
 
   const handleRemove = useCallback(
     word => {
-      ignoredWords.remove(word)
-      runAsync(
-        postJSON('/spelling/unlearn', {
-          body: {
-            word,
-          },
+      runAsync(postJSON('/spelling/unlearn', { body: { word } }))
+        .then(() => {
+          setLearnedWords(prevLearnedWords => {
+            const learnedWords = new Set(prevLearnedWords)
+            learnedWords.delete(word)
+            return learnedWords
+          })
+          window.dispatchEvent(
+            new CustomEvent('editor:remove-learned-word', { detail: word })
+          )
         })
-      ).catch(console.error)
+        .catch(debugConsole.error)
     },
     [runAsync]
   )
 
   return (
     <>
-      <Modal.Header closeButton>
-        <Modal.Title>{t('edit_dictionary')}</Modal.Title>
-      </Modal.Header>
+      <OLModalHeader closeButton>
+        <OLModalTitle>{t('edit_dictionary')}</OLModalTitle>
+      </OLModalHeader>
 
-      <Modal.Body>
+      <OLModalBody>
         {isError ? (
-          <Alert bsStyle="danger">{t('generic_something_went_wrong')}</Alert>
+          <OLNotification
+            type="error"
+            content={t('generic_something_went_wrong')}
+          />
         ) : null}
 
-        {ignoredWords.learnedWords?.size > 0 ? (
+        {learnedWords.size > 0 ? (
           <ul className="list-unstyled dictionary-entries-list">
-            {[...ignoredWords.learnedWords]
-              .sort(wordsSortFunction)
-              .map(learnedWord => (
-                <li key={learnedWord} className="dictionary-entry">
-                  <span className="dictionary-entry-name">{learnedWord}</span>
-                  <Tooltip
-                    id={`tooltip-remove-learned-word-${learnedWord}`}
-                    description={t('edit_dictionary_remove')}
-                    overlayProps={{ delay: 0 }}
-                  >
-                    <Button
-                      bsStyle="danger"
-                      bsSize="xs"
-                      onClick={() => handleRemove(learnedWord)}
-                    >
-                      <Icon
-                        type="trash-o"
-                        accessibilityLabel={t('edit_dictionary_remove')}
-                      />
-                    </Button>
-                  </Tooltip>
-                </li>
-              ))}
+            {[...learnedWords].sort(wordsSortFunction).map(learnedWord => (
+              <li key={learnedWord} className="dictionary-entry">
+                <span className="dictionary-entry-name">{learnedWord}</span>
+                <OLTooltip
+                  id={`tooltip-remove-learned-word-${learnedWord}`}
+                  description={t('edit_dictionary_remove')}
+                  overlayProps={{ delay: 0 }}
+                >
+                  <OLIconButton
+                    variant="danger"
+                    size="sm"
+                    onClick={() => handleRemove(learnedWord)}
+                    bs3Props={{ bsSize: 'xsmall' }}
+                    icon={
+                      bsVersion({
+                        bs5: 'delete',
+                        bs3: 'trash-o',
+                      }) as string
+                    }
+                    accessibilityLabel={t('edit_dictionary_remove')}
+                  />
+                </OLTooltip>
+              </li>
+            ))}
           </ul>
         ) : (
           <p className="dictionary-empty-body text-center">
             <i>{t('edit_dictionary_empty')}</i>
           </p>
         )}
-      </Modal.Body>
+      </OLModalBody>
 
-      <Modal.Footer>
-        <Button bsStyle={null} className="btn-secondary" onClick={handleHide}>
-          {t('done')}
-        </Button>
-      </Modal.Footer>
+      <OLModalFooter>
+        <OLButton variant="secondary" onClick={handleHide}>
+          {t('close')}
+        </OLButton>
+      </OLModalFooter>
     </>
   )
 }

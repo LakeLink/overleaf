@@ -2,7 +2,11 @@ import { useCallback, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import { postJSON } from '../../../../infrastructure/fetch-json'
 import { useSubscriptionDashboardContext } from '../../context/subscription-dashboard-context'
-import { Institution } from './managed-institutions'
+import { ManagedInstitution as Institution } from '../../../../../../types/subscription/dashboard/managed-institution'
+import { RowLink } from './row-link'
+import { debugConsole } from '@/utils/debugging'
+import getMeta from '@/utils/meta'
+import OLButton from '@/features/ui/components/ol/ol-button'
 
 type ManagedInstitutionProps = {
   institution: Institution
@@ -26,7 +30,7 @@ export default function ManagedInstitution({
           institution.metricsEmail.optedOutUserIds = data
           updateManagedInstitution(institution)
         } catch (error) {
-          console.error(error)
+          debugConsole.error(error)
         }
         setSubscriptionChanging(false)
       }
@@ -46,45 +50,49 @@ export default function ManagedInstitution({
           values={{
             institutionName: institution.name || '',
           }}
+          shouldUnescape
+          tOptions={{ interpolation: { escapeValue: true } }}
         />
       </p>
-      <p>
-        <a
-          className="btn btn-primary"
+      <ul className="list-group p-0">
+        <RowLink
           href={`/metrics/institutions/${institution.v1Id}`}
-        >
-          <i className="fa fa-fw fa-line-chart" /> {t('view_metrics')}
-        </a>
-      </p>
-      <p>
-        <a href={`/institutions/${institution.v1Id}/hub`}>
-          <i className="fa fa-fw fa-user-circle" /> {t('view_hub')}
-        </a>
-      </p>
-      <p>
-        <a href={`/manage/institutions/${institution.v1Id}/managers`}>
-          <i className="fa fa-fw fa-users" /> {t('manage_institution_managers')}
-        </a>
-      </p>
+          heading={t('view_metrics')}
+          subtext={t('view_metrics_commons_subtext')}
+          icon="insights"
+        />
+        <RowLink
+          href={`/institutions/${institution.v1Id}/hub`}
+          heading={t('view_hub')}
+          subtext={t('view_hub_subtext')}
+          icon="account_circle"
+        />
+        <RowLink
+          href={`/manage/institutions/${institution.v1Id}/managers`}
+          heading={t('manage_institution_managers')}
+          subtext={t('manage_managers_subtext')}
+          icon="manage_accounts"
+        />
+      </ul>
       <div>
         <p>
           <span>Monthly metrics emails: </span>
           {subscriptionChanging ? (
             <i className="fa fa-spin fa-refresh" />
           ) : (
-            <button
+            <OLButton
+              variant="link"
               className="btn-inline-link"
-              style={{ border: 0 }}
               onClick={e =>
                 changeInstitutionalEmailSubscription(e, institution.v1Id)
               }
             >
               {institution.metricsEmail.optedOutUserIds.includes(
-                window.user_id!
+                getMeta('ol-user_id')!
               )
                 ? t('subscribe')
                 : t('unsubscribe')}
-            </button>
+            </OLButton>
           )}
         </p>
       </div>

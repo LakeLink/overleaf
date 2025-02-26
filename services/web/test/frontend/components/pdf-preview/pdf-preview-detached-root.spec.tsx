@@ -1,24 +1,16 @@
+import '../../helpers/bootstrap-3'
 import PdfPreviewDetachedRoot from '../../../../frontend/js/features/pdf-preview/components/pdf-preview-detached-root'
-import { User } from '../../../../types/user'
 import { detachChannel, testDetachChannel } from '../../helpers/detach-channel'
 
 describe('<PdfPreviewDetachedRoot/>', function () {
   beforeEach(function () {
-    window.user = { id: 'user1' } as User
-
-    window.metaAttributesCache = new Map<string, unknown>([
-      ['ol-user', window.user],
-      ['ol-project_id', 'project1'],
-      ['ol-detachRole', 'detached'],
-      ['ol-projectName', 'Project Name'],
-      ['ol-preventCompileOnLoad', true],
-    ])
+    window.metaAttributesCache.set('ol-user', { id: 'user1' })
+    window.metaAttributesCache.set('ol-project_id', 'project1')
+    window.metaAttributesCache.set('ol-detachRole', 'detached')
+    window.metaAttributesCache.set('ol-projectName', 'Project Name')
+    window.metaAttributesCache.set('ol-preventCompileOnLoad', true)
 
     cy.interceptEvents()
-  })
-
-  afterEach(function () {
-    window.metaAttributesCache = new Map()
   })
 
   it('syncs compiling state', function () {
@@ -71,7 +63,7 @@ describe('<PdfPreviewDetachedRoot/>', function () {
       .should('not.be.disabled')
       .click()
 
-    cy.get('@postDetachMessage').should('be.calledWith', {
+    cy.get('@postDetachMessage').should('have.been.calledWith', {
       role: 'detached',
       event: 'action-clearCache',
       data: {

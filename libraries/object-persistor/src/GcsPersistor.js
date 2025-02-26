@@ -1,47 +1,66 @@
-const fs = require('fs')
-const { pipeline } = require('stream/promises')
-const { Storage } = require('@google-cloud/storage')
-const { WriteError, ReadError, NotFoundError } = require('./Errors')
+const fs = require('node:fs')
+const { pipeline } = require('node:stream/promises')
+const { PassThrough } = require('node:stream')
+const { Storage, IdempotencyStrategy } = require('@google-cloud/storage')
+const {
+  WriteError,
+  ReadError,
+  NotFoundError,
+  NotImplementedError,
+} = require('./Errors')
 const asyncPool = require('tiny-async-pool')
 const AbstractPersistor = require('./AbstractPersistor')
 const PersistorHelper = require('./PersistorHelper')
+const Logger = require('@overleaf/logger')
+const zlib = require('node:zlib')
 
 module.exports = class GcsPersistor extends AbstractPersistor {
   constructor(settings) {
-    super()
+    if (settings.storageClass) {
+      throw new NotImplementedError(
+        'Use default bucket class for GCS instead of settings.storageClass'
+      )
+    }
 
+    super()
     this.settings = settings
 
     // endpoint settings will be null by default except for tests
     // that's OK - GCS uses the locally-configured service account by default
-    this.storage = new Storage(this.settings.endpoint)
-    // workaround for broken uploads with custom endpoints:
-    // https://github.com/googleapis/nodejs-storage/issues/898
-    if (this.settings.endpoint && this.settings.endpoint.apiEndpoint) {
-      this.storage.interceptors.push({
-        request: reqOpts => {
-          const url = new URL(reqOpts.uri)
-          url.host = this.settings.endpoint.apiEndpoint
-          if (this.settings.endpoint.apiScheme) {
-            url.protocol = this.settings.endpoint.apiScheme
-          }
-          reqOpts.uri = url.toString()
-          return reqOpts
-        },
-      })
+    const storageOptions = {}
+    if (this.settings.endpoint) {
+      storageOptions.projectId = this.settings.endpoint.projectId
+      storageOptions.apiEndpoint = this.settings.endpoint.apiEndpoint
     }
+    storageOptions.retryOptions = { ...this.settings.retryOptions }
+    if (storageOptions.retryOptions) {
+      if (storageOptions.retryOptions.idempotencyStrategy) {
+        const value =
+          IdempotencyStrategy[this.settings.retryOptions.idempotencyStrategy]
+        if (value === undefined) {
+          throw new Error(
+            'Unrecognised value for retryOptions.idempotencyStrategy'
+          )
+        }
+        Logger.info(
+          `Setting retryOptions.idempotencyStrategy to ${storageOptions.retryOptions.idempotencyStrategy} (${value})`
+        )
+        storageOptions.retryOptions.idempotencyStrategy = value
+      }
+    }
+
+    this.storage = new Storage(storageOptions)
   }
 
   async sendFile(bucketName, key, fsPath) {
-    return this.sendStream(bucketName, key, fs.createReadStream(fsPath))
+    return await this.sendStream(bucketName, key, fs.createReadStream(fsPath))
   }
 
   async sendStream(bucketName, key, readStream, opts = {}) {
     try {
-      // egress from us to gcs
       const observeOptions = {
-        metric: 'gcs.egress',
-        Metrics: this.settings.Metrics,
+        metric: 'gcs.egress', // egress from us to GCS
+        bucket: bucketName,
       }
 
       let sourceMd5 = opts.sourceMd5
@@ -70,10 +89,14 @@ module.exports = class GcsPersistor extends AbstractPersistor {
         writeOptions.metadata = writeOptions.metadata || {}
         writeOptions.metadata.contentEncoding = opts.contentEncoding
       }
+      const fileOptions = {}
+      if (opts.ifNoneMatch === '*') {
+        fileOptions.generation = 0
+      }
 
       const uploadStream = this.storage
         .bucket(bucketName)
-        .file(key)
+        .file(key, fileOptions)
         .createWriteStream(writeOptions)
 
       await pipeline(readStream, observer, uploadStream)
@@ -89,28 +112,40 @@ module.exports = class GcsPersistor extends AbstractPersistor {
       throw PersistorHelper.wrapError(
         err,
         'upload to GCS failed',
-        { bucketName, key },
+        { bucketName, key, ifNoneMatch: opts.ifNoneMatch },
         WriteError
       )
     }
   }
 
   async getObjectStream(bucketName, key, opts = {}) {
+    const observer = new PersistorHelper.ObserverStream({
+      metric: 'gcs.ingress', // ingress to us from GCS
+      bucket: bucketName,
+    })
     const stream = this.storage
       .bucket(bucketName)
       .file(key)
       .createReadStream({ decompress: false, ...opts })
 
-    // ingress to us from gcs
-    const observer = new PersistorHelper.ObserverStream({
-      metric: 'gcs.ingress',
-      Metrics: this.settings.Metrics,
-    })
-
+    let contentEncoding
     try {
-      // wait for the pipeline to be ready, to catch non-200s
-      await PersistorHelper.getReadyPipeline(stream, observer)
-      return observer
+      await new Promise((resolve, reject) => {
+        stream.on('response', res => {
+          switch (res.statusCode) {
+            case 200: // full response
+            case 206: // partial response
+              contentEncoding = res.headers['content-encoding']
+              return resolve()
+            case 404:
+              return reject(new NotFoundError())
+            default:
+              return reject(new Error('non success status: ' + res.statusCode))
+          }
+        })
+        stream.on('error', reject)
+        stream.read(0) // kick off request
+      })
     } catch (err) {
       throw PersistorHelper.wrapError(
         err,
@@ -119,16 +154,23 @@ module.exports = class GcsPersistor extends AbstractPersistor {
         ReadError
       )
     }
+    // Return a PassThrough stream with a minimal interface. It will buffer until the caller starts reading. It will emit errors from the source stream (Stream.pipeline passes errors along).
+    const pass = new PassThrough()
+    const transformer = []
+    if (contentEncoding === 'gzip' && opts.autoGunzip) {
+      transformer.push(zlib.createGunzip())
+    }
+    pipeline(stream, observer, ...transformer, pass).catch(() => {})
+    return pass
   }
 
   async getRedirectUrl(bucketName, key) {
     if (this.settings.unsignedUrls) {
       // Construct a direct URL to the object download endpoint
       // (see https://cloud.google.com/storage/docs/request-endpoints#json-api)
-      const apiScheme = this.settings.endpoint.apiScheme || 'https://'
       const apiEndpoint =
-        this.settings.endpoint.apiEndpoint || 'storage.googleapis.com'
-      return `${apiScheme}://${apiEndpoint}/download/storage/v1/b/${bucketName}/o/${key}?alt=media`
+        this.settings.endpoint.apiEndpoint || 'https://storage.googleapis.com'
+      return `${apiEndpoint}/download/storage/v1/b/${bucketName}/o/${key}?alt=media`
     }
     try {
       const [url] = await this.storage
@@ -155,7 +197,7 @@ module.exports = class GcsPersistor extends AbstractPersistor {
         .bucket(bucketName)
         .file(key)
         .getMetadata()
-      return metadata.size
+      return parseInt(metadata.size, 10)
     } catch (err) {
       throw PersistorHelper.wrapError(
         err,
@@ -264,7 +306,10 @@ module.exports = class GcsPersistor extends AbstractPersistor {
       )
     }
 
-    return files.reduce((acc, file) => Number(file.metadata.size) + acc, 0)
+    return files.reduce(
+      (acc, file) => parseInt(file.metadata.size, 10) + acc,
+      0
+    )
   }
 
   async checkIfObjectExists(bucketName, key) {

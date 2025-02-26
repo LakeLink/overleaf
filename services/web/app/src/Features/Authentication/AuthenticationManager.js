@@ -10,7 +10,10 @@ const {
   PasswordMustBeDifferentError,
   PasswordReusedError,
 } = require('./AuthenticationErrors')
-const util = require('util')
+const {
+  callbackify,
+  callbackifyMultiResult,
+} = require('@overleaf/promise-utils')
 const HaveIBeenPwned = require('./HaveIBeenPwned')
 const UserAuditLogHandler = require('../User/UserAuditLogHandler')
 const logger = require('@overleaf/logger')
@@ -30,13 +33,9 @@ function _exceedsMaximumLengthRatio(password, maxSimilarity, value) {
   )
 }
 
-const _checkWriteResult = function (result, callback) {
+const _checkWriteResult = function (result) {
   // for MongoDB
-  if (result && result.modifiedCount === 1) {
-    callback(null, true)
-  } else {
-    callback(null, false)
-  }
+  return !!(result && result.modifiedCount === 1)
 }
 
 function _validatePasswordNotTooLong(password) {
@@ -59,97 +58,123 @@ function _metricsForSuccessfulPasswordMatch(password) {
 }
 
 const AuthenticationManager = {
-  _checkUserPassword(query, password, callback) {
+  async _checkUserPassword(query, password) {
     // Using Mongoose for legacy reasons here. The returned User instance
     // gets serialized into the session and there may be subtle differences
     // between the user returned by Mongoose vs mongodb (such as default values)
-    User.findOne(query, (error, user) => {
-      if (error) {
-        return callback(error)
-      }
-      if (!user || !user.hashedPassword) {
-        return callback(null, null, null)
-      }
-      bcrypt.compare(password, user.hashedPassword, function (error, match) {
-        if (error) {
-          return callback(error)
+    const user = await User.findOne(query).exec()
+
+    if (!user || !user.hashedPassword) {
+      return { user: null, match: null }
+    }
+
+    let rounds = 0
+    try {
+      rounds = bcrypt.getRounds(user.hashedPassword)
+    } catch (err) {
+      let prefix, suffix, length
+      if (typeof user.hashedPassword === 'string') {
+        length = user.hashedPassword.length
+        if (user.hashedPassword.length > 50) {
+          // A full bcrypt hash is 60 characters long.
+          prefix = user.hashedPassword.slice(0, '$2a$12$x'.length)
+          suffix = user.hashedPassword.slice(-4)
+        } else if (user.hashedPassword.length > 20) {
+          prefix = user.hashedPassword.slice(0, 4)
+          suffix = user.hashedPassword.slice(-4)
+        } else {
+          prefix = user.hashedPassword.slice(0, 4)
         }
-        if (match) {
-          _metricsForSuccessfulPasswordMatch(password)
-        }
-        callback(null, user, match)
-      })
+      }
+      logger.warn(
+        {
+          err,
+          userId: user._id,
+          hashedPassword: {
+            type: typeof user.hashedPassword,
+            length,
+            prefix,
+            suffix,
+          },
+        },
+        'unexpected user.hashedPassword value'
+      )
+    }
+    Metrics.inc('bcrypt', 1, {
+      method: 'compare',
+      path: rounds,
     })
+
+    const match = await bcrypt.compare(password, user.hashedPassword)
+
+    if (match) {
+      _metricsForSuccessfulPasswordMatch(password)
+    }
+
+    return { user, match }
   },
 
-  authenticate(query, password, auditLog, callback) {
-    if (typeof callback === 'undefined') {
-      callback = auditLog
-      auditLog = null
-    }
-    AuthenticationManager._checkUserPassword(
+  async authenticate(query, password, auditLog, { enforceHIBPCheck = true }) {
+    const { user, match } = await AuthenticationManager._checkUserPassword(
       query,
-      password,
-      (error, user, match) => {
-        if (error) {
-          return callback(error)
-        }
-        if (!user) {
-          return callback(null, null)
-        }
-        const update = { $inc: { loginEpoch: 1 } }
-        if (!match) {
-          update.$set = { lastFailedLogin: new Date() }
-        }
-        User.updateOne(
-          { _id: user._id, loginEpoch: user.loginEpoch },
-          update,
-          {},
-          (err, result) => {
-            if (err) {
-              return callback(err)
-            }
-            if (result.modifiedCount !== 1) {
-              return callback(new ParallelLoginError())
-            }
-            if (!match) {
-              if (!auditLog) {
-                return callback(null, null)
-              } else {
-                return UserAuditLogHandler.addEntry(
-                  user._id,
-                  'failed-password-match',
-                  user._id,
-                  auditLog.ipAddress,
-                  auditLog.info,
-                  err => {
-                    if (err) {
-                      logger.error(
-                        { userId: user._id, err, info: auditLog.info },
-                        'Error while adding AuditLog entry for failed-password-match'
-                      )
-                    }
-                    callback(null, null)
-                  }
-                )
-              }
-            }
-            AuthenticationManager.checkRounds(
-              user,
-              user.hashedPassword,
-              password,
-              function (err) {
-                if (err) {
-                  return callback(err)
-                }
-                callback(null, user)
-                HaveIBeenPwned.checkPasswordForReuseInBackground(password)
-              }
-            )
-          }
-        )
-      }
+      password
     )
+
+    if (!user) {
+      return { user: null }
+    }
+
+    const update = { $inc: { loginEpoch: 1 } }
+    if (!match) {
+      update.$set = { lastFailedLogin: new Date() }
+    }
+
+    const result = await User.updateOne(
+      { _id: user._id, loginEpoch: user.loginEpoch },
+      update,
+      {}
+    ).exec()
+
+    if (result.modifiedCount !== 1) {
+      throw new ParallelLoginError()
+    }
+
+    if (!match) {
+      if (!auditLog) {
+        return { user: null }
+      } else {
+        try {
+          await UserAuditLogHandler.promises.addEntry(
+            user._id,
+            'failed-password-match',
+            user._id,
+            auditLog.ipAddress,
+            auditLog.info
+          )
+        } catch (err) {
+          logger.error(
+            { userId: user._id, err, info: auditLog.info },
+            'Error while adding AuditLog entry for failed-password-match'
+          )
+        }
+        return { user: null }
+      }
+    }
+    await AuthenticationManager.checkRounds(user, user.hashedPassword, password)
+
+    let isPasswordReused
+    try {
+      isPasswordReused =
+        await HaveIBeenPwned.promises.checkPasswordForReuse(password)
+    } catch (err) {
+      logger.err({ err }, 'cannot check password for re-use')
+    }
+
+    if (isPasswordReused && enforceHIBPCheck) {
+      throw new PasswordReusedError()
+    }
+
+    return { user, isPasswordReused }
   },
 
   validateEmail(email) {
@@ -160,8 +185,8 @@ const AuthenticationManager = {
     return null
   },
 
-  // validates a password based on a similar set of rules to `complexPassword.js` on the frontend
-  // note that `passfield.js` enforces more rules than this, but these are the most commonly set.
+  // validates a password based on a similar set of rules previously used by `passfield.js` on the frontend
+  // note that `passfield.js` enforced more rules than this, but these are the most commonly set.
   // returns null on success, or an error object.
   validatePassword(password, email) {
     if (password == null) {
@@ -248,101 +273,92 @@ const AuthenticationManager = {
     return null
   },
 
-  setUserPassword(user, password, callback) {
-    AuthenticationManager.setUserPasswordInV2(user, password, callback)
+  async setUserPassword(user, password) {
+    return await AuthenticationManager.setUserPasswordInV2(user, password)
   },
 
-  checkRounds(user, hashedPassword, password, callback) {
+  async checkRounds(user, hashedPassword, password) {
     // Temporarily disable this function, TODO: re-enable this
     if (Settings.security.disableBcryptRoundsUpgrades) {
-      return callback()
+      Metrics.inc('bcrypt_check_rounds', 1, { status: 'disabled' })
+      return
     }
     // check current number of rounds and rehash if necessary
     const currentRounds = bcrypt.getRounds(hashedPassword)
     if (currentRounds < BCRYPT_ROUNDS) {
-      AuthenticationManager._setUserPasswordInMongo(user, password, callback)
+      Metrics.inc('bcrypt_check_rounds', 1, { status: 'upgrade' })
+      return await AuthenticationManager._setUserPasswordInMongo(user, password)
     } else {
-      callback()
+      Metrics.inc('bcrypt_check_rounds', 1, { status: 'success' })
     }
   },
 
-  hashPassword(password, callback) {
+  async hashPassword(password) {
     // Double-check the size to avoid truncating in bcrypt.
     const error = _validatePasswordNotTooLong(password)
     if (error) {
-      return callback(error)
+      throw error
     }
-    bcrypt.genSalt(BCRYPT_ROUNDS, BCRYPT_MINOR_VERSION, function (error, salt) {
-      if (error) {
-        return callback(error)
-      }
-      bcrypt.hash(password, salt, callback)
+
+    const salt = await bcrypt.genSalt(BCRYPT_ROUNDS, BCRYPT_MINOR_VERSION)
+
+    Metrics.inc('bcrypt', 1, {
+      method: 'hash',
+      path: BCRYPT_ROUNDS,
     })
+    return await bcrypt.hash(password, salt)
   },
 
-  setUserPasswordInV2(user, password, callback) {
+  async setUserPasswordInV2(user, password) {
     if (!user || !user.email || !user._id) {
-      return callback(new Error('invalid user object'))
+      throw new Error('invalid user object')
     }
     const validationError = this.validatePassword(password, user.email)
     if (validationError) {
-      return callback(validationError)
+      throw validationError
     }
     // check if we can log in with this password. In which case we should reject it,
     // because it is the same as the existing password.
-    AuthenticationManager._checkUserPassword(
+    const { match } = await AuthenticationManager._checkUserPassword(
       { _id: user._id },
-      password,
-      (err, _user, match) => {
-        if (err) {
-          return callback(err)
-        }
-        if (match) {
-          return callback(new PasswordMustBeDifferentError())
-        }
-
-        HaveIBeenPwned.checkPasswordForReuse(
-          password,
-          (error, isPasswordReused) => {
-            if (error) {
-              logger.err({ error }, 'cannot check password for re-use')
-            }
-
-            if (!error && isPasswordReused) {
-              return callback(new PasswordReusedError())
-            }
-
-            // password is strong enough or the validation with the service did not happen
-            this._setUserPasswordInMongo(user, password, callback)
-          }
-        )
-      }
+      password
     )
+
+    if (match) {
+      throw new PasswordMustBeDifferentError()
+    }
+
+    let isPasswordReused
+    try {
+      isPasswordReused =
+        await HaveIBeenPwned.promises.checkPasswordForReuse(password)
+    } catch (error) {
+      logger.err({ error }, 'cannot check password for re-use')
+    }
+
+    if (isPasswordReused) {
+      throw new PasswordReusedError()
+    }
+
+    // password is strong enough or the validation with the service did not happen
+    return await this._setUserPasswordInMongo(user, password)
   },
 
-  _setUserPasswordInMongo(user, password, callback) {
-    this.hashPassword(password, function (error, hash) {
-      if (error) {
-        return callback(error)
-      }
-      db.users.updateOne(
-        { _id: ObjectId(user._id.toString()) },
-        {
-          $set: {
-            hashedPassword: hash,
-          },
-          $unset: {
-            password: true,
-          },
+  async _setUserPasswordInMongo(user, password) {
+    const hash = await this.hashPassword(password)
+    const result = await db.users.updateOne(
+      { _id: new ObjectId(user._id.toString()) },
+      {
+        $set: {
+          hashedPassword: hash,
         },
-        function (updateError, result) {
-          if (updateError) {
-            return callback(updateError)
-          }
-          _checkWriteResult(result, callback)
-        }
-      )
-    })
+        $unset: {
+          password: true,
+        },
+      }
+    )
+
+    return _checkWriteResult(result)
   },
 
   _passwordCharactersAreValid(password) {
@@ -402,12 +418,64 @@ const AuthenticationManager = {
       }
     }
   },
+
+  getMessageForInvalidPasswordError(error, req) {
+    const errorCode = error?.info?.code
+    const message = {
+      type: 'error',
+    }
+    switch (errorCode) {
+      case 'not_set':
+        message.key = 'password-not-set'
+        message.text = req.i18n.translate('invalid_password_not_set')
+        break
+      case 'invalid_character':
+        message.key = 'password-invalid-character'
+        message.text = req.i18n.translate('invalid_password_invalid_character')
+        break
+      case 'contains_email':
+        message.key = 'password-contains-email'
+        message.text = req.i18n.translate('invalid_password_contains_email')
+        break
+      case 'too_similar':
+        message.key = 'password-too-similar'
+        message.text = req.i18n.translate('invalid_password_too_similar')
+        break
+      case 'too_short':
+        message.key = 'password-too-short'
+        message.text = req.i18n.translate('invalid_password_too_short', {
+          minLength: Settings.passwordStrengthOptions?.length?.min || 8,
+        })
+        break
+      case 'too_long':
+        message.key = 'password-too-long'
+        message.text = req.i18n.translate('invalid_password_too_long', {
+          maxLength: Settings.passwordStrengthOptions?.length?.max || 72,
+        })
+        break
+      default:
+        logger.error({ err: error }, 'Unknown password validation error code')
+        message.text = req.i18n.translate('invalid_password')
+        break
+    }
+    return message
+  },
 }
 
-AuthenticationManager.promises = {
-  authenticate: util.promisify(AuthenticationManager.authenticate),
-  hashPassword: util.promisify(AuthenticationManager.hashPassword),
-  setUserPassword: util.promisify(AuthenticationManager.setUserPassword),
+module.exports = {
+  _validatePasswordNotTooSimilar:
+    AuthenticationManager._validatePasswordNotTooSimilar, // Private function exported for tests
+  validateEmail: AuthenticationManager.validateEmail,
+  validatePassword: AuthenticationManager.validatePassword,
+  getMessageForInvalidPasswordError:
+    AuthenticationManager.getMessageForInvalidPasswordError,
+  authenticate: callbackifyMultiResult(AuthenticationManager.authenticate, [
+    'user',
+    'isPasswordReused',
+  ]),
+  setUserPassword: callbackify(AuthenticationManager.setUserPassword),
+  checkRounds: callbackify(AuthenticationManager.checkRounds),
+  hashPassword: callbackify(AuthenticationManager.hashPassword),
+  setUserPasswordInV2: callbackify(AuthenticationManager.setUserPasswordInV2),
+  promises: AuthenticationManager,
 }
-
-module.exports = AuthenticationManager

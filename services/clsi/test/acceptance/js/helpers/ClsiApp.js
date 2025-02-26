@@ -10,8 +10,6 @@
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
  */
 const app = require('../../../../app')
-require('@overleaf/logger').logger.level('info')
-const logger = require('@overleaf/logger')
 const Settings = require('@overleaf/settings')
 
 module.exports = {
@@ -30,17 +28,13 @@ module.exports = {
       this.initing = true
       this.callbacks.push(callback)
       return app.listen(
-        __guard__(
-          Settings.internal != null ? Settings.internal.clsi : undefined,
-          x => x.port
-        ),
-        'localhost',
+        Settings.internal.clsi.port,
+        Settings.internal.clsi.host,
         error => {
           if (error != null) {
             throw error
           }
           this.running = true
-          logger.info('clsi running in dev mode')
 
           return (() => {
             const result = []
@@ -53,9 +47,4 @@ module.exports = {
       )
     }
   },
-}
-function __guard__(value, transform) {
-  return typeof value !== 'undefined' && value !== null
-    ? transform(value)
-    : undefined
 }

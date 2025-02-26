@@ -1,5 +1,5 @@
 const NotificationsHandler = require('./NotificationsHandler')
-const { promisifyAll } = require('../../util/promises')
+const { promisifyAll } = require('@overleaf/promise-utils')
 const request = require('request')
 const settings = require('@overleaf/settings')
 
@@ -198,12 +198,13 @@ function ipMatcherAffiliation(userId) {
 function tpdsFileLimit(userId) {
   return {
     key: `tpdsFileLimit-${userId}`,
-    create(projectName, callback) {
+    create(projectName, projectId, callback) {
       if (callback == null) {
         callback = function () {}
       }
       const messageOpts = {
         projectName,
+        projectId,
       }
       NotificationsHandler.createNotification(
         userId,
@@ -212,6 +213,63 @@ function tpdsFileLimit(userId) {
         messageOpts,
         null,
         true,
+        callback
+      )
+    },
+    read(callback) {
+      if (callback == null) {
+        callback = function () {}
+      }
+      NotificationsHandler.markAsReadByKeyOnly(this.key, callback)
+    },
+  }
+}
+
+function groupInvitation(userId, subscriptionId, managedUsersEnabled) {
+  return {
+    key: `groupInvitation-${subscriptionId}-${userId}`,
+    create(invite, callback) {
+      if (callback == null) {
+        callback = function () {}
+      }
+      const messageOpts = {
+        token: invite.token,
+        inviterName: invite.inviterName,
+        managedUsersEnabled,
+      }
+      NotificationsHandler.createNotification(
+        userId,
+        this.key,
+        'notification_group_invitation',
+        messageOpts,
+        null,
+        true,
+        callback
+      )
+    },
+    read(callback) {
+      if (callback == null) {
+        callback = function () {}
+      }
+      NotificationsHandler.markAsReadByKeyOnly(this.key, callback)
+    },
+  }
+}
+
+function personalAndGroupSubscriptions(userId) {
+  return {
+    key: 'personal-and-group-subscriptions',
+    create(callback) {
+      if (callback == null) {
+        callback = function () {}
+      }
+      NotificationsHandler.createNotification(
+        userId,
+        this.key,
+        'notification_personal_and_group_subscriptions',
+        {},
+        null,
+        false,
         callback
       )
     },
@@ -233,6 +291,8 @@ const NotificationsBuilder = {
   projectInvite,
   ipMatcherAffiliation,
   tpdsFileLimit,
+  groupInvitation,
+  personalAndGroupSubscriptions,
 }
 
 NotificationsBuilder.promises = {
@@ -245,8 +305,20 @@ NotificationsBuilder.promises = {
   dropboxDuplicateProjectNames(userId) {
     return promisifyAll(dropboxDuplicateProjectNames(userId))
   },
+  featuresUpgradedByAffiliation: function (affiliation, user) {
+    return promisifyAll(featuresUpgradedByAffiliation(affiliation, user))
+  },
   ipMatcherAffiliation: function (userId) {
     return promisifyAll(ipMatcherAffiliation(userId))
+  },
+  groupInvitation: function (userId, groupId, managedUsersEnabled) {
+    return promisifyAll(groupInvitation(userId, groupId, managedUsersEnabled))
+  },
+  projectInvite(invite, project, sendingUser, user) {
+    return promisifyAll(projectInvite(invite, project, sendingUser, user))
+  },
+  personalAndGroupSubscriptions(userId) {
+    return promisifyAll(personalAndGroupSubscriptions(userId))
   },
 }
 

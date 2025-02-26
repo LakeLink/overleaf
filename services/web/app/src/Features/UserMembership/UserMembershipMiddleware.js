@@ -1,4 +1,4 @@
-const { expressify } = require('../../util/promises')
+const { expressify } = require('@overleaf/promise-utils')
 const async = require('async')
 const UserMembershipAuthorization = require('./UserMembershipAuthorization')
 const AuthenticationController = require('../Authentication/AuthenticationController')
@@ -20,6 +20,23 @@ const UserMembershipMiddleware = {
       UserMembershipAuthorization.hasEntityAccess(),
       UserMembershipAuthorization.hasStaffAccess('groupMetrics'),
     ]),
+  ],
+
+  requireGroup: [fetchEntityConfig('group'), fetchEntity(), requireEntity()],
+
+  requireGroupAccess: [
+    AuthenticationController.requireLogin(),
+    fetchEntityConfig('group'),
+    fetchEntity(),
+    requireEntity(),
+  ],
+
+  requireGroupMemberAccess: [
+    AuthenticationController.requireLogin(),
+    fetchEntityConfig('groupMember'),
+    fetchEntity(),
+    requireEntity(),
+    allowAccessIfAny([UserMembershipAuthorization.hasEntityAccess()]),
   ],
 
   requireGroupManagementAccess: [
@@ -47,6 +64,17 @@ const UserMembershipMiddleware = {
   requireGroupManagersManagementAccess: [
     AuthenticationController.requireLogin(),
     fetchEntityConfig('groupManagers'),
+    fetchEntity(),
+    requireEntity(),
+    allowAccessIfAny([
+      UserMembershipAuthorization.hasEntityAccess(),
+      UserMembershipAuthorization.hasStaffAccess('groupManagement'),
+    ]),
+  ],
+
+  requireGroupAdminAccess: [
+    AuthenticationController.requireLogin(),
+    fetchEntityConfig('groupAdmin'),
     fetchEntity(),
     requireEntity(),
     allowAccessIfAny([
@@ -213,12 +241,11 @@ function fetchEntityConfig(entityName) {
 // fetch the entity with id and config, and set it in the request
 function fetchEntity() {
   return expressify(async (req, res, next) => {
-    const entity =
+    req.entity =
       await UserMembershipHandler.promises.getEntityWithoutAuthorizationCheck(
         req.params.id,
         req.entityConfig
       )
-    req.entity = entity
     next()
   })
 }

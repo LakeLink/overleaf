@@ -1,3 +1,4 @@
+import '../../helpers/bootstrap-3'
 import useDetachLayout from '../../../../frontend/js/shared/hooks/use-detach-layout'
 import { detachChannel, testDetachChannel } from '../../helpers/detach-channel'
 import { EditorProviders } from '../../helpers/editor-providers'
@@ -36,15 +37,10 @@ const DetachLayoutTest = () => {
 
 describe('useDetachLayout', function () {
   beforeEach(function () {
-    window.metaAttributesCache = new Map()
     window.metaAttributesCache.set('ol-preventCompileOnLoad', true)
     cy.stub(window, 'open').as('openWindow')
     cy.stub(window, 'close').as('closeWindow')
     cy.interceptEvents()
-  })
-
-  afterEach(function () {
-    window.metaAttributesCache = new Map()
   })
 
   it('detaching', function () {
@@ -62,8 +58,8 @@ describe('useDetachLayout', function () {
     // 2. detach
     cy.get('#detach').click()
     cy.get('@openWindow').should(
-      'be.calledOnceWith',
-      Cypress.sinon.match(/\/detached$/),
+      'have.been.calledOnceWith',
+      Cypress.sinon.match(/\/detached/),
       '_blank'
     )
     cy.get('#isLinked').should('not.be.checked')
@@ -95,7 +91,7 @@ describe('useDetachLayout', function () {
     })
 
     // 2. simulate connected detached tab
-    cy.get('@postDetachMessage').should('be.calledWith', {
+    cy.get('@postDetachMessage').should('have.been.calledWith', {
       role: 'detacher',
       event: 'up',
     })
@@ -134,7 +130,7 @@ describe('useDetachLayout', function () {
     cy.get('#isLinked').should('not.be.checked')
     cy.get('#isLinking').should('not.be.checked')
     cy.get('#role').should('have.text', 'none')
-    cy.get('@postDetachMessage').should('be.calledWith', {
+    cy.get('@postDetachMessage').should('have.been.calledWith', {
       role: 'detacher',
       event: 'reattach',
     })
@@ -225,7 +221,7 @@ describe('useDetachLayout', function () {
     cy.get('#isLinked').should('be.checked')
     cy.get('#isLinking').should('not.be.checked')
     cy.get('#role').should('have.text', 'detached')
-    cy.get('@postDetachMessage').should('be.calledWith', {
+    cy.get('@postDetachMessage').should('have.been.calledWith', {
       role: 'detached',
       event: 'up',
     })
@@ -241,6 +237,6 @@ describe('useDetachLayout', function () {
     cy.get('#isLinked').should('not.be.checked')
     cy.get('#isLinking').should('not.be.checked')
     cy.get('#role').should('have.text', 'detached')
-    cy.get('@closeWindow').should('be.called')
+    cy.get('@closeWindow').should('have.been.called')
   })
 })

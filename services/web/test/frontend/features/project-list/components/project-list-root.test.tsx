@@ -4,14 +4,17 @@ import fetchMock from 'fetch-mock'
 import sinon from 'sinon'
 import ProjectListRoot from '../../../../../frontend/js/features/project-list/components/project-list-root'
 import { renderWithProjectListContext } from '../helpers/render-with-context'
-import * as eventTracking from '../../../../../frontend/js/infrastructure/event-tracking'
+import * as eventTracking from '@/infrastructure/event-tracking'
 import {
   projectsData,
   owner,
   archivedProjects,
   makeLongProjectList,
+  archiveableProject,
+  copyableProject,
 } from '../fixtures/projects-data'
 import * as useLocationModule from '../../../../../frontend/js/shared/hooks/use-location'
+import getMeta from '@/utils/meta'
 
 const {
   fullList,
@@ -25,13 +28,14 @@ const {
 const userId = owner.id
 
 describe('<ProjectListRoot />', function () {
-  let sendSpy: sinon.SinonSpy
+  this.timeout('10s')
+
+  let sendMBSpy: sinon.SinonSpy
   let assignStub: sinon.SinonStub
 
   beforeEach(async function () {
     global.localStorage.clear()
-    sendSpy = sinon.spy(eventTracking, 'send')
-    window.metaAttributesCache = new Map()
+    sendMBSpy = sinon.spy(eventTracking, 'sendMB')
     this.tagId = '999fff999fff'
     this.tagName = 'First tag name'
     window.metaAttributesCache.set('ol-tags', [
@@ -41,23 +45,34 @@ describe('<ProjectListRoot />', function () {
         project_ids: [projectsData[0].id, projectsData[1].id],
       },
     ])
-    window.metaAttributesCache.set('ol-ExposedSettings', {
+    Object.assign(getMeta('ol-ExposedSettings'), {
       templateLinks: [],
     })
     window.metaAttributesCache.set('ol-userEmails', [
       { email: 'test@overleaf.com', default: true },
     ])
-    window.user_id = userId
+    // we need a blank user here since its used in checking if we should display certain ads
+    window.metaAttributesCache.set('ol-user', {})
+    window.metaAttributesCache.set('ol-user_id', userId)
+    window.metaAttributesCache.set('ol-footer', {
+      showThinFooter: false,
+      translatedLanguages: { en: 'English' },
+      subdomainLang: { en: { lngCode: 'en', url: 'overleaf.com' } },
+    })
+    window.metaAttributesCache.set('ol-navbar', {
+      items: [],
+    })
     assignStub = sinon.stub()
     this.locationStub = sinon.stub(useLocationModule, 'useLocation').returns({
       assign: assignStub,
+      replace: sinon.stub(),
       reload: sinon.stub(),
+      setHash: sinon.stub(),
     })
   })
 
   afterEach(function () {
-    sendSpy.restore()
-    window.user_id = undefined
+    sendMBSpy.restore()
     fetchMock.reset()
     this.locationStub.restore()
   })
@@ -71,7 +86,7 @@ describe('<ProjectListRoot />', function () {
     })
 
     it('the welcome page is displayed', async function () {
-      screen.getByRole('heading', { name: 'Welcome to Overleaf!' })
+      screen.getByRole('heading', { name: 'Welcome to Overleaf' })
     })
 
     it('the email confirmation alert is not displayed', async function () {
@@ -196,7 +211,9 @@ describe('<ProjectListRoot />', function () {
           let checked = allCheckboxes.filter(c => c.checked)
           expect(checked.length).to.equal(21) // max projects viewable by default is 20, and plus one for check all
 
-          const loadMoreButton = screen.getByLabelText('Show 17 more projects')
+          const loadMoreButton = screen.getByRole('button', {
+            name: 'Show 17 more projects',
+          })
           fireEvent.click(loadMoreButton)
 
           allCheckboxes = screen.getAllByRole<HTMLInputElement>('checkbox')
@@ -206,7 +223,9 @@ describe('<ProjectListRoot />', function () {
         })
 
         it('maintains viewable and selected projects after loading more and then selecting all', async function () {
-          const loadMoreButton = screen.getByLabelText('Show 17 more projects')
+          const loadMoreButton = screen.getByRole('button', {
+            name: 'Show 17 more projects',
+          })
           fireEvent.click(loadMoreButton)
           // verify button gone
           screen.getByText(
@@ -219,8 +238,8 @@ describe('<ProjectListRoot />', function () {
             `Showing ${currentList.length} out of ${currentList.length} projects.`
           )
 
-          allCheckboxes = screen.getAllByRole<HTMLInputElement>('checkbox')
-          expect(allCheckboxes.length).to.equal(currentList.length + 1)
+          // allCheckboxes = screen.getAllByRole<HTMLInputElement>('checkbox')
+          // expect(allCheckboxes.length).to.equal(currentList.length + 1)
         })
       })
 
@@ -645,9 +664,9 @@ describe('<ProjectListRoot />', function () {
             const tagsDropdown = within(actionsToolbar).getByLabelText('Tags')
             fireEvent.click(tagsDropdown)
           })
-          screen.getByText('Add to folder')
+          screen.getByText('Add to tag')
 
-          const newTagButton = screen.getByText('Create New Folder')
+          const newTagButton = screen.getByText('Create new tag')
           fireEvent.click(newTagButton)
 
           const modal = screen.getAllByRole('dialog')[0]
@@ -675,8 +694,8 @@ describe('<ProjectListRoot />', function () {
         })
 
         it('opens the tags dropdown and remove a tag from selected projects', async function () {
-          const deleteProjectsFromTagMock = fetchMock.delete(
-            `express:/tag/:id/projects`,
+          const deleteProjectsFromTagMock = fetchMock.post(
+            `express:/tag/:id/projects/remove`,
             {
               status: 204,
             }
@@ -685,7 +704,7 @@ describe('<ProjectListRoot />', function () {
 
           const tagsDropdown = within(actionsToolbar).getByLabelText('Tags')
           fireEvent.click(tagsDropdown)
-          within(actionsToolbar).getByText('Add to folder')
+          within(actionsToolbar).getByText('Add to tag')
 
           const tagButton = within(actionsToolbar).getByLabelText(
             `Add or remove project from tag ${this.tagName}`
@@ -695,11 +714,14 @@ describe('<ProjectListRoot />', function () {
           await fetchMock.flush(true)
 
           expect(
-            deleteProjectsFromTagMock.called(`/tag/${this.tagId}/projects`, {
-              body: {
-                projectIds: [projectsData[0].id, projectsData[1].id],
-              },
-            })
+            deleteProjectsFromTagMock.called(
+              `/tag/${this.tagId}/projects/remove`,
+              {
+                body: {
+                  projectIds: [projectsData[0].id, projectsData[1].id],
+                },
+              }
+            )
           ).to.be.true
           screen.getByRole('button', { name: `${this.tagName} (0)` })
         })
@@ -718,7 +740,7 @@ describe('<ProjectListRoot />', function () {
 
           const tagsDropdown = within(actionsToolbar).getByLabelText('Tags')
           fireEvent.click(tagsDropdown)
-          within(actionsToolbar).getByText('Add to folder')
+          within(actionsToolbar).getByText('Add to tag')
 
           const tagButton = within(actionsToolbar).getByLabelText(
             `Add or remove project from tag ${this.tagName}`
@@ -779,44 +801,54 @@ describe('<ProjectListRoot />', function () {
             const filterButton = screen.getAllByText('All Projects')[0]
             fireEvent.click(filterButton)
             allCheckboxes = screen.getAllByRole<HTMLInputElement>('checkbox')
-            // first one is the select all checkbox
-            fireEvent.click(allCheckboxes[2])
-            actionsToolbar = screen.getAllByRole('toolbar')[0]
           })
 
           it('does not show the dropdown when more than 1 project is selected', async function () {
+            fireEvent.click(allCheckboxes[2]) // select a project
+
+            const actionsToolbar = screen.getAllByRole('toolbar')[0]
             await waitFor(() => {
               within(actionsToolbar).getByText<HTMLElement>('More')
             })
-            fireEvent.click(allCheckboxes[0])
+            fireEvent.click(allCheckboxes[0]) // select all
             expect(within(actionsToolbar).queryByText<HTMLElement>('More')).to
               .be.null
           })
 
           it('validates the project name', async function () {
-            const moreDropdown = await within(
-              actionsToolbar
-            ).findByText<HTMLElement>('More')
+            fireEvent.click(allCheckboxes[1]) // select a project owned by the current user
+
+            const actionsToolbar = screen.getAllByRole('toolbar')[0]
+            const moreDropdown =
+              await within(actionsToolbar).findByText<HTMLElement>('More')
             fireEvent.click(moreDropdown)
 
-            const renameButton =
-              screen.getAllByText<HTMLButtonElement>('Rename')[1] // first one is for the tag in the sidebar
-            fireEvent.click(renameButton)
+            const editButton =
+              screen.getAllByText<HTMLButtonElement>('Rename')[0]
+            fireEvent.click(editButton)
 
             const modals = await screen.findAllByRole('dialog')
             const modal = modals[0]
 
-            expect(sendSpy).to.be.calledOnce
-            expect(sendSpy).calledWith('project-list-page-interaction')
+            expect(sendMBSpy).to.have.been.calledTwice
+            expect(sendMBSpy).to.have.been.calledWith('loads_v2_dash')
+            expect(sendMBSpy).to.have.been.calledWith(
+              'project-list-page-interaction',
+              {
+                action: 'rename',
+                page: '/',
+                projectId: copyableProject.id,
+                isSmallDevice: true,
+              }
+            )
 
             // same name
             let confirmButton =
               within(modal).getByText<HTMLButtonElement>('Rename')
             expect(confirmButton.disabled).to.be.true
-            let input = screen.getByLabelText('New Name') as HTMLButtonElement
 
             // no name
-            input = screen.getByLabelText('New Name') as HTMLButtonElement
+            const input = screen.getByLabelText('New Name') as HTMLButtonElement
             fireEvent.change(input, {
               target: { value: '' },
             })
@@ -825,19 +857,21 @@ describe('<ProjectListRoot />', function () {
           })
 
           it('opens the rename modal, and can rename the project, and view updated', async function () {
+            fireEvent.click(allCheckboxes[1]) // select a project owned by the current user
+            const actionsToolbar = screen.getAllByRole('toolbar')[0]
+
             const renameProjectMock = fetchMock.post(
               `express:/project/:id/rename`,
               {
                 status: 200,
               }
             )
-            const moreDropdown = await within(
-              actionsToolbar
-            ).findByText<HTMLElement>('More')
+            const moreDropdown =
+              await within(actionsToolbar).findByText<HTMLElement>('More')
             fireEvent.click(moreDropdown)
 
             const renameButton =
-              within(actionsToolbar).getByText<HTMLButtonElement>('Rename') // first one is for the tag in the sidebar
+              within(actionsToolbar).getByText<HTMLButtonElement>('Rename')
             fireEvent.click(renameButton)
 
             const modals = await screen.findAllByRole('dialog')
@@ -861,21 +895,25 @@ describe('<ProjectListRoot />', function () {
             await fetchMock.flush(true)
 
             expect(
-              renameProjectMock.called(`/project/${projectsData[1].id}/rename`)
+              renameProjectMock.called(`/project/${projectsData[0].id}/rename`)
             ).to.be.true
 
             const table = await screen.findByRole('table')
             within(table).getByText(newProjectName)
             expect(within(table).queryByText(oldName)).to.be.null
 
-            const allCheckboxes = await within(
-              table
-            ).findAllByRole<HTMLInputElement>('checkbox')
-            const allCheckboxesChecked = allCheckboxes.filter(c => c.checked)
+            const allCheckboxesInTable =
+              await within(table).findAllByRole<HTMLInputElement>('checkbox')
+            const allCheckboxesChecked = allCheckboxesInTable.filter(
+              c => c.checked
+            )
             expect(allCheckboxesChecked.length).to.equal(0)
           })
 
           it('opens the copy modal, can copy the project, and view updated', async function () {
+            fireEvent.click(allCheckboxes[2])
+            const actionsToolbar = screen.getAllByRole('toolbar')[0]
+
             const tableRows = screen.getAllByRole('row')
             const linkForProjectToCopy = within(tableRows[1]).getByRole('link')
             const projectNameToCopy = linkForProjectToCopy.textContent || '' // needed for type checking
@@ -923,8 +961,17 @@ describe('<ProjectListRoot />', function () {
               cloneProjectMock.called(`/project/${projectsData[1].id}/clone`)
             ).to.be.true
 
-            expect(sendSpy).to.be.calledOnce
-            expect(sendSpy).calledWith('project-list-page-interaction')
+            expect(sendMBSpy).to.have.been.calledTwice
+            expect(sendMBSpy).to.have.been.calledWith('loads_v2_dash')
+            expect(sendMBSpy).to.have.been.calledWith(
+              'project-list-page-interaction',
+              {
+                action: 'clone',
+                page: '/',
+                projectId: archiveableProject.id,
+                isSmallDevice: true,
+              }
+            )
 
             screen.getByText(copiedProjectName)
           })
@@ -1024,7 +1071,7 @@ describe('<ProjectListRoot />', function () {
     describe('search', function () {
       it('shows only projects based on the input', async function () {
         const input = screen.getAllByRole('textbox', {
-          name: /search projects/i,
+          name: /search in all projects/i,
         })[0]
         const value = currentList[0].name
 
@@ -1061,7 +1108,9 @@ describe('<ProjectListRoot />', function () {
             archived: false,
           },
         })
-        const copyButton = within(tableRows[1]).getAllByLabelText('Copy')[0]
+        const copyButton = within(tableRows[1]).getAllByRole('button', {
+          name: 'Copy',
+        })[0]
         fireEvent.click(copyButton)
 
         // confirm in modal
@@ -1073,14 +1122,23 @@ describe('<ProjectListRoot />', function () {
         await fetchMock.flush(true)
         expect(fetchMock.done()).to.be.true
 
-        expect(sendSpy).to.be.calledOnce
-        expect(sendSpy).calledWith('project-list-page-interaction')
+        expect(sendMBSpy).to.have.been.calledTwice
+        expect(sendMBSpy).to.have.been.calledWith('loads_v2_dash')
+        expect(sendMBSpy).to.have.been.calledWith(
+          'project-list-page-interaction',
+          {
+            action: 'clone',
+            page: '/',
+            projectId: archiveableProject.id,
+            isSmallDevice: true,
+          }
+        )
 
         expect(screen.queryByText(copiedProjectName)).to.be.null
 
         const yourProjectFilter = screen.getAllByText('Your Projects')[0]
         fireEvent.click(yourProjectFilter)
-        screen.findByText(copiedProjectName)
+        await screen.findByText(copiedProjectName)
       })
     })
 

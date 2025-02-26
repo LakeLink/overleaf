@@ -1,8 +1,7 @@
-const logger = require('@overleaf/logger')
 const OError = require('@overleaf/o-error')
 const metrics = require('@overleaf/metrics')
 const Settings = require('@overleaf/settings')
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 const Features = require('../../infrastructure/Features')
 const { Project } = require('../../models/Project')
 const { Folder } = require('../../models/Folder')
@@ -13,9 +12,10 @@ const { User } = require('../../models/User')
 const fs = require('fs')
 const path = require('path')
 const { callbackify } = require('util')
-const _ = require('underscore')
+const _ = require('lodash')
 const AnalyticsManager = require('../Analytics/AnalyticsManager')
 const TpdsUpdateSender = require('../ThirdPartyDataStore/TpdsUpdateSender')
+const SplitTestHandler = require('../SplitTests/SplitTestHandler')
 
 const MONTH_NAMES = [
   'January',
@@ -56,13 +56,13 @@ async function createBlankProject(
   Object.assign(segmentation, attributes.segmentation)
   segmentation.projectId = project._id
   if (isImport) {
-    AnalyticsManager.recordEventForUser(
+    AnalyticsManager.recordEventForUserInBackground(
       ownerId,
       'project-imported',
       segmentation
     )
   } else {
-    AnalyticsManager.recordEventForUser(
+    AnalyticsManager.recordEventForUserInBackground(
       ownerId,
       'project-created',
       segmentation
@@ -73,7 +73,7 @@ async function createBlankProject(
 
 async function createProjectFromSnippet(ownerId, projectName, docLines) {
   const project = await _createBlankProject(ownerId, projectName)
-  AnalyticsManager.recordEventForUser(ownerId, 'project-created', {
+  AnalyticsManager.recordEventForUserInBackground(ownerId, 'project-created', {
     projectId: project._id,
   })
   await _createRootDoc(project, ownerId, docLines)
@@ -86,7 +86,7 @@ async function createBasicProject(ownerId, projectName) {
   const docLines = await _buildTemplate('mainbasic.tex', ownerId, projectName)
   await _createRootDoc(project, ownerId, docLines)
 
-  AnalyticsManager.recordEventForUser(ownerId, 'project-created', {
+  AnalyticsManager.recordEventForUserInBackground(ownerId, 'project-created', {
     projectId: project._id,
   })
 
@@ -98,7 +98,7 @@ async function createExampleProject(ownerId, projectName) {
 
   await _addExampleProjectFiles(ownerId, projectName, project)
 
-  AnalyticsManager.recordEventForUser(ownerId, 'project-created', {
+  AnalyticsManager.recordEventForUserInBackground(ownerId, 'project-created', {
     projectId: project._id,
   })
 
@@ -169,15 +169,10 @@ async function _createBlankProject(
     }
   }
 
-  // only display full project history when the project has the overleaf history id attribute
-  // (to allow scripted creation of projects without full project history)
-  const historyId = project.overleaf.history.id
-  if (
-    Settings.apis.project_history.displayHistoryForNewProjects &&
-    historyId != null
-  ) {
-    project.overleaf.history.display = true
-  }
+  // All the projects are initialised with Full Project History. This property
+  // is still set for backwards compatibility: Server Pro requires all projects
+  // have it set to `true` since SP 4.0
+  project.overleaf.history.display = true
 
   if (Settings.currentImageName) {
     // avoid clobbering any imageName already set in attributes (e.g. importedImageName)
@@ -186,8 +181,19 @@ async function _createBlankProject(
     }
   }
   project.rootFolder[0] = rootFolder
-  const user = await User.findById(ownerId, 'ace.spellCheckLanguage')
+  const user = await User.findById(ownerId, {
+    'ace.spellCheckLanguage': 1,
+    _id: 1,
+  })
   project.spellCheckLanguage = user.ace.spellCheckLanguage
+  const historyRangesSupportAssignment =
+    await SplitTestHandler.promises.getAssignmentForUser(
+      user._id,
+      'history-ranges-support'
+    )
+  if (historyRangesSupportAssignment.variant === 'enabled') {
+    project.overleaf.history.rangesSupportEnabled = true
+  }
   await project.save()
   if (!skipCreatingInTPDS) {
     await TpdsUpdateSender.promises.createProject({
@@ -247,10 +253,3 @@ module.exports = {
     createExampleProject,
   },
 }
-
-metrics.timeAsyncMethod(
-  module.exports,
-  'createBlankProject',
-  'mongo.ProjectCreationHandler',
-  logger
-)

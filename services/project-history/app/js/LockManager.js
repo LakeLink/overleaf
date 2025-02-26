@@ -7,12 +7,13 @@
  * DS207: Consider shorter variations of null checks
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
  */
+import { promisify } from 'node:util'
 import async from 'async'
 import metrics from '@overleaf/metrics'
 import Settings from '@overleaf/settings'
 import redis from '@overleaf/redis-wrapper'
-import os from 'os'
-import crypto from 'crypto'
+import os from 'node:os'
+import crypto from 'node:crypto'
 import logger from '@overleaf/logger'
 import OError from '@overleaf/o-error'
 
@@ -65,7 +66,9 @@ _mocks.tryLock = (key, callback) => {
     'NX',
     function (err, gotLock) {
       if (err != null) {
-        return callback(OError.tag(err))
+        return callback(
+          OError.tag(err, 'redis error trying to get lock', { key })
+        )
       }
       if (gotLock === 'OK') {
         metrics.inc('lock.project.try.success')
@@ -94,7 +97,9 @@ _mocks.extendLock = (key, lockValue, callback) => {
     LOCK_TTL,
     function (err, result) {
       if (err != null) {
-        return callback(OError.tag(err))
+        return callback(
+          OError.tag(err, 'redis error trying to extend lock', { key })
+        )
       }
 
       if (result != null && result !== 1) {
@@ -128,9 +133,7 @@ _mocks.getLock = (key, callback) => {
   return (attempt = function () {
     if (Date.now() - startTime > MAX_LOCK_WAIT_TIME) {
       metrics.inc('lock.project.get.failed')
-      const e = new OError('Timeout')
-      e.key = key
-      return callback(e)
+      return callback(new OError('Timeout', { key }))
     }
 
     attempts += 1
@@ -270,4 +273,42 @@ class Lock {
       return callback()
     })
   }
+}
+
+/**
+ * Promisified version of runWithLock.
+ *
+ * @param {string} key
+ * @param {(extendLock: Function) => Promise<any>} runner
+ */
+async function runWithLockPromises(key, runner) {
+  const runnerCb = (extendLock, callback) => {
+    const extendLockPromises = promisify(extendLock)
+    runner(extendLockPromises)
+      .then(result => {
+        callback(null, result)
+      })
+      .catch(err => {
+        callback(err)
+      })
+  }
+
+  return await new Promise((resolve, reject) => {
+    runWithLock(key, runnerCb, (err, result) => {
+      if (err) {
+        reject(err)
+      } else {
+        resolve(result)
+      }
+    })
+  })
+}
+
+export const promises = {
+  tryLock: promisify(tryLock),
+  extendLock: promisify(extendLock),
+  getLock: promisify(getLock),
+  checkLock: promisify(checkLock),
+  releaseLock: promisify(releaseLock),
+  runWithLock: runWithLockPromises,
 }

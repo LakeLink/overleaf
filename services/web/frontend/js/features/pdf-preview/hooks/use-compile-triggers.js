@@ -12,9 +12,19 @@ export const startCompileKeypress = event => {
     if (event.key === 's' || event.key === 'Enter' || event.key === '.') {
       return true
     }
+
+    // Ctrl+s with Caps-Lock on
+    if (event.key === 'S' && !event.shiftKey) {
+      return true
+    }
   } else if (event.metaKey) {
     // Cmd+s / Cmd+Enter
     if (event.key === 's' || event.key === 'Enter') {
+      return true
+    }
+
+    // Cmd+s with Caps-Lock on
+    if (event.key === 'S' && !event.shiftKey) {
       return true
     }
   }
@@ -54,5 +64,4 @@ export default function useCompileTriggers(startCompile, setChangedAt) {
     setOrTriggerChangedAt(Date.now())
   }, [setOrTriggerChangedAt])
   useEventListener('doc:changed', setChangedAtHandler)
-  useEventListener('doc:saved', setChangedAtHandler) // TODO: store this separately?
 }

@@ -1,5 +1,6 @@
 const Settings = require('@overleaf/settings')
 const logger = require('@overleaf/logger')
+const Metrics = require('@overleaf/metrics')
 const RedisClientManager = require('./RedisClientManager')
 const SafeJsonParse = require('./SafeJsonParse')
 const EventLogger = require('./EventLogger')
@@ -9,21 +10,52 @@ const ChannelManager = require('./ChannelManager')
 const ConnectedUsersManager = require('./ConnectedUsersManager')
 
 const RESTRICTED_USER_MESSAGE_TYPE_PASS_LIST = [
-  'connectionAccepted',
   'otUpdateApplied',
   'otUpdateError',
   'joinDoc',
   'reciveNewDoc',
   'reciveNewFile',
   'reciveNewFolder',
+  'reciveEntityMove',
+  'reciveEntityRename',
   'removeEntity',
   'accept-changes',
+  'projectNameUpdated',
+  'rootDocUpdated',
+  'toggle-track-changes',
+  'projectRenamedOrDeletedByExternalSource',
 ]
+const BANDWIDTH_BUCKETS = [0]
+// 64 bytes ... 8MB
+for (let i = 5; i <= 22; i++) {
+  BANDWIDTH_BUCKETS.push(2 << i)
+}
 
 let WebsocketLoadBalancer
 module.exports = WebsocketLoadBalancer = {
   rclientPubList: RedisClientManager.createClientList(Settings.redis.pubsub),
   rclientSubList: RedisClientManager.createClientList(Settings.redis.pubsub),
+
+  shouldDisconnectClient(client, message) {
+    const userId = client.ol_context.user_id
+    if (message?.message === 'userRemovedFromProject') {
+      if (message?.payload?.includes(userId)) {
+        return true
+      }
+    } else if (message?.message === 'project:publicAccessLevel:changed') {
+      const [info] = message.payload
+      if (
+        info.newAccessLevel === 'private' &&
+        !client.ol_context.is_invited_member
+      ) {
+        return true
+      }
+    } else if (message?.message === 'project:collaboratorAccessLevel:changed') {
+      const changedUserId = message.payload[0].userId
+      return userId === changedUserId
+    }
+    return false
+  },
 
   emitToRoom(roomId, message, ...payload) {
     if (!roomId) {
@@ -113,6 +145,31 @@ module.exports = WebsocketLoadBalancer = {
         for (const client of clientList) {
           ConnectedUsersManager.refreshClient(message.room_id, client.publicId)
         }
+      } else if (message.message === 'canary-applied-op') {
+        const { ack, broadcast, source, projectId, docId } = message.payload
+
+        const estimateBandwidth = (room, path) => {
+          const seen = new Set()
+          for (const client of io.sockets.clients(room)) {
+            if (seen.has(client.id)) continue
+            seen.add(client.id)
+            let v = client.id === source ? ack : broadcast
+            if (v === 0) {
+              // Acknowledgements with update.dup===true will not get sent to other clients.
+              continue
+            }
+            v += `5:::{"name":"otUpdateApplied","args":[]}`.length
+            Metrics.histogram(
+              'estimated-applied-ops-bandwidth',
+              v,
+              BANDWIDTH_BUCKETS,
+              { path }
+            )
+          }
+        }
+
+        estimateBandwidth(projectId, 'per-project')
+        estimateBandwidth(docId, 'per-doc')
       } else if (message.room_id) {
         if (message._id && Settings.checkEventOrder) {
           const status = EventLogger.checkEventOrder(
@@ -129,12 +186,7 @@ module.exports = WebsocketLoadBalancer = {
           !RESTRICTED_USER_MESSAGE_TYPE_PASS_LIST.includes(message.message)
 
         // send messages only to unique clients (due to duplicate entries in io.sockets.clients)
-        const clientList = io.sockets
-          .clients(message.room_id)
-          .filter(
-            client =>
-              !(isRestrictedMessage && client.ol_context.is_restricted_user)
-          )
+        const clientList = io.sockets.clients(message.room_id)
 
         // avoid unnecessary work if no clients are connected
         if (clientList.length === 0) {
@@ -154,7 +206,37 @@ module.exports = WebsocketLoadBalancer = {
         for (const client of clientList) {
           if (!seen.has(client.id)) {
             seen.set(client.id, true)
-            client.emit(message.message, ...message.payload)
+            if (WebsocketLoadBalancer.shouldDisconnectClient(client, message)) {
+              logger.debug(
+                {
+                  message,
+                  userId: client?.ol_context?.user_id,
+                  projectId: client?.ol_context?.project_id,
+                },
+                'disconnecting client'
+              )
+              if (
+                message?.message !== 'project:collaboratorAccessLevel:changed'
+              ) {
+                client.emit('project:access:revoked')
+              }
+              client.disconnect()
+            } else {
+              if (isRestrictedMessage && client.ol_context.is_restricted_user) {
+                // hide restricted message
+                logger.debug(
+                  {
+                    message,
+                    clientId: client.id,
+                    userId: client.ol_context.user_id,
+                    projectId: client.ol_context.project_id,
+                  },
+                  'hiding restricted message from client'
+                )
+              } else {
+                client.emit(message.message, ...message.payload)
+              }
+            }
           }
         }
       } else if (message.health_check) {

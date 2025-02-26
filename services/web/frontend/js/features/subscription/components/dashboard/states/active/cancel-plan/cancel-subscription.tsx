@@ -8,42 +8,40 @@ import {
   cancelSubscriptionUrl,
   redirectAfterCancelSubscriptionUrl,
 } from '../../../../../data/subscription-url'
-import canExtendTrial from '../../../../../util/can-extend-trial'
 import showDowngradeOption from '../../../../../util/show-downgrade-option'
-import ActionButtonText from '../../../action-button-text'
 import GenericErrorAlert from '../../../generic-error-alert'
 import DowngradePlanButton from './downgrade-plan-button'
 import ExtendTrialButton from './extend-trial-button'
 import { useLocation } from '../../../../../../../shared/hooks/use-location'
+import { debugConsole } from '@/utils/debugging'
+import OLButton from '@/features/ui/components/ol/ol-button'
+import moment from 'moment'
+import OLNotification from '@/features/ui/components/ol/ol-notification'
 
 const planCodeToDowngradeTo = 'paid-personal'
 
 function ConfirmCancelSubscriptionButton({
-  buttonClass,
-  buttonText,
-  handleCancelSubscription,
-  isLoadingCancel,
-  isSuccessCancel,
-  isButtonDisabled,
+  showNoThanks,
+  onClick,
+  disabled,
+  isLoading,
 }: {
-  buttonClass: string
-  buttonText: string
-  handleCancelSubscription: () => void
-  isLoadingCancel: boolean
-  isSuccessCancel: boolean
-  isButtonDisabled: boolean
+  showNoThanks: boolean
+  onClick: () => void
+  disabled: boolean
+  isLoading: boolean
 }) {
+  const { t } = useTranslation()
+  const text = showNoThanks ? t('no_thanks_cancel_now') : t('cancel_my_account')
   return (
-    <button
-      className={`btn ${buttonClass}`}
-      onClick={handleCancelSubscription}
-      disabled={isButtonDisabled}
+    <OLButton
+      isLoading={isLoading}
+      disabled={disabled}
+      onClick={onClick}
+      variant={showNoThanks ? 'link' : undefined}
     >
-      <ActionButtonText
-        inflight={isSuccessCancel || isLoadingCancel}
-        buttonText={buttonText}
-      />
-    </button>
+      {text}
+    </OLButton>
   )
 }
 
@@ -77,17 +75,15 @@ function NotCancelOption({
             values={{
               days: 14,
             }}
-            components={[
-              // eslint-disable-next-line react/jsx-key
-              <strong />,
-            ]}
+            shouldUnescape
+            tOptions={{ interpolation: { escapeValue: true } }}
+            components={{ strong: <strong /> }}
           />
         </p>
         <p>
           <ExtendTrialButton
             isButtonDisabled={isButtonDisabled}
-            isLoadingSecondaryAction={isLoadingSecondaryAction}
-            isSuccessSecondaryAction={isSuccessSecondaryAction}
+            isLoading={isLoadingSecondaryAction || isSuccessSecondaryAction}
             runAsyncSecondaryAction={runAsyncSecondaryAction}
           />
         </p>
@@ -104,6 +100,8 @@ function NotCancelOption({
             values={{
               price: planToDowngradeTo.displayPrice,
             }}
+            shouldUnescape
+            tOptions={{ interpolation: { escapeValue: true } }}
             components={[
               // eslint-disable-next-line react/jsx-key
               <strong />,
@@ -113,8 +111,7 @@ function NotCancelOption({
         <p>
           <DowngradePlanButton
             isButtonDisabled={isButtonDisabled}
-            isLoadingSecondaryAction={isLoadingSecondaryAction}
-            isSuccessSecondaryAction={isSuccessSecondaryAction}
+            isLoading={isLoadingSecondaryAction || isSuccessSecondaryAction}
             planToDowngradeTo={planToDowngradeTo}
             runAsyncSecondaryAction={runAsyncSecondaryAction}
           />
@@ -129,12 +126,9 @@ function NotCancelOption({
 
   return (
     <p>
-      <button
-        className="btn btn-secondary-info btn-secondary"
-        onClick={handleKeepPlan}
-      >
+      <OLButton variant="secondary" onClick={handleKeepPlan}>
         {t('i_want_to_stay')}
-      </button>
+      </OLButton>
     </p>
   )
 }
@@ -142,7 +136,8 @@ function NotCancelOption({
 export function CancelSubscription() {
   const { t } = useTranslation()
   const location = useLocation()
-  const { personalSubscription, plans } = useSubscriptionDashboardContext()
+  const { personalSubscription, plans, userCanExtendTrial } =
+    useSubscriptionDashboardContext()
   const {
     isLoading: isLoadingCancel,
     isError: isErrorCancel,
@@ -166,7 +161,9 @@ export function CancelSubscription() {
   const showDowngrade = showDowngradeOption(
     personalSubscription.plan.planCode,
     personalSubscription.plan.groupPlan,
-    personalSubscription.recurly.trial_ends_at
+    personalSubscription.recurly.trial_ends_at,
+    personalSubscription.recurly.pausedAt,
+    personalSubscription.recurly.remainingPauseCycles
   )
   const planToDowngradeTo = plans.find(
     plan => plan.planCode === planCodeToDowngradeTo
@@ -175,54 +172,62 @@ export function CancelSubscription() {
     return <LoadingSpinner />
   }
 
+  const startDate = moment.utc(personalSubscription.recurly.account.created_at)
+  const pricingChangeEffectiveDate = moment.utc('2025-01-08T12:00:00Z')
+  const displayPricingWarning =
+    personalSubscription.plan.groupPlan &&
+    startDate.isBefore(pricingChangeEffectiveDate)
+
   async function handleCancelSubscription() {
     try {
       await runAsyncCancel(postJSON(cancelSubscriptionUrl))
       location.assign(redirectAfterCancelSubscriptionUrl)
     } catch (e) {
-      console.error(e)
+      debugConsole.error(e)
     }
   }
 
-  const showExtendFreeTrial = canExtendTrial(
-    personalSubscription.plan.planCode,
-    personalSubscription.plan.groupPlan,
-    personalSubscription.recurly.trial_ends_at
-  )
-
-  let confirmCancelButtonText = t('cancel_my_account')
-  let confirmCancelButtonClass = 'btn-primary'
-  if (showExtendFreeTrial || showDowngrade) {
-    confirmCancelButtonText = t('no_thanks_cancel_now')
-    confirmCancelButtonClass = 'btn-inline-link'
-  }
+  const showExtendFreeTrial = userCanExtendTrial
 
   return (
-    <div className="text-center">
-      <p>
-        <strong>{t('wed_love_you_to_stay')}</strong>
-      </p>
+    <>
+      {displayPricingWarning && (
+        <OLNotification
+          type="warning"
+          content={
+            <>
+              <h2 className="pricing-warning-heading">
+                {t('cancel_group_price_warning_heading')}
+              </h2>
+              <p>{t('cancel_group_price_warning')}</p>
+            </>
+          }
+        />
+      )}
+      <div className="text-center">
+        <p>
+          <strong>{t('wed_love_you_to_stay')}</strong>
+        </p>
 
-      {(isErrorCancel || isErrorSecondaryAction) && <GenericErrorAlert />}
+        {(isErrorCancel || isErrorSecondaryAction) && <GenericErrorAlert />}
 
-      <NotCancelOption
-        showExtendFreeTrial={showExtendFreeTrial}
-        showDowngrade={showDowngrade}
-        isButtonDisabled={isButtonDisabled}
-        isLoadingSecondaryAction={isLoadingSecondaryAction}
-        isSuccessSecondaryAction={isSuccessSecondaryAction}
-        planToDowngradeTo={planToDowngradeTo}
-        runAsyncSecondaryAction={runAsyncSecondaryAction}
-      />
+        <NotCancelOption
+          showExtendFreeTrial={showExtendFreeTrial}
+          showDowngrade={showDowngrade}
+          isButtonDisabled={isButtonDisabled}
+          isLoadingSecondaryAction={isLoadingSecondaryAction}
+          isSuccessSecondaryAction={isSuccessSecondaryAction}
+          planToDowngradeTo={planToDowngradeTo}
+          runAsyncSecondaryAction={runAsyncSecondaryAction}
+        />
 
-      <ConfirmCancelSubscriptionButton
-        buttonClass={confirmCancelButtonClass}
-        buttonText={confirmCancelButtonText}
-        isButtonDisabled={isButtonDisabled}
-        handleCancelSubscription={handleCancelSubscription}
-        isSuccessCancel={isSuccessCancel}
-        isLoadingCancel={isLoadingCancel}
-      />
-    </div>
+        <ConfirmCancelSubscriptionButton
+          showNoThanks={showExtendFreeTrial || showDowngrade}
+          onClick={handleCancelSubscription}
+          disabled={isButtonDisabled}
+          isLoading={isSuccessCancel || isLoadingCancel}
+        />
+      </div>
+    </>
   )
 }

@@ -3,7 +3,7 @@ const sinon = require('sinon')
 const modulePath =
   '../../../../app/src/Features/Subscription/SubscriptionUpdater'
 const { assert, expect } = require('chai')
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 
 describe('SubscriptionUpdater', function () {
   beforeEach(function () {
@@ -77,6 +77,13 @@ describe('SubscriptionUpdater', function () {
       exec: sinon.stub().resolves(this.subscription),
     })
 
+    this.SSOConfigModel = class {}
+    this.SSOConfigModel.findOne = sinon.stub().returns({
+      lean: sinon.stub().returns({
+        exec: sinon.stub().resolves({ enabled: true }),
+      }),
+    })
+
     this.SubscriptionLocator = {
       promises: {
         getUsersSubscription: sinon.stub(),
@@ -139,8 +146,19 @@ describe('SubscriptionUpdater', function () {
     }
 
     this.AnalyticsManager = {
-      recordEventForUser: sinon.stub().resolves(),
-      setUserPropertyForUser: sinon.stub(),
+      recordEventForUserInBackground: sinon.stub().resolves(),
+      setUserPropertyForUserInBackground: sinon.stub(),
+      registerAccountMapping: sinon.stub(),
+    }
+
+    this.Features = {
+      hasFeature: sinon.stub().returns(false),
+    }
+
+    this.UserAuditLogHandler = {
+      promises: {
+        addEntry: sinon.stub().resolves(),
+      },
     }
 
     this.SubscriptionUpdater = SandboxedModule.require(modulePath, {
@@ -148,6 +166,7 @@ describe('SubscriptionUpdater', function () {
         '../../models/Subscription': {
           Subscription: this.SubscriptionModel,
         },
+        '../../models/SSOConfig': { SSOConfig: this.SSOConfigModel },
         './UserFeaturesUpdater': this.UserFeaturesUpdater,
         './SubscriptionLocator': this.SubscriptionLocator,
         '@overleaf/settings': this.Settings,
@@ -157,6 +176,11 @@ describe('SubscriptionUpdater', function () {
           DeletedSubscription: this.DeletedSubscription,
         },
         '../Analytics/AnalyticsManager': this.AnalyticsManager,
+        '../Analytics/AccountMappingHelper': (this.AccountMappingHelper = {
+          generateSubscriptionToRecurlyMapping: sinon.stub(),
+        }),
+        '../../infrastructure/Features': this.Features,
+        '../User/UserAuditLogHandler': this.UserAuditLogHandler,
       },
     })
   })
@@ -169,12 +193,12 @@ describe('SubscriptionUpdater', function () {
         this.otherUserId
       )
       const query = {
-        _id: ObjectId(this.subscription._id),
+        _id: new ObjectId(this.subscription._id),
         customAccount: true,
       }
       const update = {
-        $set: { admin_id: ObjectId(this.otherUserId) },
-        $addToSet: { manager_ids: ObjectId(this.otherUserId) },
+        $set: { admin_id: new ObjectId(this.otherUserId) },
+        $addToSet: { manager_ids: new ObjectId(this.otherUserId) },
       }
       this.SubscriptionModel.updateOne.should.have.been.calledOnce
       this.SubscriptionModel.updateOne.should.have.been.calledWith(
@@ -189,13 +213,13 @@ describe('SubscriptionUpdater', function () {
         this.otherUserId
       )
       const query = {
-        _id: ObjectId(this.subscription._id),
+        _id: new ObjectId(this.subscription._id),
         customAccount: true,
       }
       const update = {
         $set: {
-          admin_id: ObjectId(this.otherUserId),
-          manager_ids: [ObjectId(this.otherUserId)],
+          admin_id: new ObjectId(this.otherUserId),
+          manager_ids: [new ObjectId(this.otherUserId)],
         },
       }
       this.SubscriptionModel.updateOne.should.have.been.calledOnce
@@ -260,6 +284,41 @@ describe('SubscriptionUpdater', function () {
       ).to.have.been.calledWith(this.adminUser._id)
     })
 
+    it('should send a recurly account mapping event', async function () {
+      const createdAt = new Date().toISOString()
+      this.AccountMappingHelper.generateSubscriptionToRecurlyMapping.returns({
+        source: 'recurly',
+        sourceEntity: 'subscription',
+        sourceEntityId: this.recurlySubscription.uuid,
+        target: 'v2',
+        targetEntity: 'subscription',
+        targetEntityId: this.subscription._id,
+        createdAt,
+      })
+      await this.SubscriptionUpdater.promises.updateSubscriptionFromRecurly(
+        this.recurlySubscription,
+        this.subscription,
+        {}
+      )
+      expect(
+        this.AccountMappingHelper.generateSubscriptionToRecurlyMapping
+      ).to.have.been.calledWith(
+        this.subscription._id,
+        this.recurlySubscription.uuid
+      )
+      expect(
+        this.AnalyticsManager.registerAccountMapping
+      ).to.have.been.calledWith({
+        source: 'recurly',
+        sourceEntity: 'subscription',
+        sourceEntityId: this.recurlySubscription.uuid,
+        target: 'v2',
+        targetEntity: 'subscription',
+        targetEntityId: this.subscription._id,
+        createdAt,
+      })
+    })
+
     it('should remove the subscription when expired', async function () {
       this.recurlySubscription.state = 'expired'
       await this.SubscriptionUpdater.promises.updateSubscriptionFromRecurly(
@@ -267,6 +326,35 @@ describe('SubscriptionUpdater', function () {
         this.subscription,
         {}
       )
+      this.SubscriptionModel.deleteOne.should.have.been.calledWith({
+        _id: this.subscription._id,
+      })
+    })
+
+    it('should not remove the subscription when expired if it has Managed Users enabled', async function () {
+      this.Features.hasFeature.withArgs('saas').returns(true)
+      this.subscription.managedUsersEnabled = true
+
+      this.recurlySubscription.state = 'expired'
+      await this.SubscriptionUpdater.promises.updateSubscriptionFromRecurly(
+        this.recurlySubscription,
+        this.subscription,
+        {}
+      )
+      this.SubscriptionModel.deleteOne.should.not.have.been.called
+    })
+
+    it('should not remove the subscription when expired if it has Group SSO enabled', async function () {
+      this.Features.hasFeature.withArgs('saas').returns(true)
+      this.subscription.ssoConfig = new ObjectId('abc123abc123abc123abc123')
+
+      this.recurlySubscription.state = 'expired'
+      await this.SubscriptionUpdater.promises.updateSubscriptionFromRecurly(
+        this.recurlySubscription,
+        this.subscription,
+        {}
+      )
+      this.SubscriptionModel.deleteOne.should.not.have.been.called
     })
 
     it('should update all the users features', async function () {
@@ -399,7 +487,7 @@ describe('SubscriptionUpdater', function () {
         .calledWith(searchOps, insertOperation)
         .should.equal(true)
       sinon.assert.calledWith(
-        this.AnalyticsManager.recordEventForUser,
+        this.AnalyticsManager.recordEventForUserInBackground,
         this.otherUserId,
         'group-subscription-joined',
         {
@@ -428,7 +516,7 @@ describe('SubscriptionUpdater', function () {
         this.otherUserId
       )
       sinon.assert.calledWith(
-        this.AnalyticsManager.setUserPropertyForUser,
+        this.AnalyticsManager.setUserPropertyForUserInBackground,
         this.otherUserId,
         'group-subscription-plan-code',
         'group_subscription'
@@ -444,7 +532,7 @@ describe('SubscriptionUpdater', function () {
         this.otherUserId
       )
       sinon.assert.calledWith(
-        this.AnalyticsManager.setUserPropertyForUser,
+        this.AnalyticsManager.setUserPropertyForUserInBackground,
         this.otherUserId,
         'group-subscription-plan-code',
         'better_group_subscription'
@@ -460,10 +548,27 @@ describe('SubscriptionUpdater', function () {
         this.otherUserId
       )
       sinon.assert.calledWith(
-        this.AnalyticsManager.setUserPropertyForUser,
+        this.AnalyticsManager.setUserPropertyForUserInBackground,
         this.otherUserId,
         'group-subscription-plan-code',
         'better_group_subscription'
+      )
+    })
+
+    it('should add an entry to the user audit log when joining a group', async function () {
+      await this.SubscriptionUpdater.promises.addUserToGroup(
+        this.subscription._id,
+        this.otherUserId
+      )
+      sinon.assert.calledWith(
+        this.UserAuditLogHandler.promises.addEntry,
+        this.otherUserId,
+        'join-group-subscription',
+        undefined,
+        undefined,
+        {
+          subscriptionId: this.subscription._id,
+        }
       )
     })
   })
@@ -501,7 +606,7 @@ describe('SubscriptionUpdater', function () {
         this.otherUserId
       )
       sinon.assert.calledWith(
-        this.AnalyticsManager.recordEventForUser,
+        this.AnalyticsManager.recordEventForUserInBackground,
         this.otherUserId,
         'group-subscription-left',
         {
@@ -517,7 +622,7 @@ describe('SubscriptionUpdater', function () {
         this.otherUserId
       )
       sinon.assert.calledWith(
-        this.AnalyticsManager.setUserPropertyForUser,
+        this.AnalyticsManager.setUserPropertyForUserInBackground,
         this.otherUserId,
         'group-subscription-plan-code',
         null
@@ -532,6 +637,23 @@ describe('SubscriptionUpdater', function () {
       this.FeaturesUpdater.promises.refreshFeatures
         .calledWith(this.otherUserId)
         .should.equal(true)
+    })
+
+    it('should add an audit log when a user leaves a group', async function () {
+      await this.SubscriptionUpdater.promises.removeUserFromGroup(
+        this.subscription._id,
+        this.otherUserId
+      )
+      sinon.assert.calledWith(
+        this.UserAuditLogHandler.promises.addEntry,
+        this.otherUserId,
+        'leave-group-subscription',
+        undefined,
+        undefined,
+        {
+          subscriptionId: this.subscription._id,
+        }
+      )
     })
   })
 
@@ -552,7 +674,7 @@ describe('SubscriptionUpdater', function () {
         this.otherUserId
       )
       sinon.assert.calledWith(
-        this.AnalyticsManager.setUserPropertyForUser,
+        this.AnalyticsManager.setUserPropertyForUserInBackground,
         this.otherUserId,
         'group-subscription-plan-code',
         null
@@ -599,7 +721,7 @@ describe('SubscriptionUpdater', function () {
         this.otherUserId
       )
       sinon.assert.calledWith(
-        this.AnalyticsManager.recordEventForUser,
+        this.AnalyticsManager.recordEventForUserInBackground,
         this.otherUserId,
         'group-subscription-left',
         {
@@ -608,7 +730,7 @@ describe('SubscriptionUpdater', function () {
         }
       )
       sinon.assert.calledWith(
-        this.AnalyticsManager.recordEventForUser,
+        this.AnalyticsManager.recordEventForUserInBackground,
         this.otherUserId,
         'group-subscription-left',
         {
@@ -617,15 +739,41 @@ describe('SubscriptionUpdater', function () {
         }
       )
     })
+
+    it('should add an audit log entry for each group the user leaves', async function () {
+      await this.SubscriptionUpdater.promises.removeUserFromAllGroups(
+        this.otherUserId
+      )
+      sinon.assert.calledWith(
+        this.UserAuditLogHandler.promises.addEntry,
+        this.otherUserId,
+        'leave-group-subscription',
+        undefined,
+        undefined,
+        {
+          subscriptionId: 'fake-id-1',
+        }
+      )
+      sinon.assert.calledWith(
+        this.UserAuditLogHandler.promises.addEntry,
+        this.otherUserId,
+        'leave-group-subscription',
+        undefined,
+        undefined,
+        {
+          subscriptionId: 'fake-id-2',
+        }
+      )
+    })
   })
 
   describe('deleteSubscription', function () {
     beforeEach(async function () {
       this.subscription = {
-        _id: ObjectId().toString(),
+        _id: new ObjectId().toString(),
         mock: 'subscription',
-        admin_id: ObjectId(),
-        member_ids: [ObjectId(), ObjectId(), ObjectId()],
+        admin_id: new ObjectId(),
+        member_ids: [new ObjectId(), new ObjectId(), new ObjectId()],
       }
       await this.SubscriptionUpdater.promises.deleteSubscription(
         this.subscription,

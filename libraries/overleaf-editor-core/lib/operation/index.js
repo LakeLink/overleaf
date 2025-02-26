@@ -2,9 +2,7 @@
 
 const _ = require('lodash')
 const assert = require('check-types').assert
-const BPromise = require('bluebird')
-
-const TextOperation = require('./text_operation')
+const EditOperationTransformer = require('./edit_operation_transformer')
 
 // Dependencies are loaded at the bottom of the file to mitigate circular
 // dependency
@@ -15,12 +13,11 @@ let EditFileOperation = null
 let SetFileMetadataOperation = null
 
 /**
- * @typedef {import("../types").BlobStore} BlobStore
- * @typedef {import("../snapshot")} Snapshot
+ * @import { BlobStore } from "../types"
+ * @import Snapshot from "../snapshot"
  */
 
 /**
- * @classdesc
  * An `Operation` changes a `Snapshot` when it is applied. See the
  * {@tutorial OT} tutorial for background.
  */
@@ -32,16 +29,20 @@ class Operation {
    * @return {Operation} one of the subclasses
    */
   static fromRaw(raw) {
-    if (Object.prototype.hasOwnProperty.call(raw, 'file')) {
+    if ('file' in raw) {
       return AddFileOperation.fromRaw(raw)
     }
-    if (Object.prototype.hasOwnProperty.call(raw, 'textOperation')) {
+    if (
+      'textOperation' in raw ||
+      'commentId' in raw ||
+      'deleteComment' in raw
+    ) {
       return EditFileOperation.fromRaw(raw)
     }
-    if (Object.prototype.hasOwnProperty.call(raw, 'newPathname')) {
+    if ('newPathname' in raw) {
       return new MoveFileOperation(raw.pathname, raw.newPathname)
     }
-    if (Object.prototype.hasOwnProperty.call(raw, 'metadata')) {
+    if ('metadata' in raw) {
       return new SetFileMetadataOperation(raw.pathname, raw.metadata)
     }
     if (_.isEmpty(raw)) {
@@ -80,11 +81,9 @@ class Operation {
    *
    * @param {string} kind see {File#load}
    * @param {BlobStore} blobStore
-   * @return {Promise}
+   * @return {Promise<void>}
    */
-  loadFiles(kind, blobStore) {
-    return BPromise.resolve()
-  }
+  async loadFiles(kind, blobStore) {}
 
   /**
    * Return a version of this operation that is suitable for long term storage.
@@ -94,8 +93,8 @@ class Operation {
    * @param {BlobStore} blobStore
    * @return {Promise.<Object>}
    */
-  store(blobStore) {
-    return BPromise.try(() => this.toRaw())
+  async store(blobStore) {
+    return this.toRaw()
   }
 
   /**
@@ -165,7 +164,7 @@ class Operation {
    * @return {Operation[]} operations `[a', b']`
    */
   static transform(a, b) {
-    if (a.isNoOp() || b.isNoOp()) return [b, a]
+    if (a.isNoOp() || b.isNoOp()) return [a, b]
 
     function transpose(transformer) {
       return transformer(b, a).reverse()
@@ -228,8 +227,8 @@ class Operation {
     return new AddFileOperation(pathname, file)
   }
 
-  static editFile(pathname, textOperation) {
-    return new EditFileOperation(pathname, textOperation)
+  static editFile(pathname, editOperation) {
+    return new EditFileOperation(pathname, editOperation)
   }
 
   static moveFile(pathname, newPathname) {
@@ -394,7 +393,7 @@ function transformMoveFileEditFile(move, edit) {
     }
     return [
       move,
-      Operation.editFile(move.getNewPathname(), edit.getTextOperation()),
+      Operation.editFile(move.getNewPathname(), edit.getOperation()),
     ]
   }
 
@@ -426,13 +425,13 @@ function transformMoveFileSetFileMetadata(move, set) {
 
 function transformEditFileEditFile(edit1, edit2) {
   if (edit1.getPathname() === edit2.getPathname()) {
-    const primeTextOps = TextOperation.transform(
-      edit1.getTextOperation(),
-      edit2.getTextOperation()
+    const primeOps = EditOperationTransformer.transform(
+      edit1.getOperation(),
+      edit2.getOperation()
     )
     return [
-      Operation.editFile(edit1.getPathname(), primeTextOps[0]),
-      Operation.editFile(edit2.getPathname(), primeTextOps[1]),
+      Operation.editFile(edit1.getPathname(), primeOps[0]),
+      Operation.editFile(edit2.getPathname(), primeOps[1]),
     ]
   }
 

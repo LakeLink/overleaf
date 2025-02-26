@@ -1,13 +1,15 @@
 'use strict'
 
 const assert = require('check-types').assert
-const BPromise = require('bluebird')
 
 const FileData = require('./')
 
+/**
+ * @import { RawHollowBinaryFileData } from '../types'
+ */
+
 class HollowBinaryFileData extends FileData {
   /**
-   * @constructor
    * @param {number} byteLength
    * @see FileData
    */
@@ -18,11 +20,18 @@ class HollowBinaryFileData extends FileData {
     this.byteLength = byteLength
   }
 
+  /**
+   * @param {RawHollowBinaryFileData} raw
+   * @returns {HollowBinaryFileData}
+   */
   static fromRaw(raw) {
     return new HollowBinaryFileData(raw.byteLength)
   }
 
-  /** @inheritdoc */
+  /**
+   * @inheritdoc
+   * @returns {RawHollowBinaryFileData}
+   */
   toRaw() {
     return { byteLength: this.byteLength }
   }
@@ -38,8 +47,8 @@ class HollowBinaryFileData extends FileData {
   }
 
   /** @inheritdoc */
-  toHollow() {
-    return BPromise.resolve(this)
+  async toHollow() {
+    return this
   }
 }
 

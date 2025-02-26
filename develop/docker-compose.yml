@@ -8,7 +8,6 @@ volumes:
   mongo-data:
   redis-data:
   sharelatex-data:
-  spelling-cache:
   web-data:
   history-v1-buckets:
 
@@ -89,7 +88,8 @@ services:
         - history-v1-buckets:/buckets
 
   mongo:
-    image: mongo:4.4
+    image: mongo:6.0
+    command: --replSet overleaf
     ports:
       - "127.0.0.1:27017:27017" # for debugging
     volumes:
@@ -123,22 +123,6 @@ services:
     volumes:
       - redis-data:/data
 
-  spelling:
-    build:
-      context: ..
-      dockerfile: services/spelling/Dockerfile
-    env_file:
-      - dev.env
-    volumes:
-      - spelling-cache:/overleaf/services/spelling/cache
-
-  track-changes:
-    build:
-      context: ..
-      dockerfile: services/track-changes/Dockerfile
-    env_file:
-      - dev.env
-
   web:
     build:
       context: ..
@@ -151,10 +135,10 @@ services:
       - ENABLED_LINKED_FILE_TYPES=project_file,project_output_file
       - EMAIL_CONFIRMATION_DISABLED=true
       - NODE_ENV=development
-      - SHARELATEX_ALLOW_PUBLIC_ACCESS=true
-    command: ["node", "app.js"]
+      - OVERLEAF_ALLOW_PUBLIC_ACCESS=true
+    command: ["node", "app.mjs"]
     volumes:
-      - sharelatex-data:/var/lib/sharelatex
+      - sharelatex-data:/var/lib/overleaf
       - web-data:/overleaf/services/web/data
     depends_on:
       - mongo
@@ -169,13 +153,12 @@ services:
       - notifications
       - project-history
       - real-time
-      - spelling
 
   webpack:
     build:
       context: ..
       dockerfile: services/web/Dockerfile
-      target: dev
+      target: webpack
     command: ["npx", "webpack", "serve", "--config", "webpack.config.dev-env.js"]
     ports:
       - "127.0.0.1:80:3808"

@@ -14,7 +14,6 @@ export const Survey = (args: any) => {
 
 export const UndefinedSurvey = (args: any) => {
   localStorage.clear()
-  window.metaAttributesCache = new Map()
 
   return <SurveyWidget {...args} />
 }
@@ -29,4 +28,7 @@ export const EmptySurvey = (args: any) => {
 export default {
   title: 'Project List / Survey Widget',
   component: SurveyWidget,
+  parameters: {
+    bootstrap5: true,
+  },
 }

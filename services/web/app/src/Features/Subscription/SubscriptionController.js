@@ -1,6 +1,7 @@
+// @ts-check
+
 const SessionManager = require('../Authentication/SessionManager')
 const SubscriptionHandler = require('./SubscriptionHandler')
-const PlansLocator = require('./PlansLocator')
 const SubscriptionViewModelBuilder = require('./SubscriptionViewModelBuilder')
 const LimitationsManager = require('./LimitationsManager')
 const RecurlyWrapper = require('./RecurlyWrapper')
@@ -8,307 +9,61 @@ const Settings = require('@overleaf/settings')
 const logger = require('@overleaf/logger')
 const GeoIpLookup = require('../../infrastructure/GeoIpLookup')
 const FeaturesUpdater = require('./FeaturesUpdater')
-const planFeatures = require('./planFeatures')
-const plansV2Config = require('./plansV2Config')
 const GroupPlansData = require('./GroupPlansData')
 const V1SubscriptionManager = require('./V1SubscriptionManager')
-const Errors = require('../Errors/Errors')
-const HttpErrorHandler = require('../Errors/HttpErrorHandler')
-const SubscriptionErrors = require('./Errors')
 const AnalyticsManager = require('../Analytics/AnalyticsManager')
 const RecurlyEventHandler = require('./RecurlyEventHandler')
-const { expressify } = require('../../util/promises')
+const { expressify } = require('@overleaf/promise-utils')
 const OError = require('@overleaf/o-error')
+const { DuplicateAddOnError, AddOnNotPresentError } = require('./Errors')
 const SplitTestHandler = require('../SplitTests/SplitTestHandler')
-const SubscriptionHelper = require('./SubscriptionHelper')
-const interstitialPaymentConfig = require('./interstitialPaymentConfig')
-
-const groupPlanModalOptions = Settings.groupPlanModalOptions
-const validGroupPlanModalOptions = {
-  plan_code: groupPlanModalOptions.plan_codes.map(item => item.code),
-  currency: groupPlanModalOptions.currencies.map(item => item.code),
-  size: groupPlanModalOptions.sizes,
-  usage: groupPlanModalOptions.usages.map(item => item.code),
-}
-
-async function plansPage(req, res) {
-  const plans = SubscriptionViewModelBuilder.buildPlansList()
-
-  let recommendedCurrency
-  if (req.query.currency) {
-    const queryCurrency = req.query.currency.toUpperCase()
-    if (GeoIpLookup.isValidCurrencyParam(queryCurrency)) {
-      recommendedCurrency = queryCurrency
-    }
-  }
-  if (!recommendedCurrency) {
-    const currencyLookup = await GeoIpLookup.promises.getCurrencyCode(
-      (req.query ? req.query.ip : undefined) || req.ip
-    )
-    recommendedCurrency = currencyLookup.currencyCode
-  }
-
-  function getDefault(param, category, defaultValue) {
-    const v = req.query && req.query[param]
-    if (v && validGroupPlanModalOptions[category].includes(v)) {
-      return v
-    }
-    return defaultValue
-  }
-
-  let plansPageLayoutV3Assignment = { variant: 'default' }
-
-  try {
-    plansPageLayoutV3Assignment = await SplitTestHandler.promises.getAssignment(
-      req,
-      res,
-      'plans-page-layout-v3'
-    )
-
-    if (plansPageLayoutV3Assignment.variant === 'old-plans-page-annual') {
-      plansPageLayoutV3Assignment.variant = 'old-plans-page-annual-fixed'
-      res.locals.splitTestVariants['plans-page-layout-v3'] =
-        'old-plans-page-annual-fixed'
-    }
-  } catch (error) {
-    logger.error(
-      { err: error },
-      'failed to get "plans-page-layout-v3" split test assignment'
-    )
-  }
-
-  let currentView = 'monthly'
-  if (
-    plansPageLayoutV3Assignment.variant === 'old-plans-page-annual-fixed' ||
-    plansPageLayoutV3Assignment.variant === 'new-plans-page'
-  ) {
-    currentView = 'annual'
-  }
-
-  const showNewPlansPage =
-    plansPageLayoutV3Assignment.variant === 'new-plans-page'
-
-  let defaultGroupPlanModalCurrency = 'USD'
-  if (validGroupPlanModalOptions.currency.includes(recommendedCurrency)) {
-    defaultGroupPlanModalCurrency = recommendedCurrency
-  }
-  const groupPlanModalDefaults = {
-    plan_code: getDefault('plan', 'plan_code', 'collaborator'),
-    size: getDefault('number', 'size', showNewPlansPage ? '2' : '10'),
-    currency: getDefault('currency', 'currency', defaultGroupPlanModalCurrency),
-    usage: getDefault('usage', 'usage', 'enterprise'),
-  }
-
-  AnalyticsManager.recordEventForSession(req.session, 'plans-page-view', {
-    'plans-page-layout-v3': plansPageLayoutV3Assignment.variant,
-  })
-
-  const template = showNewPlansPage
-    ? 'subscriptions/plans-marketing-v2'
-    : 'subscriptions/plans-marketing'
-
-  res.render(template, {
-    title: 'plans_and_pricing',
-    currentView,
-    plans,
-    itm_content: req.query?.itm_content,
-    itm_referrer: req.query?.itm_referrer,
-    itm_campaign: 'plans',
-    recommendedCurrency,
-    planFeatures,
-    plansV2Config,
-    groupPlans: GroupPlansData,
-    groupPlanModalOptions,
-    groupPlanModalDefaults,
-    plansPageLayoutV3Variant: plansPageLayoutV3Assignment.variant,
-    initialLocalizedGroupPrice:
-      SubscriptionHelper.generateInitialLocalizedGroupPrice(
-        recommendedCurrency
-      ),
-  })
-}
-
-async function paymentPage(req, res) {
-  try {
-    const assignment = await SplitTestHandler.promises.getAssignment(
-      req,
-      res,
-      'subscription-pages-react'
-    )
-    // get to show the recurly.js page
-    if (assignment.variant === 'active') {
-      await _paymentReactPage(req, res)
-    } else {
-      await _paymentAngularPage(req, res)
-    }
-  } catch (error) {
-    logger.warn(
-      { err: error },
-      'failed to get "subscription-pages-react" split test assignment'
-    )
-    await _paymentAngularPage(req, res)
-  }
-}
+const AuthorizationManager = require('../Authorization/AuthorizationManager')
+const Modules = require('../../infrastructure/Modules')
+const async = require('async')
+const HttpErrorHandler = require('../Errors/HttpErrorHandler')
+const RecurlyClient = require('./RecurlyClient')
+const { AI_ADD_ON_CODE } = require('./RecurlyEntities')
+const PlansLocator = require('./PlansLocator')
 
 /**
- * @param {import("express").Request} req
- * @param {import("express").Response} res
- * @returns {Promise<void>}
+ * @import { SubscriptionChangeDescription } from '../../../../types/subscription/subscription-change-preview'
+ * @import { SubscriptionChangePreview } from '../../../../types/subscription/subscription-change-preview'
+ * @import { RecurlySubscriptionChange } from './RecurlyEntities'
+ * @import { PaymentMethod } from './types'
  */
-async function _paymentReactPage(req, res) {
-  const user = SessionManager.getSessionUser(req.session)
-  const plan = PlansLocator.findLocalPlanInSettings(req.query.planCode)
-  if (!plan) {
-    return HttpErrorHandler.unprocessableEntity(req, res, 'Plan not found')
-  }
-  const hasSubscription =
-    await LimitationsManager.promises.userHasV1OrV2Subscription(user)
-  if (hasSubscription) {
-    res.redirect('/user/subscription?hasSubscription=true')
-  } else {
-    // LimitationsManager.userHasV2Subscription only checks Mongo. Double check with
-    // Recurly as well at this point (we don't do this most places for speed).
-    const valid =
-      await SubscriptionHandler.promises.validateNoSubscriptionInRecurly(
-        user._id
-      )
-    if (!valid) {
-      res.redirect('/user/subscription?hasSubscription=true')
-    } else {
-      let currency = null
-      if (req.query.currency) {
-        const queryCurrency = req.query.currency.toUpperCase()
-        if (GeoIpLookup.isValidCurrencyParam(queryCurrency)) {
-          currency = queryCurrency
-        }
-      }
-      const { currencyCode: recommendedCurrency, countryCode } =
-        await GeoIpLookup.promises.getCurrencyCode(
-          (req.query ? req.query.ip : undefined) || req.ip
-        )
-      if (recommendedCurrency && currency == null) {
-        currency = recommendedCurrency
-      }
 
-      await SplitTestHandler.promises.getAssignment(
-        req,
-        res,
-        'student-check-modal'
-      )
-
-      res.render('subscriptions/new-react', {
-        title: 'subscribe',
-        currency,
-        countryCode,
-        plan,
-        planCode: req.query.planCode,
-        couponCode: req.query.cc,
-        showCouponField: !!req.query.scf,
-        itm_campaign: req.query.itm_campaign,
-        itm_content: req.query.itm_content,
-        itm_referrer: req.query.itm_referrer,
-      })
-    }
-  }
-}
-
-async function _paymentAngularPage(req, res) {
-  const user = SessionManager.getSessionUser(req.session)
-  const plan = PlansLocator.findLocalPlanInSettings(req.query.planCode)
-  if (!plan) {
-    return HttpErrorHandler.unprocessableEntity(req, res, 'Plan not found')
-  }
-  const hasSubscription =
-    await LimitationsManager.promises.userHasV1OrV2Subscription(user)
-  if (hasSubscription) {
-    res.redirect('/user/subscription?hasSubscription=true')
-  } else {
-    // LimitationsManager.userHasV2Subscription only checks Mongo. Double check with
-    // Recurly as well at this point (we don't do this most places for speed).
-    const valid =
-      await SubscriptionHandler.promises.validateNoSubscriptionInRecurly(
-        user._id
-      )
-    if (!valid) {
-      res.redirect('/user/subscription?hasSubscription=true')
-    } else {
-      let currency = null
-      if (req.query.currency) {
-        const queryCurrency = req.query.currency.toUpperCase()
-        if (GeoIpLookup.isValidCurrencyParam(queryCurrency)) {
-          currency = queryCurrency
-        }
-      }
-      const { currencyCode: recommendedCurrency, countryCode } =
-        await GeoIpLookup.promises.getCurrencyCode(
-          (req.query ? req.query.ip : undefined) || req.ip
-        )
-      if (recommendedCurrency && currency == null) {
-        currency = recommendedCurrency
-      }
-
-      await SplitTestHandler.promises.getAssignment(
-        req,
-        res,
-        'student-check-modal'
-      )
-
-      res.render('subscriptions/new-refreshed', {
-        title: 'subscribe',
-        currency,
-        countryCode,
-        plan,
-        recurlyConfig: JSON.stringify({
-          currency,
-          subdomain: Settings.apis.recurly.subdomain,
-        }),
-        showCouponField: !!req.query.scf,
-        showVatField: !!req.query.svf,
-      })
-    }
-  }
-}
-
-async function userSubscriptionPage(req, res) {
-  try {
-    const assignment = await SplitTestHandler.promises.getAssignment(
-      req,
-      res,
-      'subscription-pages-react'
-    )
-    if (assignment.variant === 'active') {
-      await _userSubscriptionReactPage(req, res)
-    } else {
-      await _userSubscriptionAngularPage(req, res)
-    }
-  } catch (error) {
-    logger.warn(
-      { err: error },
-      'failed to get "subscription-pages-react" split test assignment'
-    )
-    await _userSubscriptionAngularPage(req, res)
-  }
-}
+const groupPlanModalOptions = Settings.groupPlanModalOptions
 
 function formatGroupPlansDataForDash() {
   return {
     plans: [...groupPlanModalOptions.plan_codes],
     sizes: [...groupPlanModalOptions.sizes],
+    sizesForHighDenominationCurrencies: [
+      ...groupPlanModalOptions.sizesForHighDenominationCurrencies,
+    ],
     usages: [...groupPlanModalOptions.usages],
     priceByUsageTypeAndSize: JSON.parse(JSON.stringify(GroupPlansData)),
   }
 }
 
-/**
- * @param {import("express").Request} req
- * @param {import("express").Response} res
- * @returns {Promise<void>}
- */
-async function _userSubscriptionReactPage(req, res) {
+async function userSubscriptionPage(req, res) {
   const user = SessionManager.getSessionUser(req.session)
+
+  await SplitTestHandler.promises.getAssignment(req, res, 'ai-add-on')
+
+  await SplitTestHandler.promises.getAssignment(req, res, 'pause-subscription')
+
+  const { variant: flexibleLicensingVariant } =
+    await SplitTestHandler.promises.getAssignment(
+      req,
+      res,
+      'flexible-group-licensing'
+    )
+
   const results =
     await SubscriptionViewModelBuilder.promises.buildUsersSubscriptionViewModel(
-      user
+      user,
+      req.i18n.language
     )
   const {
     personalSubscription,
@@ -317,10 +72,13 @@ async function _userSubscriptionReactPage(req, res) {
     currentInstitutionsWithLicence,
     managedInstitutions,
     managedPublishers,
-    v1SubscriptionStatus,
   } = results
-  const hasSubscription =
-    await LimitationsManager.promises.userHasV1OrV2Subscription(user)
+  const { hasSubscription } =
+    await LimitationsManager.promises.userHasSubscription(user)
+
+  const userCanExtendTrial = (
+    await Modules.promises.hooks.fire('userCanExtendTrial', user)
+  )?.[0]
   const fromPlansPage = req.query.hasSubscription
   const plansData =
     SubscriptionViewModelBuilder.buildPlansListForSubscriptionDash(
@@ -329,15 +87,77 @@ async function _userSubscriptionReactPage(req, res) {
 
   AnalyticsManager.recordEventForSession(req.session, 'subscription-page-view')
 
-  const cancelButtonAssignment = await SplitTestHandler.promises.getAssignment(
-    req,
-    res,
-    'subscription-cancel-button'
-  )
-
-  const cancelButtonNewCopy = cancelButtonAssignment?.variant === 'new-copy'
-
   const groupPlansDataForDash = formatGroupPlansDataForDash()
+
+  // display the Group Settings button only to admins of group subscriptions with either/or the Managed Users or Group SSO feature available
+  let groupSettingsEnabledFor
+  try {
+    const managedGroups = await async.filter(
+      managedGroupSubscriptions || [],
+      async subscription => {
+        const managedUsersResults = await Modules.promises.hooks.fire(
+          'hasManagedUsersFeature',
+          subscription
+        )
+        const groupSSOResults = await Modules.promises.hooks.fire(
+          'hasGroupSSOFeature',
+          subscription
+        )
+        const isGroupAdmin =
+          (subscription.admin_id._id || subscription.admin_id).toString() ===
+          user._id.toString()
+        return (
+          (managedUsersResults?.[0] === true ||
+            groupSSOResults?.[0] === true) &&
+          isGroupAdmin
+        )
+      }
+    )
+    groupSettingsEnabledFor = managedGroups.map(subscription =>
+      subscription._id.toString()
+    )
+  } catch (error) {
+    logger.error(
+      { err: error },
+      'Failed to list groups with group settings enabled'
+    )
+  }
+
+  let groupSettingsAdvertisedFor
+  try {
+    const managedGroups = await async.filter(
+      managedGroupSubscriptions || [],
+      async subscription => {
+        const managedUsersResults = await Modules.promises.hooks.fire(
+          'hasManagedUsersFeatureOnNonProfessionalPlan',
+          subscription
+        )
+        const groupSSOResults = await Modules.promises.hooks.fire(
+          'hasGroupSSOFeatureOnNonProfessionalPlan',
+          subscription
+        )
+        const isGroupAdmin =
+          (subscription.admin_id._id || subscription.admin_id).toString() ===
+          user._id.toString()
+        const plan = PlansLocator.findLocalPlanInSettings(subscription.planCode)
+        return (
+          (managedUsersResults?.[0] === true ||
+            groupSSOResults?.[0] === true) &&
+          isGroupAdmin &&
+          flexibleLicensingVariant === 'enabled' &&
+          plan?.canUseFlexibleLicensing
+        )
+      }
+    )
+    groupSettingsAdvertisedFor = managedGroups.map(subscription =>
+      subscription._id.toString()
+    )
+  } catch (error) {
+    logger.error(
+      { err: error },
+      'Failed to list groups with group settings enabled for advertising'
+    )
+  }
 
   const data = {
     title: 'your_subscription',
@@ -347,175 +167,30 @@ async function _userSubscriptionReactPage(req, res) {
     hasSubscription,
     fromPlansPage,
     personalSubscription,
+    userCanExtendTrial,
     memberGroupSubscriptions,
     managedGroupSubscriptions,
     managedInstitutions,
     managedPublishers,
-    v1SubscriptionStatus,
     currentInstitutionsWithLicence,
-    cancelButtonNewCopy,
+    canUseFlexibleLicensing:
+      personalSubscription?.plan?.canUseFlexibleLicensing,
     groupPlans: groupPlansDataForDash,
+    groupSettingsAdvertisedFor,
+    groupSettingsEnabledFor,
+    isManagedAccount: !!req.managedBy,
+    userRestrictions: Array.from(req.userRestrictions || []),
   }
   res.render('subscriptions/dashboard-react', data)
 }
 
-async function _userSubscriptionAngularPage(req, res) {
-  const user = SessionManager.getSessionUser(req.session)
-  const results =
-    await SubscriptionViewModelBuilder.promises.buildUsersSubscriptionViewModel(
-      user
-    )
-  const {
-    personalSubscription,
-    memberGroupSubscriptions,
-    managedGroupSubscriptions,
-    currentInstitutionsWithLicence,
-    managedInstitutions,
-    managedPublishers,
-    v1SubscriptionStatus,
-  } = results
-  const hasSubscription =
-    await LimitationsManager.promises.userHasV1OrV2Subscription(user)
-  const fromPlansPage = req.query.hasSubscription
-  const plans = SubscriptionViewModelBuilder.buildPlansList(
-    personalSubscription ? personalSubscription.plan : undefined
-  )
-
-  AnalyticsManager.recordEventForSession(req.session, 'subscription-page-view')
-
-  const cancelButtonAssignment = await SplitTestHandler.promises.getAssignment(
-    req,
-    res,
-    'subscription-cancel-button'
-  )
-
-  const cancelButtonNewCopy = cancelButtonAssignment?.variant === 'new-copy'
-
-  const data = {
-    title: 'your_subscription',
-    plans,
-    groupPlans: GroupPlansData,
-    user,
-    hasSubscription,
-    fromPlansPage,
-    personalSubscription,
-    memberGroupSubscriptions,
-    managedGroupSubscriptions,
-    managedInstitutions,
-    managedPublishers,
-    v1SubscriptionStatus,
-    currentInstitutionsWithLicence,
-    groupPlanModalOptions,
-    cancelButtonNewCopy,
-  }
-  res.render('subscriptions/dashboard', data)
-}
-
-async function interstitialPaymentPage(req, res) {
-  const user = SessionManager.getSessionUser(req.session)
-  const { currencyCode: recommendedCurrency } =
-    await GeoIpLookup.promises.getCurrencyCode(
-      (req.query ? req.query.ip : undefined) || req.ip
-    )
-
-  const hasSubscription =
-    await LimitationsManager.promises.userHasV1OrV2Subscription(user)
-
-  const showSkipLink = req.query?.skipLink === 'true'
-
-  if (hasSubscription) {
-    res.redirect('/user/subscription?hasSubscription=true')
-  } else {
-    res.render('subscriptions/interstitial-payment', {
-      title: 'subscribe',
-      itm_content: req.query && req.query.itm_content,
-      itm_campaign: req.query?.itm_campaign,
-      itm_referrer: req.query?.itm_referrer,
-      recommendedCurrency,
-      interstitialPaymentConfig,
-      showSkipLink,
-    })
-  }
-}
-
-async function createSubscription(req, res) {
-  const user = SessionManager.getSessionUser(req.session)
-  const recurlyTokenIds = {
-    billing: req.body.recurly_token_id,
-    threeDSecureActionResult:
-      req.body.recurly_three_d_secure_action_result_token_id,
-  }
-  const { subscriptionDetails } = req.body
-
-  const hasSubscription =
-    await LimitationsManager.promises.userHasV1OrV2Subscription(user)
-
-  if (hasSubscription) {
-    logger.warn({ userId: user._id }, 'user already has subscription')
-    return res.sendStatus(409) // conflict
-  }
-
-  try {
-    await SubscriptionHandler.promises.createSubscription(
-      user,
-      subscriptionDetails,
-      recurlyTokenIds
-    )
-
-    res.sendStatus(201)
-  } catch (err) {
-    if (
-      err instanceof SubscriptionErrors.RecurlyTransactionError ||
-      err instanceof Errors.InvalidError
-    ) {
-      logger.error({ err }, 'recurly transaction error, potential 422')
-      HttpErrorHandler.unprocessableEntity(
-        req,
-        res,
-        err.message,
-        OError.getFullInfo(err).public
-      )
-    } else {
-      logger.warn(
-        { err, userId: user._id },
-        'something went wrong creating subscription'
-      )
-      throw err
-    }
-  }
-}
-
 async function successfulSubscription(req, res) {
-  try {
-    const assignment = await SplitTestHandler.promises.getAssignment(
-      req,
-      res,
-      'subscription-pages-react'
-    )
-    if (assignment.variant === 'active') {
-      await _successfulSubscriptionReact(req, res)
-    } else {
-      await _successfulSubscriptionAngular(req, res)
-    }
-  } catch (error) {
-    logger.warn(
-      { err: error },
-      'failed to get "subscription-pages-react" split test assignment'
-    )
-    await _successfulSubscriptionAngular(req, res)
-  }
-}
-
-/**
- * @param {import("express").Request} req
- * @param {import("express").Response} res
- * @returns {Promise<void>}
- */
-async function _successfulSubscriptionReact(req, res) {
   const user = SessionManager.getSessionUser(req.session)
+
   const { personalSubscription } =
     await SubscriptionViewModelBuilder.promises.buildUsersSubscriptionViewModel(
-      user
+      user,
+      req.i18n.language
     )
 
   const postCheckoutRedirect = req.session?.postCheckoutRedirect
@@ -527,27 +202,72 @@ async function _successfulSubscriptionReact(req, res) {
       title: 'thank_you',
       personalSubscription,
       postCheckoutRedirect,
+      user,
     })
   }
 }
 
-async function _successfulSubscriptionAngular(req, res) {
+async function pauseSubscription(req, res, next) {
   const user = SessionManager.getSessionUser(req.session)
-  const { personalSubscription } =
-    await SubscriptionViewModelBuilder.promises.buildUsersSubscriptionViewModel(
-      user
+  const pauseCycles = req.params.pauseCycles
+  if (!('pauseCycles' in req.params)) {
+    return HttpErrorHandler.badRequest(
+      req,
+      res,
+      `Pausing subscription requires a 'pauseCycles' argument with number of billing cycles to pause for`
+    )
+  }
+  if (pauseCycles < 0) {
+    return HttpErrorHandler.badRequest(
+      req,
+      res,
+      `'pauseCycles' should be a number of billing cycles to pause for, or 0 to cancel a pending pause`
+    )
+  }
+  logger.debug(
+    { userId: user._id },
+    `pausing subscription for ${pauseCycles} billing cycles`
+  )
+  try {
+    await SubscriptionHandler.promises.pauseSubscription(user, pauseCycles)
+
+    const { subscription } =
+      await LimitationsManager.promises.userHasSubscription(user)
+
+    AnalyticsManager.recordEventForUserInBackground(
+      user._id,
+      'subscription-pause-scheduled',
+      {
+        pause_length: pauseCycles,
+        plan_code: subscription?.planCode,
+        subscriptionId: subscription?.recurlySubscription_id,
+      }
     )
 
-  const postCheckoutRedirect = req.session?.postCheckoutRedirect
+    return res.sendStatus(200)
+  } catch (err) {
+    if (err instanceof Error) {
+      OError.tag(err, 'something went wrong pausing subscription', {
+        user_id: user._id,
+      })
+    }
+    return next(err)
+  }
+}
 
-  if (!personalSubscription) {
-    res.redirect('/user/subscription/plans')
-  } else {
-    res.render('subscriptions/successful-subscription', {
-      title: 'thank_you',
-      personalSubscription,
-      postCheckoutRedirect,
-    })
+async function resumeSubscription(req, res, next) {
+  const user = SessionManager.getSessionUser(req.session)
+  logger.debug({ userId: user._id }, `resuming subscription`)
+  try {
+    await SubscriptionHandler.promises.resumeSubscription(user)
+    return res.sendStatus(200)
+  } catch (err) {
+    if (err instanceof Error) {
+      OError.tag(err, 'something went wrong resuming subscription', {
+        user_id: user._id,
+      })
+    }
+    return next(err)
   }
 }
 
@@ -567,42 +287,13 @@ function cancelSubscription(req, res, next) {
   })
 }
 
-async function canceledSubscription(req, res, next) {
-  try {
-    const assignment = await SplitTestHandler.promises.getAssignment(
-      req,
-      res,
-      'subscription-pages-react'
-    )
-    if (assignment.variant === 'active') {
-      await _canceledSubscriptionReact(req, res, next)
-    } else {
-      await _canceledSubscriptionAngular(req, res, next)
-    }
-  } catch (error) {
-    logger.warn(
-      { err: error },
-      'failed to get "subscription-pages-react" split test assignment'
-    )
-    await _canceledSubscriptionAngular(req, res, next)
-  }
-}
-
 /**
- * @param {import("express").Request} req
- * @param {import("express").Response} res
- * @param {import("express").NextFunction} next
  * @returns {Promise<void>}
  */
-function _canceledSubscriptionReact(req, res, next) {
+async function canceledSubscription(req, res, next) {
   return res.render('subscriptions/canceled-subscription-react', {
     title: 'subscription_canceled',
-  })
-}
-
-function _canceledSubscriptionAngular(req, res, next) {
-  return res.render('subscriptions/canceled-subscription', {
-    title: 'subscription_canceled',
+    user: SessionManager.getSessionUser(req.session),
   })
 }
 
@@ -618,6 +309,149 @@ function cancelV1Subscription(req, res, next) {
     }
     res.redirect('/user/subscription')
   })
+}
+
+async function previewAddonPurchase(req, res) {
+  const userId = SessionManager.getLoggedInUserId(req.session)
+  const addOnCode = req.params.addOnCode
+
+  if (addOnCode !== AI_ADD_ON_CODE) {
+    return HttpErrorHandler.notFound(req, res, `Unknown add-on: ${addOnCode}`)
+  }
+
+  const paymentMethod = await RecurlyClient.promises.getPaymentMethod(userId)
+
+  let subscriptionChange
+  try {
+    subscriptionChange =
+      await SubscriptionHandler.promises.previewAddonPurchase(userId, addOnCode)
+  } catch (err) {
+    if (err instanceof DuplicateAddOnError) {
+      return HttpErrorHandler.badRequest(
+        req,
+        res,
+        `Subscription already has add-on "${addOnCode}"`
+      )
+    }
+    throw err
+  }
+
+  const subscription = subscriptionChange.subscription
+  const addOn = await RecurlyClient.promises.getAddOn(
+    subscription.planCode,
+    addOnCode
+  )
+
+  /** @type {SubscriptionChangePreview} */
+  const changePreview = makeChangePreview(
+    {
+      type: 'add-on-purchase',
+      addOn: {
+        code: addOn.code,
+        name: addOn.name,
+      },
+    },
+    subscriptionChange,
+    paymentMethod
+  )
+
+  res.render('subscriptions/preview-change', { changePreview })
+}
+
+async function purchaseAddon(req, res, next) {
+  const user = SessionManager.getSessionUser(req.session)
+  const addOnCode = req.params.addOnCode
+  // currently we only support having a quantity of 1
+  const quantity = 1
+  // currently we only support one add-on, the Ai add-on
+  if (addOnCode !== AI_ADD_ON_CODE) {
+    return res.sendStatus(404)
+  }
+
+  logger.debug({ userId: user._id, addOnCode }, 'purchasing add-ons')
+  try {
+    await SubscriptionHandler.promises.purchaseAddon(
+      user._id,
+      addOnCode,
+      quantity
+    )
+    return res.sendStatus(200)
+  } catch (err) {
+    if (err instanceof DuplicateAddOnError) {
+      HttpErrorHandler.badRequest(
+        req,
+        res,
+        'Your subscription already includes this add-on',
+        { addon: addOnCode }
+      )
+    } else {
+      if (err instanceof Error) {
+        OError.tag(err, 'something went wrong purchasing add-ons', {
+          user_id: user._id,
+          addOnCode,
+        })
+      }
+      return next(err)
+    }
+  }
+}
+
+async function removeAddon(req, res, next) {
+  const user = SessionManager.getSessionUser(req.session)
+  const addOnCode = req.params.addOnCode
+
+  if (addOnCode !== AI_ADD_ON_CODE) {
+    return res.sendStatus(404)
+  }
+
+  logger.debug({ userId: user._id, addOnCode }, 'removing add-ons')
+
+  try {
+    await SubscriptionHandler.promises.removeAddon(user._id, addOnCode)
+    res.sendStatus(200)
+  } catch (err) {
+    if (err instanceof AddOnNotPresentError) {
+      HttpErrorHandler.badRequest(
+        req,
+        res,
+        'Your subscription does not contain the requested add-on',
+        { addon: addOnCode }
+      )
+    } else {
+      if (err instanceof Error) {
+        OError.tag(err, 'something went wrong removing add-ons', {
+          user_id: user._id,
+          addOnCode,
+        })
+      }
+      return next(err)
+    }
+  }
+}
+
+async function previewSubscription(req, res, next) {
+  const planCode = req.query.planCode
+  if (!planCode) {
+    return HttpErrorHandler.notFound(req, res, 'Missing plan code')
+  }
+  const plan = await RecurlyClient.promises.getPlan(planCode)
+  const userId = SessionManager.getLoggedInUserId(req.session)
+  const subscriptionChange =
+    await SubscriptionHandler.promises.previewSubscriptionChange(
+      userId,
+      planCode
+    )
+  const paymentMethod = await RecurlyClient.promises.getPaymentMethod(userId)
+  const changePreview = makeChangePreview(
+    {
+      type: 'premium-subscription',
+      plan: { code: plan.code, name: plan.name },
+    },
+    subscriptionChange,
+    paymentMethod
+  )
+
+  res.render('subscriptions/preview-change', { changePreview })
 }
 
 function updateSubscription(req, res, next) {
@@ -679,6 +513,16 @@ function updateAccountEmailAddress(req, res, next) {
 function reactivateSubscription(req, res, next) {
   const user = SessionManager.getSessionUser(req.session)
   logger.debug({ userId: user._id }, 'reactivating subscription')
+  try {
+    if (req.isManagedGroupAdmin) {
+      // allow admins to reactivate subscriptions
+    } else {
+      // otherwise require the user to have the reactivate-subscription permission
+      req.assertPermission('reactivate-subscription')
+    }
+  } catch (error) {
+    return next(error)
+  }
   SubscriptionHandler.reactivateSubscription(user, function (err) {
     if (err) {
       OError.tag(err, 'something went wrong reactivating subscription', {
@@ -707,6 +551,8 @@ function recurlyCallback(req, res, next) {
       'new_subscription_notification',
       'updated_subscription_notification',
       'expired_subscription_notification',
+      'subscription_paused_notification',
+      'subscription_resumed_notification',
     ].includes(event)
   ) {
     const recurlySubscription = eventData.subscription
@@ -736,68 +582,18 @@ function recurlyCallback(req, res, next) {
   }
 }
 
-function renderUpgradeToAnnualPlanPage(req, res, next) {
-  const user = SessionManager.getSessionUser(req.session)
-  LimitationsManager.userHasV2Subscription(
-    user,
-    function (err, hasSubscription, subscription) {
-      let planName
-      if (err) {
-        return next(err)
-      }
-      const planCode = subscription
-        ? subscription.planCode.toLowerCase()
-        : undefined
-      if ((planCode ? planCode.indexOf('annual') : undefined) !== -1) {
-        planName = 'annual'
-      } else if ((planCode ? planCode.indexOf('student') : undefined) !== -1) {
-        planName = 'student'
-      } else if (
-        (planCode ? planCode.indexOf('collaborator') : undefined) !== -1
-      ) {
-        planName = 'collaborator'
-      }
-      if (hasSubscription) {
-        res.render('subscriptions/upgradeToAnnual', {
-          title: 'Upgrade to annual',
-          planName,
-        })
-      } else {
-        res.redirect('/user/subscription/plans')
-      }
-    }
-  )
-}
-
-function processUpgradeToAnnualPlan(req, res, next) {
-  const user = SessionManager.getSessionUser(req.session)
-  const { planName } = req.body
-  const couponCode = Settings.coupon_codes.upgradeToAnnualPromo[planName]
-  const annualPlanName = `${planName}-annual`
-  logger.debug(
-    { userId: user._id, planName: annualPlanName },
-    'user is upgrading to annual billing with discount'
-  )
-  return SubscriptionHandler.updateSubscription(
-    user,
-    annualPlanName,
-    couponCode,
-    function (err) {
-      if (err) {
-        OError.tag(err, 'error updating subscription', {
-          user_id: user._id,
-        })
-        return next(err)
-      }
-      res.sendStatus(200)
-    }
-  )
-}
-
 async function extendTrial(req, res) {
   const user = SessionManager.getSessionUser(req.session)
   const { subscription } =
-    await LimitationsManager.promises.userHasV2Subscription(user)
+    await LimitationsManager.promises.userHasSubscription(user)
+
+  const allowed = (
+    await Modules.promises.hooks.fire('userCanExtendTrial', user)
+  )?.[0]
+  if (!allowed) {
+    logger.warn({ userId: user._id }, 'user can not extend trial')
+    return res.sendStatus(403)
+  }
 
   try {
     await SubscriptionHandler.promises.extendTrial(subscription, 14)
@@ -843,25 +639,176 @@ async function redirectToHostedPage(req, res) {
   res.redirect(url)
 }
 
+async function getRecommendedCurrency(req, res) {
+  const userId = SessionManager.getLoggedInUserId(req.session)
+  let ip = req.ip
+  if (
+    req.query?.ip &&
+    (await AuthorizationManager.promises.isUserSiteAdmin(userId))
+  ) {
+    ip = req.query.ip
+  }
+  const currencyLookup = await GeoIpLookup.promises.getCurrencyCode(ip)
+  const countryCode = currencyLookup.countryCode
+  const recommendedCurrency = currencyLookup.currencyCode
+
+  let currency = null
+  const queryCurrency = req.query.currency?.toUpperCase()
+  if (queryCurrency && GeoIpLookup.isValidCurrencyParam(queryCurrency)) {
+    currency = queryCurrency
+  } else if (recommendedCurrency) {
+    currency = recommendedCurrency
+  }
+
+  return {
+    currency,
+    recommendedCurrency,
+    countryCode,
+  }
+}
+
+async function getLatamCountryBannerDetails(req, res) {
+  const userId = SessionManager.getLoggedInUserId(req.session)
+  let ip = req.ip
+  if (
+    req.query?.ip &&
+    (await AuthorizationManager.promises.isUserSiteAdmin(userId))
+  ) {
+    ip = req.query.ip
+  }
+  const currencyLookup = await GeoIpLookup.promises.getCurrencyCode(ip)
+  const countryCode = currencyLookup.countryCode
+  const latamCountryBannerDetails = {}
+
+  switch (countryCode) {
+    case `MX`:
+      latamCountryBannerDetails.latamCountryFlag = '🇲🇽'
+      latamCountryBannerDetails.country = 'Mexico'
+      latamCountryBannerDetails.discount = '25%'
+      latamCountryBannerDetails.currency = 'Mexican Pesos'
+      break
+    case `CO`:
+      latamCountryBannerDetails.latamCountryFlag = '🇨🇴'
+      latamCountryBannerDetails.country = 'Colombia'
+      latamCountryBannerDetails.discount = '60%'
+      latamCountryBannerDetails.currency = 'Colombian Pesos'
+      break
+    case `CL`:
+      latamCountryBannerDetails.latamCountryFlag = '🇨🇱'
+      latamCountryBannerDetails.country = 'Chile'
+      latamCountryBannerDetails.discount = '30%'
+      latamCountryBannerDetails.currency = 'Chilean Pesos'
+      break
+    case `PE`:
+      latamCountryBannerDetails.latamCountryFlag = '🇵🇪'
+      latamCountryBannerDetails.country = 'Peru'
+      latamCountryBannerDetails.currency = 'Peruvian Soles'
+      latamCountryBannerDetails.discount = '40%'
+      break
+  }
+
+  return latamCountryBannerDetails
+}
+
+/**
+ * There are two sets of group plans: legacy plans and consolidated plans,
+ * and their naming conventions differ.
+ * This helper method computes the name of legacy group plans to ensure
+ * consistency with the naming of consolidated group plans.
+ *
+ * @param {string} planName
+ * @param {string} planCode
+ * @return {string}
+ */
+
+function getPlanNameForDisplay(planName, planCode) {
+  const match = planCode.match(
+    /^group_(collaborator|professional)_\d+_(enterprise|educational)$/
+  )
+
+  if (!match) return planName
+
+  const [, type, category] = match
+  const prefix = type === 'collaborator' ? 'Standard' : 'Professional'
+  const suffix = category === 'educational' ? ' Educational' : ''
+
+  return `Overleaf ${prefix} Group${suffix}`
+}
+
+/**
+ * Build a subscription change preview for display purposes
+ *
+ * @param {SubscriptionChangeDescription} subscriptionChangeDescription A description of the change for the frontend
+ * @param {RecurlySubscriptionChange} subscriptionChange The subscription change object coming from Recurly
+ * @param {PaymentMethod} paymentMethod The payment method associated to the user
+ * @return {SubscriptionChangePreview}
+ */
+function makeChangePreview(
+  subscriptionChangeDescription,
+  subscriptionChange,
+  paymentMethod
+) {
+  const subscription = subscriptionChange.subscription
+  const nextPlan = PlansLocator.findLocalPlanInSettings(
+    subscriptionChange.nextPlanCode
+  )
+  return {
+    change: subscriptionChangeDescription,
+    currency: subscription.currency,
+    immediateCharge: { ...subscriptionChange.immediateCharge },
+    paymentMethod: paymentMethod.toString(),
+    nextPlan: {
+      annual: nextPlan.annual ?? false,
+    },
+    nextInvoice: {
+      date: subscription.periodEnd.toISOString(),
+      plan: {
+        name: getPlanNameForDisplay(
+          subscriptionChange.nextPlanName,
+          subscriptionChange.nextPlanCode
+        ),
+        amount: subscriptionChange.nextPlanPrice,
+      },
+      addOns: subscriptionChange.nextAddOns.map(addOn => ({
+        code: addOn.code,
+        name: addOn.name,
+        quantity: addOn.quantity,
+        unitAmount: addOn.unitPrice,
+        amount: addOn.preTaxTotal,
+      })),
+      subtotal: subscriptionChange.subtotal,
+      tax: {
+        rate: subscription.taxRate,
+        amount: subscriptionChange.tax,
+      },
+      total: subscriptionChange.total,
+    },
+  }
+}
+
 module.exports = {
-  plansPage: expressify(plansPage),
-  paymentPage: expressify(paymentPage),
   userSubscriptionPage: expressify(userSubscriptionPage),
-  interstitialPaymentPage: expressify(interstitialPaymentPage),
-  createSubscription: expressify(createSubscription),
   successfulSubscription: expressify(successfulSubscription),
   cancelSubscription,
-  canceledSubscription,
+  pauseSubscription,
+  resumeSubscription,
+  canceledSubscription: expressify(canceledSubscription),
   cancelV1Subscription,
+  previewSubscription: expressify(previewSubscription),
   updateSubscription,
   cancelPendingSubscriptionChange,
   updateAccountEmailAddress,
   reactivateSubscription,
   recurlyCallback,
-  renderUpgradeToAnnualPlanPage,
-  processUpgradeToAnnualPlan,
   extendTrial: expressify(extendTrial),
   recurlyNotificationParser,
   refreshUserFeatures: expressify(refreshUserFeatures),
   redirectToHostedPage: expressify(redirectToHostedPage),
+  previewAddonPurchase: expressify(previewAddonPurchase),
+  purchaseAddon,
+  removeAddon,
+  makeChangePreview,
+  getRecommendedCurrency,
+  getLatamCountryBannerDetails,
+  getPlanNameForDisplay,
 }

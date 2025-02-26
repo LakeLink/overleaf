@@ -1,16 +1,15 @@
-const { callbackify } = require('util')
+const { callbackify } = require('node:util')
 const MongoManager = require('./MongoManager').promises
 const Errors = require('./Errors')
 const logger = require('@overleaf/logger')
 const Settings = require('@overleaf/settings')
-const crypto = require('crypto')
-const Streamifier = require('streamifier')
+const crypto = require('node:crypto')
+const { ReadableString } = require('@overleaf/stream-utils')
 const RangeManager = require('./RangeManager')
 const PersistorManager = require('./PersistorManager')
 const pMap = require('p-map')
-
-const Bson = require('bson')
-const BSON = new Bson()
+const { streamToBuffer } = require('./StreamToBuffer').promises
+const { BSON } = require('mongodb-legacy')
 
 const PARALLEL_JOBS = Settings.parallelArchiveJobs
 const UN_ARCHIVE_BATCH_SIZE = Settings.unArchiveBatchSize
@@ -33,6 +32,10 @@ module.exports = {
 }
 
 async function archiveAllDocs(projectId) {
+  if (!_isArchivingEnabled()) {
+    return
+  }
+
   const docIds = await MongoManager.getNonArchivedProjectDocIds(projectId)
   await pMap(docIds, docId => archiveDoc(projectId, docId), {
     concurrency: PARALLEL_JOBS,
@@ -40,6 +43,10 @@ async function archiveAllDocs(projectId) {
 }
 
 async function archiveDoc(projectId, docId) {
+  if (!_isArchivingEnabled()) {
+    return
+  }
+
   const doc = await MongoManager.getDocForArchiving(projectId, docId)
 
   if (!doc) {
@@ -84,7 +91,7 @@ async function archiveDoc(projectId, docId) {
   }
 
   const md5 = crypto.createHash('md5').update(json).digest('hex')
-  const stream = Streamifier.createReadStream(json)
+  const stream = new ReadableString(json)
   await PersistorManager.sendStream(Settings.docstore.bucket, key, stream, {
     sourceMd5: md5,
   })
@@ -92,6 +99,10 @@ async function archiveDoc(projectId, docId) {
 }
 
 async function unArchiveAllDocs(projectId) {
+  if (!_isArchivingEnabled()) {
+    return
+  }
+
   while (true) {
     let docs
     if (Settings.docstore.keepSoftDeletedDocsArchived) {
@@ -126,7 +137,7 @@ async function getDoc(projectId, docId) {
     key
   )
   stream.resume()
-  const buffer = await _streamToBuffer(stream)
+  const buffer = await streamToBuffer(projectId, docId, stream)
   const md5 = crypto.createHash('md5').update(buffer).digest('hex')
   if (sourceMd5 !== md5) {
     throw new Errors.Md5MismatchError('md5 mismatch when downloading doc', {
@@ -136,8 +147,7 @@ async function getDoc(projectId, docId) {
     })
   }
 
-  const json = buffer.toString()
-  return _deserializeArchivedDoc(json)
+  return _deserializeArchivedDoc(buffer)
 }
 
 // get the doc and unarchive it to mongo
@@ -151,6 +161,13 @@ async function unarchiveDoc(projectId, docId) {
     // The doc is already unarchived
     return
   }
+
+  if (!_isArchivingEnabled()) {
+    throw new Error(
+      'found archived doc, but archiving backend is not configured'
+    )
+  }
+
   const archivedDoc = await getDoc(projectId, docId)
   if (archivedDoc.rev == null) {
     // Older archived docs didn't have a rev. Assume that the rev of the
@@ -171,17 +188,8 @@ async function destroyProject(projectId) {
   await Promise.all(tasks)
 }
 
-async function _streamToBuffer(stream) {
-  const chunks = []
-  return new Promise((resolve, reject) => {
-    stream.on('data', chunk => chunks.push(chunk))
-    stream.on('error', reject)
-    stream.on('end', () => resolve(Buffer.concat(chunks)))
-  })
-}
-
-function _deserializeArchivedDoc(json) {
-  const doc = JSON.parse(json)
+function _deserializeArchivedDoc(buffer) {
+  const doc = JSON.parse(buffer)
 
   const result = {}
   if (doc.schema_v === 1 && doc.lines != null) {

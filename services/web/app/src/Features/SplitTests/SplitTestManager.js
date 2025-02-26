@@ -2,6 +2,7 @@ const { SplitTest } = require('../../models/SplitTest')
 const SplitTestUtils = require('./SplitTestUtils')
 const OError = require('@overleaf/o-error')
 const _ = require('lodash')
+const { CacheFlow } = require('cache-flow')
 
 const ALPHA_PHASE = 'alpha'
 const BETA_PHASE = 'beta'
@@ -47,29 +48,47 @@ async function getSplitTests({ name, phase, type, active, archived }) {
     filters.archived = { $ne: true }
   }
   try {
-    return await SplitTest.find(filters).limit(100).exec()
+    return await SplitTest.find(filters)
+      .populate('archivedBy', ['email', 'first_name', 'last_name'])
+      .populate('versions.author', ['email', 'first_name', 'last_name'])
+      .limit(300)
+      .exec()
   } catch (error) {
     throw OError.tag(error, 'Failed to get split tests list')
   }
 }
 
+async function getRuntimeTests() {
+  try {
+    return SplitTest.find({}).lean().exec()
+  } catch (error) {
+    throw OError.tag(error, 'Failed to get active split tests list')
+  }
+}
+
 async function getSplitTest(query) {
   try {
-    return await SplitTest.findOne(query).exec()
+    return await SplitTest.findOne(query)
+      .populate('archivedBy', ['email', 'first_name', 'last_name'])
+      .populate('versions.author', ['email', 'first_name', 'last_name'])
+      .exec()
   } catch (error) {
     throw OError.tag(error, 'Failed to get split test', { query })
   }
 }
 
-async function createSplitTest({
-  name,
-  configuration,
-  badgeInfo = {},
-  info = {},
-}) {
+async function createSplitTest(
+  { name, configuration, badgeInfo = {}, info = {} },
+  userId
+) {
   const stripedVariants = []
   let stripeStart = 0
-  _checkNewVariantsConfiguration([], configuration.variants)
+
+  _checkNewVariantsConfiguration(
+    [],
+    configuration.variants,
+    configuration.analyticsEnabled
+  )
   for (const variant of configuration.variants) {
     stripedVariants.push({
       name: (variant.name || '').trim(),
@@ -89,7 +108,6 @@ async function createSplitTest({
   const splitTest = new SplitTest({
     name: (name || '').trim(),
     description: info.description,
-    expectedEndDate: info.expectedEndDate,
     ticketUrl: info.ticketUrl,
     reportsUrls: info.reportsUrls,
     winningVariant: info.winningVariant,
@@ -102,13 +120,17 @@ async function createSplitTest({
         analyticsEnabled:
           configuration.active && configuration.analyticsEnabled,
         variants: stripedVariants,
+        author: userId,
       },
     ],
+    expectedEndDate: info.expectedEndDate,
+    expectedUplift: info.expectedUplift,
+    requiredCohortSize: info.requiredCohortSize,
   })
   return _saveSplitTest(splitTest)
 }
 
-async function updateSplitTestConfig(name, configuration) {
+async function updateSplitTestConfig({ name, configuration, comment }, userId) {
   const splitTest = await getSplitTest({ name })
   if (!splitTest) {
     throw new OError(`Cannot update split test '${name}': not found`)
@@ -122,7 +144,11 @@ async function updateSplitTestConfig(name, configuration) {
       `Cannot update with different phase - use /switch-to-next-phase endpoint instead`
     )
   }
-  _checkNewVariantsConfiguration(lastVersion.variants, configuration.variants)
+  _checkNewVariantsConfiguration(
+    lastVersion.variants,
+    configuration.variants,
+    configuration.analyticsEnabled
+  )
   const updatedVariants = _updateVariantsWithNewConfiguration(
     lastVersion.variants,
     configuration.variants
@@ -132,8 +158,10 @@ async function updateSplitTestConfig(name, configuration) {
     versionNumber: lastVersion.versionNumber + 1,
     phase: configuration.phase,
     active: configuration.active,
-    analyticsEnabled: configuration.active && configuration.analyticsEnabled,
+    analyticsEnabled: configuration.analyticsEnabled,
     variants: updatedVariants,
+    author: userId,
+    comment,
   })
   return _saveSplitTest(splitTest)
 }
@@ -160,7 +188,46 @@ async function updateSplitTestBadgeInfo(name, badgeInfo) {
   return _saveSplitTest(splitTest)
 }
 
-async function switchToNextPhase(name) {
+async function replaceSplitTests(tests) {
+  _checkEnvIsSafe('replace')
+
+  try {
+    await _deleteSplitTests()
+    return await SplitTest.create(tests)
+  } catch (error) {
+    throw OError.tag(error, 'Failed to replace all split tests', { tests })
+  }
+}
+
+async function mergeSplitTests(incomingTests, overWriteLocal) {
+  _checkEnvIsSafe('merge')
+
+  // this is required as the query returns models, and we need all the items to be objects,
+  //   similar to the ones we recieve as incomingTests
+  const localTests = await SplitTest.find({}).lean().exec()
+
+  let merged
+  // we preserve the state of the local tests (baseTests)
+  // eg: if inTest is in phase 1, and basetest is in phase 2, the merged will be in state 2
+  // therefore, we can have the opposite effect by swapping the order of args (overwrite locals with sent tests)
+  if (overWriteLocal) {
+    merged = _mergeFlags(localTests, incomingTests)
+  } else {
+    merged = _mergeFlags(incomingTests, localTests)
+  }
+
+  try {
+    await _deleteSplitTests()
+    const success = await SplitTest.create(merged)
+    return success
+  } catch (error) {
+    throw OError.tag(error, 'Failed to merge all split tests, merged set was', {
+      merged,
+    })
+  }
+}
+
+async function switchToNextPhase({ name, comment }, userId) {
   const splitTest = await getSplitTest({ name })
   if (!splitTest) {
     throw new OError(
@@ -192,11 +259,17 @@ async function switchToNextPhase(name) {
     variant.rolloutPercent = 0
     variant.rolloutStripes = []
   }
+  lastVersionCopy.author = userId
+  lastVersionCopy.comment = comment
+  lastVersionCopy.createdAt = new Date()
   splitTest.versions.push(lastVersionCopy)
   return _saveSplitTest(splitTest)
 }
 
-async function revertToPreviousVersion(name, versionNumber) {
+async function revertToPreviousVersion(
+  { name, versionNumber, comment },
+  userId
+) {
   const splitTest = await getSplitTest({ name })
   if (!splitTest) {
     throw new OError(
@@ -232,11 +305,13 @@ async function revertToPreviousVersion(name, versionNumber) {
   const previousVersionCopy = previousVersion.toObject()
   previousVersionCopy.versionNumber = lastVersion.versionNumber + 1
   previousVersionCopy.createdAt = new Date()
+  previousVersionCopy.author = userId
+  previousVersionCopy.comment = comment
   splitTest.versions.push(previousVersionCopy)
   return _saveSplitTest(splitTest)
 }
 
-async function archive(name) {
+async function archive(name, userId) {
   const splitTest = await getSplitTest({ name })
   if (!splitTest) {
     throw new OError(`Cannot archive split test with ID '${name}': not found`)
@@ -246,10 +321,23 @@ async function archive(name) {
   }
   splitTest.archived = true
   splitTest.archivedAt = new Date()
+  splitTest.archivedBy = userId
   return _saveSplitTest(splitTest)
 }
 
-function _checkNewVariantsConfiguration(variants, newVariantsConfiguration) {
+async function clearCache() {
+  await CacheFlow.reset('split-test')
+}
+
+function _checkNewVariantsConfiguration(
+  variants,
+  newVariantsConfiguration,
+  analyticsEnabled
+) {
+  if (newVariantsConfiguration?.length > 1 && !analyticsEnabled) {
+    throw new OError(`Gradual rollouts can only have a single variant`)
+  }
+
   const totalRolloutPercentage = _getTotalRolloutPercentage(
     newVariantsConfiguration
   )
@@ -320,7 +408,18 @@ function _getTotalRolloutPercentage(variants) {
 
 async function _saveSplitTest(splitTest) {
   try {
-    return (await splitTest.save()).toObject()
+    const savedSplitTest = await splitTest.save()
+    await savedSplitTest.populate('archivedBy', [
+      'email',
+      'first_name',
+      'last_name',
+    ])
+    await savedSplitTest.populate('versions.author', [
+      'email',
+      'first_name',
+      'last_name',
+    ])
+    return savedSplitTest.toObject()
   } catch (error) {
     throw OError.tag(error, 'Failed to save split test', {
       splitTest: JSON.stringify(splitTest),
@@ -328,9 +427,51 @@ async function _saveSplitTest(splitTest) {
   }
 }
 
+/*
+ * As this is only used for utility in local dev environment, we should make sure this isn't run in
+ * any other deployment environment.
+ */
+function _checkEnvIsSafe(operation) {
+  if (process.env.NODE_ENV !== 'development') {
+    throw new OError(
+      `Attempted to ${operation} all feature flags outside of local env`
+    )
+  }
+}
+
+async function _deleteSplitTests() {
+  _checkEnvIsSafe('delete')
+  let deleted
+
+  try {
+    deleted = await SplitTest.deleteMany({}).exec()
+  } catch (error) {
+    throw new OError('Failed to delete all split tests')
+  }
+
+  if (!deleted.acknowledged) {
+    throw new OError('Error deleting split tests, split tests have not updated')
+  }
+}
+
+function _mergeFlags(incomingTests, baseTests) {
+  // copy all base versions
+  const mergedSet = baseTests.map(test => test)
+  for (const inTest of incomingTests) {
+    // since name is a unique key, we can use it to compare
+    const newFeatureFlag = !mergedSet.some(bTest => bTest.name === inTest.name)
+    // only add new feature flags, instead of overwriting ones in baseTests, meaning baseTests take precendence
+    if (newFeatureFlag) {
+      mergedSet.push(inTest)
+    }
+  }
+  return mergedSet
+}
+
 module.exports = {
   getSplitTest,
   getSplitTests,
+  getRuntimeTests,
   createSplitTest,
   updateSplitTestConfig,
   updateSplitTestInfo,
@@ -338,4 +479,7 @@ module.exports = {
   switchToNextPhase,
   revertToPreviousVersion,
   archive,
+  replaceSplitTests,
+  mergeSplitTests,
+  clearCache,
 }

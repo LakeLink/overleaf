@@ -18,7 +18,7 @@ const contentDisposition = require('content-disposition')
 class MockResponse {
   static initClass() {
     // Added via ExpressLocals.
-    this.prototype.setContentDisposition = sinon.stub()
+    this.prototype.setContentDisposition = sinon.stub() // FIXME: should be reset between each test
   }
 
   constructor() {
@@ -81,6 +81,10 @@ class MockResponse {
     }
   }
 
+  writeHead(status) {
+    this.statusCode = status
+  }
+
   send(status, body) {
     if (arguments.length < 2) {
       if (typeof status !== 'number') {
@@ -133,6 +137,14 @@ class MockResponse {
 
   setHeader(header, value) {
     this.header(header, value)
+  }
+
+  appendHeader(header, value) {
+    if (this.headers[header]) {
+      this.headers[header] += `, ${value}`
+    } else {
+      this.headers[header] = value
+    }
   }
 
   setTimeout(timout) {

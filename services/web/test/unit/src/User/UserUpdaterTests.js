@@ -2,7 +2,7 @@ const { setTimeout } = require('timers/promises')
 const SandboxedModule = require('sandboxed-module')
 const path = require('path')
 const sinon = require('sinon')
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 const tk = require('timekeeper')
 const { expect } = require('chai')
 const { normalizeQuery } = require('../../../../app/src/Features/Helpers/Mongo')
@@ -18,7 +18,7 @@ describe('UserUpdater', function () {
     tk.freeze(Date.now())
 
     this.user = {
-      _id: ObjectId(),
+      _id: new ObjectId(),
       name: 'bob',
       email: 'hello@world.com',
       emails: [{ email: 'hello@world.com' }],
@@ -31,9 +31,7 @@ describe('UserUpdater', function () {
     }
     this.mongodb = {
       db: this.db,
-      ObjectId(id) {
-        return id
-      },
+      ObjectId,
     }
 
     this.UserGetter = {
@@ -67,7 +65,7 @@ describe('UserUpdater', function () {
       },
     }
     this.AnalyticsManager = {
-      recordEventForUser: sinon.stub(),
+      recordEventForUserInBackground: sinon.stub(),
     }
     this.InstitutionsAPI = {
       promises: {
@@ -109,6 +107,20 @@ describe('UserUpdater', function () {
       },
     }
 
+    this.Modules = {
+      promises: {
+        hooks: {
+          fire: sinon.stub().resolves([]),
+        },
+      },
+    }
+
+    this.UserSessionsManager = {
+      promises: {
+        removeSessionsFromRedis: sinon.stub().resolves(),
+      },
+    }
+
     this.UserUpdater = SandboxedModule.require(MODULE_PATH, {
       requires: {
         '../Helpers/Mongo': { normalizeQuery },
@@ -126,6 +138,8 @@ describe('UserUpdater', function () {
         '../../Errors/Errors': Errors,
         '../Subscription/SubscriptionLocator': this.SubscriptionLocator,
         '../Notifications/NotificationsBuilder': this.NotificationsBuilder,
+        '../../infrastructure/Modules': this.Modules,
+        './UserSessionsManager': this.UserSessionsManager,
       },
     })
 
@@ -199,7 +213,7 @@ describe('UserUpdater', function () {
 
     it('adds the new email', function () {
       expect(this.db.users.updateOne).to.have.been.calledWith(
-        { _id: this.user._id },
+        { _id: this.user._id, 'emails.email': { $ne: this.newEmail } },
         {
           $push: {
             emails: sinon.match({ email: this.newEmail }),
@@ -281,7 +295,7 @@ describe('UserUpdater', function () {
         .reverse()
         .join('')
       this.db.users.updateOne.should.have.been.calledWith(
-        { _id: this.user._id },
+        { _id: this.user._id, 'emails.email': { $ne: this.newEmail } },
         {
           $push: {
             emails: {
@@ -1054,6 +1068,59 @@ describe('UserUpdater', function () {
           { _id: this.user._id }
         )
       })
+    })
+  })
+
+  describe('suspendUser', function () {
+    beforeEach(function () {
+      this.auditLog = {
+        initiatorId: 'abc123',
+        ip: '0.0.0.0',
+      }
+    })
+
+    it('should suspend the user', async function () {
+      await this.UserUpdater.promises.suspendUser(this.user._id, this.auditLog)
+      expect(this.db.users.updateOne).to.have.been.calledWith(
+        { _id: this.user._id, suspended: { $ne: true } },
+        { $set: { suspended: true } }
+      )
+    })
+
+    it('should remove sessions from redis', async function () {
+      await this.UserUpdater.promises.suspendUser(this.user._id, this.auditLog)
+      expect(
+        this.UserSessionsManager.promises.removeSessionsFromRedis
+      ).to.have.been.calledWith({ _id: this.user._id })
+    })
+
+    it('should log the suspension to the audit log', async function () {
+      await this.UserUpdater.promises.suspendUser(this.user._id, this.auditLog)
+      expect(
+        this.UserAuditLogHandler.promises.addEntry
+      ).to.have.been.calledWith(
+        this.user._id,
+        'account-suspension',
+        this.auditLog.initiatorId,
+        this.auditLog.ip,
+        {}
+      )
+    })
+
+    it('should fire the removeDropbox hook', async function () {
+      await this.UserUpdater.promises.suspendUser(this.user._id, this.auditLog)
+      expect(this.Modules.promises.hooks.fire).to.have.been.calledWith(
+        'removeDropbox',
+        this.user._id,
+        'account-suspension'
+      )
+    })
+
+    it('should handle not finding a record to update', async function () {
+      this.db.users.updateOne.resolves({ matchedCount: 0 })
+      await expect(
+        this.UserUpdater.promises.suspendUser(this.user._id, this.auditLog)
+      ).to.be.rejectedWith(Errors.NotFoundError)
     })
   })
 })

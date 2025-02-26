@@ -1,9 +1,9 @@
-const Path = require('path')
+const Path = require('node:path')
 const SandboxedModule = require('sandboxed-module')
 const { expect } = require('chai')
 const sinon = require('sinon')
 
-const MODULE_PATH = require('path').join(
+const MODULE_PATH = require('node:path').join(
   __dirname,
   '../../../app/js/CompileManager'
 )
@@ -35,6 +35,7 @@ describe('CompileManager', function () {
         build: 1234,
       },
     ]
+    this.buildId = 'build-id-123'
     this.commandOutput = 'Dummy output'
     this.compileBaseDir = '/compile/dir'
     this.outputBaseDir = '/output/dir'
@@ -53,12 +54,17 @@ describe('CompileManager', function () {
     }
     this.OutputFileFinder = {
       promises: {
-        findOutputFiles: sinon.stub().resolves(this.outputFiles),
+        findOutputFiles: sinon.stub().resolves({
+          outputFiles: this.outputFiles,
+          allEntries: this.outputFiles.map(f => f.path).concat(['main.tex']),
+        }),
       },
     }
     this.OutputCacheManager = {
       promises: {
-        saveOutputFiles: sinon.stub().resolves(this.buildFiles),
+        saveOutputFiles: sinon
+          .stub()
+          .resolves({ outputFiles: this.buildFiles, buildId: this.buildId }),
       },
     }
     this.Settings = {
@@ -82,7 +88,15 @@ describe('CompileManager', function () {
     }
     this.CommandRunner = {
       promises: {
-        run: sinon.stub().resolves({ stdout: this.commandOutput }),
+        run: sinon.stub().callsFake((_1, _2, _3, _4, _5, _6, compileGroup) => {
+          if (compileGroup === 'synctex') {
+            return Promise.resolve({ stdout: this.commandOutput })
+          } else {
+            return Promise.resolve({
+              stdout: 'Encoding: ascii\nWords in text: 2',
+            })
+          }
+        }),
       },
     }
     this.DraftModeManager = {
@@ -96,10 +110,10 @@ describe('CompileManager', function () {
       },
     }
     this.lock = {
-      release: sinon.stub().resolves(),
+      release: sinon.stub(),
     }
     this.LockManager = {
-      acquire: sinon.stub().resolves(this.lock),
+      acquire: sinon.stub().returns(this.lock),
     }
     this.SynctexOutputParser = {
       parseViewOutput: sinon.stub(),
@@ -116,14 +130,15 @@ describe('CompileManager', function () {
       lstat: sinon.stub(),
       stat: sinon.stub(),
       readFile: sinon.stub(),
+      mkdir: sinon.stub().resolves(),
+      rm: sinon.stub().resolves(),
+      unlink: sinon.stub().resolves(),
+      rmdir: sinon.stub().resolves(),
     }
     this.fsPromises.lstat.withArgs(this.compileDir).resolves(this.dirStats)
     this.fsPromises.stat
       .withArgs(Path.join(this.compileDir, 'output.synctex.gz'))
       .resolves(this.fileStats)
-    this.fse = {
-      ensureDir: sinon.stub().resolves(),
-    }
 
     this.CompileManager = SandboxedModule.require(MODULE_PATH, {
       requires: {
@@ -132,6 +147,12 @@ describe('CompileManager', function () {
         './OutputFileFinder': this.OutputFileFinder,
         './OutputCacheManager': this.OutputCacheManager,
         '@overleaf/settings': this.Settings,
+        '@overleaf/metrics': {
+          inc: sinon.stub(),
+          timing: sinon.stub(),
+          gauge: sinon.stub(),
+          Timer: sinon.stub().returns({ done: sinon.stub() }),
+        },
         child_process: this.child_process,
         './CommandRunner': this.CommandRunner,
         './DraftModeManager': this.DraftModeManager,
@@ -139,7 +160,6 @@ describe('CompileManager', function () {
         './LockManager': this.LockManager,
         './SynctexOutputParser': this.SynctexOutputParser,
         'fs/promises': this.fsPromises,
-        'fs-extra': this.fse,
       },
     })
   })
@@ -158,20 +178,24 @@ describe('CompileManager', function () {
         compileGroup: (this.compileGroup = 'compile-group'),
         stopOnFirstError: false,
       }
-      this.env = {}
+      this.env = {
+        OVERLEAF_PROJECT_ID: this.projectId,
+      }
     })
 
     describe('when the project is locked', function () {
       beforeEach(async function () {
         const error = new Error('locked')
-        this.LockManager.acquire.rejects(error)
+        this.LockManager.acquire.throws(error)
         await expect(
           this.CompileManager.promises.doCompileWithLock(this.request)
         ).to.be.rejectedWith(error)
       })
 
       it('should ensure that the compile directory exists', function () {
-        expect(this.fse.ensureDir).to.have.been.calledWith(this.compileDir)
+        expect(this.fsPromises.mkdir).to.have.been.calledWith(this.compileDir, {
+          recursive: true,
+        })
       })
 
       it('should not run LaTeX', function () {
@@ -187,7 +211,9 @@ describe('CompileManager', function () {
       })
 
       it('should ensure that the compile directory exists', function () {
-        expect(this.fse.ensureDir).to.have.been.calledWith(this.compileDir)
+        expect(this.fsPromises.mkdir).to.have.been.calledWith(this.compileDir, {
+          recursive: true,
+        })
       })
 
       it('should write the resources to disk', function () {
@@ -264,6 +290,7 @@ describe('CompileManager', function () {
               CHKTEX_OPTIONS: '-nall -e9 -e10 -w15 -w16',
               CHKTEX_EXIT_ON_ERROR: 1,
               CHKTEX_ULIMIT_OPTIONS: '-t 5 -v 64000',
+              OVERLEAF_PROJECT_ID: this.projectId,
             },
             compileGroup: this.compileGroup,
             stopOnFirstError: this.request.stopOnFirstError,
@@ -312,12 +339,15 @@ describe('CompileManager', function () {
       })
 
       it('should clear the compile directory', function () {
-        expect(this.child_process.execFile).to.have.been.calledWith('rm', [
-          '-r',
-          '-f',
-          '--',
-          this.compileDir,
-        ])
+        for (const { path } of this.buildFiles) {
+          expect(this.fsPromises.unlink).to.have.been.calledWith(
+            this.compileDir + '/' + path
+          )
+        }
+        expect(this.fsPromises.unlink).to.have.been.calledWith(
+          this.compileDir + '/main.tex'
+        )
+        expect(this.fsPromises.rmdir).to.have.been.calledWith(this.compileDir)
       })
     })
 
@@ -332,50 +362,29 @@ describe('CompileManager', function () {
       })
 
       it('should clear the compile directory', function () {
-        expect(this.child_process.execFile).to.have.been.calledWith('rm', [
-          '-r',
-          '-f',
-          '--',
-          this.compileDir,
-        ])
+        for (const { path } of this.buildFiles) {
+          expect(this.fsPromises.unlink).to.have.been.calledWith(
+            this.compileDir + '/' + path
+          )
+        }
+        expect(this.fsPromises.unlink).to.have.been.calledWith(
+          this.compileDir + '/main.tex'
+        )
+        expect(this.fsPromises.rmdir).to.have.been.calledWith(this.compileDir)
       })
     })
   })
 
   describe('clearProject', function () {
-    describe('successfully', function () {
-      beforeEach(async function () {
-        await this.CompileManager.promises.clearProject(
-          this.projectId,
-          this.userId
-        )
-      })
+    it('should clear the compile directory', async function () {
+      await this.CompileManager.promises.clearProject(
+        this.projectId,
+        this.userId
+      )
 
-      it('should remove the project directory', function () {
-        expect(this.child_process.execFile).to.have.been.calledWith('rm', [
-          '-r',
-          '-f',
-          '--',
-          this.compileDir,
-        ])
-      })
-    })
-
-    describe('with a non-success status code', function () {
-      beforeEach(async function () {
-        this.child_process.execFile.yields(new Error('oops'))
-        await expect(
-          this.CompileManager.promises.clearProject(this.projectId, this.userId)
-        ).to.be.rejected
-      })
-
-      it('should remove the project directory', function () {
-        expect(this.child_process.execFile).to.have.been.calledWith('rm', [
-          '-r',
-          '-f',
-          '--',
-          this.compileDir,
-        ])
+      expect(this.fsPromises.rm).to.have.been.calledWith(this.compileDir, {
+        force: true,
+        recursive: true,
       })
     })
   })
@@ -549,11 +558,6 @@ describe('CompileManager', function () {
 
   describe('wordcount', function () {
     beforeEach(async function () {
-      this.stdout = 'Encoding: ascii\nWords in text: 2'
-      this.fsPromises.readFile
-        .withArgs(Path.join(this.compileDir, 'main.tex.wc'))
-        .resolves(this.stdout)
-
       this.timeout = 60 * 1000
       this.filename = 'main.tex'
       this.image = 'example.com/image'
@@ -568,13 +572,7 @@ describe('CompileManager', function () {
 
     it('should run the texcount command', function () {
       this.filePath = `$COMPILE_DIR/${this.filename}`
-      this.command = [
-        'texcount',
-        '-nocol',
-        '-inc',
-        this.filePath,
-        `-out=${this.filePath}.wc`,
-      ]
+      this.command = ['texcount', '-nocol', '-inc', this.filePath]
 
       expect(this.CommandRunner.promises.run).to.have.been.calledWith(
         `${this.projectId}-${this.userId}`,

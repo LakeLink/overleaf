@@ -12,8 +12,9 @@ import {
   professionalUserData,
   unconfirmedUserData,
   fakeUsersData,
+  unconfirmedCommonsUserData,
 } from '../fixtures/test-user-email-data'
-import localStorage from '../../../../../frontend/js/infrastructure/local-storage'
+import localStorage from '@/infrastructure/local-storage'
 
 const renderUserEmailsContext = () =>
   renderHook(() => useUserEmailsContext(), {
@@ -53,6 +54,7 @@ describe('UserEmailContext', function () {
         'bar@overleaf.com': confirmedUserData,
         'baz@overleaf.com': unconfirmedUserData,
         'foo@overleaf.com': professionalUserData,
+        'qux@overleaf.com': unconfirmedCommonsUserData,
       })
       expect(result.current.state.data.linkedInstitutionIds).to.have.lengthOf(0)
 

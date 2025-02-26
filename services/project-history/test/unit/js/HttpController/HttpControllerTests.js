@@ -1,6 +1,7 @@
 import sinon from 'sinon'
 import { strict as esmock } from 'esmock'
-import { ObjectId } from 'mongodb'
+import mongodb from 'mongodb-legacy'
+const { ObjectId } = mongodb
 
 const MODULE_PATH = '../../../../app/js/HttpController.js'
 
@@ -44,6 +45,7 @@ describe('HttpController', function () {
     this.LabelsManager = {
       createLabel: sinon.stub(),
       deleteLabel: sinon.stub().yields(),
+      deleteLabelForUser: sinon.stub().yields(),
       getLabels: sinon.stub(),
     }
     this.HistoryApiManager = {
@@ -52,8 +54,10 @@ describe('HttpController', function () {
     this.RetryManager = {}
     this.FlushManager = {}
     this.request = {}
+    this.pipeline = sinon.stub()
     this.HttpController = await esmock(MODULE_PATH, {
       request: this.request,
+      stream: { pipeline: this.pipeline },
       '../../../../app/js/UpdatesProcessor.js': this.UpdatesProcessor,
       '../../../../app/js/SummarizedUpdatesManager.js':
         this.SummarizedUpdatesManager,
@@ -72,6 +76,7 @@ describe('HttpController', function () {
     })
     this.pathname = 'doc-id-123'
     this.projectId = new ObjectId().toString()
+    this.projectOwnerId = new ObjectId().toString()
     this.next = sinon.stub()
     this.userId = new ObjectId().toString()
     this.now = Date.now()
@@ -79,16 +84,18 @@ describe('HttpController', function () {
       json: sinon.stub(),
       send: sinon.stub(),
       sendStatus: sinon.stub(),
+      setHeader: sinon.stub(),
     }
   })
 
   describe('getProjectBlob', function () {
     beforeEach(function () {
       this.blobHash = 'abcd'
-      this.stream = { pipe: sinon.stub() }
+      this.stream = {}
+      this.historyId = 1337
       this.HistoryStoreManager.getProjectBlobStream.yields(null, this.stream)
       this.HttpController.getProjectBlob(
-        { params: { project_id: this.projectId, hash: this.blobHash } },
+        { params: { history_id: this.historyId, hash: this.blobHash } },
         this.res,
         this.next
       )
@@ -96,15 +103,22 @@ describe('HttpController', function () {
 
     it('should get a blob stream', function () {
       this.HistoryStoreManager.getProjectBlobStream
-        .calledWith(this.projectId, this.blobHash)
+        .calledWith(this.historyId, this.blobHash)
         .should.equal(true)
-      this.stream.pipe.calledWith(this.res).should.equal(true)
+      this.pipeline.should.have.been.calledWith(this.stream, this.res)
+    })
+
+    it('should set caching header', function () {
+      this.res.setHeader.should.have.been.calledWith(
+        'Cache-Control',
+        'private, max-age=86400'
+      )
     })
   })
 
   describe('initializeProject', function () {
     beforeEach(function () {
-      this.historyId = ObjectId().toString()
+      this.historyId = new ObjectId().toString()
       this.req = { body: { historyId: this.historyId } }
       this.HistoryStoreManager.initializeProject.yields(null, this.historyId)
       this.HttpController.initializeProject(this.req, this.res, this.next)
@@ -308,7 +322,7 @@ describe('HttpController', function () {
         },
       }
       this.res = { mock: 'res' }
-      this.stream = { pipe: sinon.stub() }
+      this.stream = {}
       this.SnapshotManager.getFileSnapshotStream.yields(null, this.stream)
       this.HttpController.getFileSnapshot(this.req, this.res, this.next)
     })
@@ -322,7 +336,7 @@ describe('HttpController', function () {
     })
 
     it('should pipe the returned stream into the response', function () {
-      this.stream.pipe.calledWith(this.res).should.equal(true)
+      this.pipeline.should.have.been.calledWith(this.stream, this.res)
     })
   })
 
@@ -398,13 +412,13 @@ describe('HttpController', function () {
       this.req = {
         params: {
           project_id: this.projectId,
-          user_id: this.userId,
         },
         body: {
           version: (this.version = 'label-1'),
           comment: (this.comment = 'a comment'),
           created_at: (this.created_at = Date.now().toString()),
           validate_exists: true,
+          user_id: this.userId,
         },
       }
       this.label = { _id: new ObjectId() }
@@ -470,21 +484,43 @@ describe('HttpController', function () {
     })
   })
 
-  describe('deleteLabel', function () {
+  describe('deleteLabelForUser', function () {
     beforeEach(function () {
       this.req = {
         params: {
           project_id: this.projectId,
           user_id: this.userId,
-          label_id: (this.label_id = ObjectId()),
+          label_id: (this.label_id = new ObjectId()),
+        },
+      }
+      this.HttpController.deleteLabelForUser(this.req, this.res, this.next)
+    })
+
+    it('should delete a label for a project', function () {
+      this.LabelsManager.deleteLabelForUser
+        .calledWith(this.projectId, this.userId, this.label_id)
+        .should.equal(true)
+    })
+
+    it('should return 204', function () {
+      this.res.sendStatus.calledWith(204).should.equal(true)
+    })
+  })
+
+  describe('deleteLabel', function () {
+    beforeEach(function () {
+      this.req = {
+        params: {
+          project_id: this.projectId,
+          label_id: (this.label_id = new ObjectId()),
         },
       }
       this.HttpController.deleteLabel(this.req, this.res, this.next)
     })
 
-    it('should create a label for a project', function () {
+    it('should delete a label for a project', function () {
       this.LabelsManager.deleteLabel
-        .calledWith(this.projectId, this.userId, this.label_id)
+        .calledWith(this.projectId, this.label_id)
         .should.equal(true)
     })
 

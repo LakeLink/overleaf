@@ -9,7 +9,6 @@
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
  */
 const app = require('../../../../app')
-require('@overleaf/logger').logger.level('fatal')
 
 module.exports = {
   running: false,
@@ -26,7 +25,7 @@ module.exports = {
     }
     this.initing = true
     this.callbacks.push(callback)
-    app.listen(3003, 'localhost', error => {
+    app.listen(3003, '127.0.0.1', error => {
       if (error != null) {
         throw error
       }

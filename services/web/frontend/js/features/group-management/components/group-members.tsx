@@ -1,135 +1,41 @@
-import { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { Button, Col, Form, FormControl, Row } from 'react-bootstrap'
 import { Trans, useTranslation } from 'react-i18next'
-import { User } from '../../../../../types/group-management/user'
-import {
-  deleteJSON,
-  FetchError,
-  postJSON,
-} from '../../../infrastructure/fetch-json'
 import MaterialIcon from '../../../shared/components/material-icon'
-import Tooltip from '../../../shared/components/tooltip'
 import useWaitForI18n from '../../../shared/hooks/use-wait-for-i18n'
 import getMeta from '../../../utils/meta'
-import { parseEmails } from '../utils/emails'
-import ErrorAlert, { APIError } from './error-alert'
-import GroupMemberRow from './group-member-row'
-import useUserSelection from '../hooks/use-user-selection'
+import { useGroupMembersContext } from '../context/group-members-context'
+import ErrorAlert from './error-alert'
+import MembersList from './members-table/members-list'
+import { useFeatureFlag } from '@/shared/context/split-test-context'
+import { sendMB } from '../../../infrastructure/event-tracking'
 
 export default function GroupMembers() {
   const { isReady } = useWaitForI18n()
   const { t } = useTranslation()
-
   const {
     users,
-    setUsers,
     selectedUsers,
-    selectAllUsers,
-    unselectAllUsers,
-    selectUser,
-    unselectUser,
-  } = useUserSelection(getMeta('ol-users', []))
-
+    addMembers,
+    removeMembers,
+    removeMemberLoading,
+    removeMemberError,
+    inviteMemberLoading,
+    inviteError,
+    paths,
+  } = useGroupMembersContext()
   const [emailString, setEmailString] = useState<string>('')
-  const [inviteUserInflightCount, setInviteUserInflightCount] = useState(0)
-  const [inviteError, setInviteError] = useState<APIError>()
-  const [removeMemberInflightCount, setRemoveMemberInflightCount] = useState(0)
-  const [removeMemberError, setRemoveMemberError] = useState<APIError>()
-
-  const groupId: string = getMeta('ol-groupId')
-  const groupName: string = getMeta('ol-groupName')
-  const groupSize: number = getMeta('ol-groupSize')
-
-  const paths = useMemo(
-    () => ({
-      addMember: `/manage/groups/${groupId}/invites`,
-      removeMember: `/manage/groups/${groupId}/user`,
-      removeInvite: `/manage/groups/${groupId}/invites`,
-      exportMembers: `/manage/groups/${groupId}/members/export`,
-    }),
-    [groupId]
+  const isFlexibleGroupLicensingFeatureFlagEnabled = useFeatureFlag(
+    'flexible-group-licensing'
   )
 
-  const addMembers = useCallback(
-    e => {
-      e.preventDefault()
-      setInviteError(undefined)
-      const emails = parseEmails(emailString)
-      ;(async () => {
-        for (const email of emails) {
-          setInviteUserInflightCount(count => count + 1)
-          try {
-            const data = await postJSON<{ user: User }>(paths.addMember, {
-              body: {
-                email,
-              },
-            })
-            if (data.user) {
-              const alreadyListed = users.find(
-                user => user.email === data.user.email
-              )
-              if (!alreadyListed) {
-                setUsers(users => [...users, data.user])
-              }
-            }
-            setEmailString('')
-          } catch (error: unknown) {
-            console.error(error)
-            setInviteError((error as FetchError)?.data?.error || {})
-          }
-          setInviteUserInflightCount(count => count - 1)
-        }
-      })()
-    },
-    [emailString, paths.addMember, users, setUsers]
-  )
-
-  const removeMembers = useCallback(
-    e => {
-      e.preventDefault()
-      setRemoveMemberError(undefined)
-      ;(async () => {
-        for (const user of selectedUsers) {
-          let url
-          if (paths.removeInvite && user.invite && user._id == null) {
-            url = `${paths.removeInvite}/${encodeURIComponent(user.email)}`
-          } else if (paths.removeMember && user._id) {
-            url = `${paths.removeMember}/${user._id}`
-          } else {
-            return
-          }
-          setRemoveMemberInflightCount(count => count + 1)
-          try {
-            await deleteJSON(url, {})
-            setUsers(users => users.filter(u => u !== user))
-            unselectUser(user)
-          } catch (error: unknown) {
-            console.error(error)
-            setRemoveMemberError((error as FetchError)?.data?.error || {})
-          }
-          setRemoveMemberInflightCount(count => count - 1)
-        }
-      })()
-    },
-    [
-      selectedUsers,
-      unselectUser,
-      setUsers,
-      paths.removeInvite,
-      paths.removeMember,
-    ]
-  )
-
-  const handleSelectAllClick = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.checked) {
-        selectAllUsers()
-      } else {
-        unselectAllUsers()
-      }
-    },
-    [selectAllUsers, unselectAllUsers]
-  )
+  const groupId = getMeta('ol-groupId')
+  const groupName = getMeta('ol-groupName')
+  const groupSize = getMeta('ol-groupSize')
+  const canUseFlexibleLicensing = getMeta('ol-canUseFlexibleLicensing')
+  const canUseAddSeatsFeature = getMeta('ol-canUseAddSeatsFeature')
+  const isFlexibleGroupLicensing =
+    canUseFlexibleLicensing && isFlexibleGroupLicensingFeatureFlagEnabled
 
   const handleEmailsChange = useCallback(
     e => {
@@ -140,6 +46,54 @@ export default function GroupMembers() {
 
   if (!isReady) {
     return null
+  }
+
+  const onAddMembersSubmit = (e: React.FormEvent<Form>) => {
+    e.preventDefault()
+    addMembers(emailString)
+  }
+
+  const groupSizeDetails = () => {
+    if (isFlexibleGroupLicensing) {
+      return (
+        <small data-testid="group-size-details">
+          <strong>
+            {users.length === 1
+              ? t('you_have_1_user_and_your_plan_supports_up_to_y', {
+                  groupSize,
+                })
+              : t('you_have_x_users_and_your_plan_supports_up_to_y', {
+                  addedUsersSize: users.length,
+                  groupSize,
+                })}
+          </strong>
+          {canUseAddSeatsFeature && (
+            <>
+              {' '}
+              <a
+                href="/user/subscription/group/add-users"
+                rel="noreferrer noopener"
+                onClick={() => sendMB('flex-add-users')}
+              >
+                {t('add_more_users')}.
+              </a>
+            </>
+          )}
+        </small>
+      )
+    }
+
+    return (
+      <small>
+        <Trans
+          i18nKey="you_have_added_x_of_group_size_y"
+          components={[<strong />, <strong />]} // eslint-disable-line react/jsx-key
+          values={{ addedUsersSize: users.length, groupSize }}
+          shouldUnescape
+          tOptions={{ interpolation: { escapeValue: true } }}
+        />
+      </small>
+    )
   }
 
   return (
@@ -158,16 +112,8 @@ export default function GroupMembers() {
           <div className="card">
             <div className="page-header">
               <div className="pull-right">
-                {selectedUsers.length === 0 && (
-                  <small>
-                    <Trans
-                      i18nKey="you_have_added_x_of_group_size_y"
-                      components={[<strong />, <strong />]} // eslint-disable-line react/jsx-key
-                      values={{ addedUsersSize: users.length, groupSize }}
-                    />
-                  </small>
-                )}
-                {removeMemberInflightCount > 0 ? (
+                {selectedUsers.length === 0 && groupSizeDetails()}
+                {removeMemberLoading ? (
                   <Button bsStyle="danger" disabled>
                     {t('removing')}&hellip;
                   </Button>
@@ -185,70 +131,21 @@ export default function GroupMembers() {
             </div>
             <div className="row-spaced-small">
               <ErrorAlert error={removeMemberError} />
-              <ul className="list-unstyled structured-list">
-                <li className="container-fluid">
-                  <Row>
-                    <Col xs={4}>
-                      <label htmlFor="select-all" className="sr-only">
-                        {t('select_all')}
-                      </label>
-                      <input
-                        className="select-all"
-                        id="select-all"
-                        type="checkbox"
-                        onChange={handleSelectAllClick}
-                        checked={selectedUsers.length === users.length}
-                      />
-                      <span className="header">{t('email')}</span>
-                    </Col>
-                    <Col xs={4}>
-                      <span className="header">{t('name')}</span>
-                    </Col>
-                    <Col xs={2}>
-                      <Tooltip
-                        id="last-active-tooltip"
-                        description={t('last_active_description')}
-                        overlayProps={{
-                          placement: 'left',
-                        }}
-                      >
-                        <span className="header">
-                          {t('last_active')}
-                          <sup>(?)</sup>
-                        </span>
-                      </Tooltip>
-                    </Col>
-                    <Col xs={2}>
-                      <span className="header">{t('accepted_invite')}</span>
-                    </Col>
-                  </Row>
-                </li>
-                {users.length === 0 && (
-                  <li>
-                    <Row>
-                      <Col md={12} className="text-centered">
-                        <small>{t('no_members')}</small>
-                      </Col>
-                    </Row>
-                  </li>
-                )}
-                {users.map((user: any) => (
-                  <GroupMemberRow
-                    key={user.email}
-                    user={user}
-                    selectUser={selectUser}
-                    unselectUser={unselectUser}
-                    selected={selectedUsers.includes(user)}
-                  />
-                ))}
-              </ul>
+              <MembersList groupId={groupId} />
             </div>
             <hr />
             {users.length < groupSize && (
-              <div>
-                <p className="small">{t('add_more_members')}</p>
+              <div
+                className="add-more-members-form"
+                data-testid="add-more-members-form"
+              >
+                <p className="small">
+                  {isFlexibleGroupLicensing
+                    ? t('invite_more_members')
+                    : t('add_more_members')}
+                </p>
                 <ErrorAlert error={inviteError} />
-                <Form horizontal onSubmit={addMembers} className="form">
+                <Form horizontal onSubmit={onAddMembersSubmit} className="form">
                   <Row>
                     <Col xs={6}>
                       <FormControl
@@ -260,13 +157,16 @@ export default function GroupMembers() {
                       />
                     </Col>
                     <Col xs={4}>
-                      {inviteUserInflightCount > 0 ? (
+                      {inviteMemberLoading ? (
                         <Button bsStyle="primary" disabled>
-                          {t('adding')}&hellip;
+                          {isFlexibleGroupLicensing
+                            ? t('inviting')
+                            : t('adding')}
+                          &hellip;
                         </Button>
                       ) : (
-                        <Button bsStyle="primary" onClick={addMembers}>
-                          {t('add')}
+                        <Button bsStyle="primary" onClick={onAddMembersSubmit}>
+                          {isFlexibleGroupLicensing ? t('invite') : t('add')}
                         </Button>
                       )}
                     </Col>

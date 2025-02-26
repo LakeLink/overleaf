@@ -1,19 +1,7 @@
-/* eslint-disable
-    max-len,
-*/
-// TODO: This file was created by bulk-decaffeinate.
-// Fix any style issues and re-enable lint.
-/*
- * decaffeinate suggestions:
- * DS101: Remove unnecessary use of Array.from
- * DS102: Remove unnecessary code created because of implicit returns
- * DS205: Consider reworking code to avoid use of IIFEs
- * DS207: Consider shorter variations of null checks
- * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
- */
 let ProjectEditorHandler
-const _ = require('underscore')
+const _ = require('lodash')
 const Path = require('path')
+const Features = require('../../infrastructure/Features')
 
 function mergeDeletedDocs(a, b) {
   const docIdsInA = new Set(a.map(doc => doc._id.toString()))
@@ -36,6 +24,7 @@ module.exports = ProjectEditorHandler = {
       _id: project._id,
       name: project.name,
       rootDoc_id: project.rootDoc_id,
+      mainBibliographyDoc_id: project.mainBibliographyDoc_id,
       rootFolder: [this.buildFolderModelView(project.rootFolder[0])],
       publicAccesLevel: project.publicAccesLevel,
       dropboxEnabled: !!project.existsInDropbox,
@@ -48,20 +37,13 @@ module.exports = ProjectEditorHandler = {
         deletedDocsFromDocstore
       ),
       members: [],
-      invites,
-      tokens: project.tokens,
+      invites: this.buildInvitesView(invites),
       imageName:
         project.imageName != null
           ? Path.basename(project.imageName)
           : undefined,
     }
 
-    if (result.invites == null) {
-      result.invites = []
-    }
-    result.invites.forEach(invite => {
-      delete invite.token
-    })
     ;({ owner, ownerFeatures, members } =
       this.buildOwnerAndMembersViews(members))
     result.owner = owner
@@ -100,14 +82,12 @@ module.exports = ProjectEditorHandler = {
     let owner = null
     let ownerFeatures = null
     const filteredMembers = []
-    for (const member of Array.from(members || [])) {
+    for (const member of members || []) {
       if (member.privilegeLevel === 'owner') {
         ownerFeatures = member.user.features
-        owner = this.buildUserModelView(member.user, 'owner')
+        owner = this.buildUserModelView(member)
       } else {
-        filteredMembers.push(
-          this.buildUserModelView(member.user, member.privilegeLevel)
-        )
+        filteredMembers.push(this.buildUserModelView(member))
       }
     }
     return {
@@ -117,45 +97,45 @@ module.exports = ProjectEditorHandler = {
     }
   },
 
-  buildUserModelView(user, privileges) {
+  buildUserModelView(member) {
+    const user = member.user
     return {
       _id: user._id,
       first_name: user.first_name,
       last_name: user.last_name,
       email: user.email,
-      privileges,
+      privileges: member.privilegeLevel,
       signUpDate: user.signUpDate,
+      pendingEditor: member.pendingEditor,
     }
   },
 
   buildFolderModelView(folder) {
-    let file
     const fileRefs = _.filter(folder.fileRefs || [], file => file != null)
     return {
       _id: folder._id,
       name: folder.name,
-      folders: Array.from(folder.folders || []).map(childFolder =>
+      folders: (folder.folders || []).map(childFolder =>
         this.buildFolderModelView(childFolder)
       ),
-      fileRefs: (() => {
-        const result = []
-        for (file of Array.from(fileRefs)) {
-          result.push(this.buildFileModelView(file))
-        }
-        return result
-      })(),
-      docs: Array.from(folder.docs || []).map(doc =>
-        this.buildDocModelView(doc)
-      ),
+      fileRefs: fileRefs.map(file => this.buildFileModelView(file)),
+      docs: (folder.docs || []).map(doc => this.buildDocModelView(doc)),
     }
   },
 
   buildFileModelView(file) {
+    const additionalFileProperties = {}
+
+    if (Features.hasFeature('project-history-blobs')) {
+      additionalFileProperties.hash = file.hash
+    }
+
     return {
       _id: file._id,
       name: file.name,
       linkedFileData: file.linkedFileData,
       created: file.created,
+      ...additionalFileProperties,
     }
   },
 
@@ -164,5 +144,12 @@ module.exports = ProjectEditorHandler = {
       _id: doc._id,
       name: doc.name,
     }
+  },
+
+  buildInvitesView(invites) {
+    if (invites == null) {
+      return []
+    }
+    return invites.map(invite => _.pick(invite, ['_id', 'email', 'privileges']))
   },
 }

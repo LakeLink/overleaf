@@ -1,15 +1,5 @@
-import _ from 'lodash'
 import * as eventTracking from '../../infrastructure/event-tracking'
-
-function isInViewport(element) {
-  const elTop = $(element).offset().top
-  const elBtm = elTop + $(element).outerHeight()
-
-  const viewportTop = $(window).scrollTop()
-  const viewportBtm = viewportTop + $(window).height()
-
-  return elBtm > viewportTop && elTop < viewportBtm
-}
+import { debugConsole } from '@/utils/debugging'
 
 function setupEventTracking(el) {
   const key = el.getAttribute('event-tracking')
@@ -20,10 +10,21 @@ function setupEventTracking(el) {
   const trigger = el.getAttribute('event-tracking-trigger')
   const sendOnce = el.getAttribute('event-tracking-send-once')
   const element = el.getAttribute('event-tracking-element')
-  const segmentation = JSON.parse(el.getAttribute('event-segmentation') || '{}')
-  segmentation.page = window.location.pathname
 
   function submit() {
+    if (key === 'menu-expand') {
+      const expanded = el.getAttribute('aria-expanded')
+      if (expanded === 'true') {
+        // skip if the menu is already expanded
+        return
+      }
+    }
+
+    const segmentation = JSON.parse(
+      el.getAttribute('event-segmentation') || '{}'
+    )
+    segmentation.page = window.location.pathname
+
     if (element === 'checkbox') {
       segmentation.checkbox = el.checked ? 'checked' : 'unchecked'
     } else if (element === 'select') {
@@ -46,13 +47,9 @@ function setupEventTracking(el) {
     }
   }
 
-  let handler
   let timer
   let timeoutAmt = 500
   switch (trigger) {
-    case 'load':
-      submit()
-      break
     case 'click':
       el.addEventListener('click', () => submit())
       break
@@ -65,17 +62,9 @@ function setupEventTracking(el) {
       })
       el.addEventListener('mouseleave', () => clearTimeout(timer))
       break
-    case 'scroll':
-      handler = _.throttle(() => {
-        if (isInViewport(el)) {
-          submit()
-          window.removeEventListener('scroll', handler)
-          window.removeEventListener('resize', handler)
-        }
-      }, 500)
-      window.addEventListener('scroll', handler)
-      window.addEventListener('resize', handler)
-      break
+
+    default:
+      debugConsole.error(`unsupported event tracking action: ${trigger}`)
   }
 }
 

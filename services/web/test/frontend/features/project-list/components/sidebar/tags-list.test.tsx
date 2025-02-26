@@ -8,7 +8,6 @@ import { renderWithProjectListContext } from '../../helpers/render-with-context'
 describe('<TagsList />', function () {
   beforeEach(async function () {
     global.localStorage.clear()
-    window.metaAttributesCache = new Map()
     window.metaAttributesCache.set('ol-tags', [
       {
         _id: 'abc123def456',
@@ -21,6 +20,7 @@ describe('<TagsList />', function () {
         project_ids: [projectsData[0].id, projectsData[1].id],
       },
     ])
+    window.metaAttributesCache.set('ol-ExposedSettings', { isOverleaf: true })
 
     fetchMock.post('/tag', {
       _id: 'eee888eee888',
@@ -28,7 +28,7 @@ describe('<TagsList />', function () {
       project_ids: [],
     })
     fetchMock.post('express:/tag/:tagId/projects', 200)
-    fetchMock.post('express:/tag/:tagId/rename', 200)
+    fetchMock.post('express:/tag/:tagId/edit', 200)
     fetchMock.delete('express:/tag/:tagId', 200)
 
     renderWithProjectListContext(<TagsList />)
@@ -42,11 +42,11 @@ describe('<TagsList />', function () {
   })
 
   it('displays the tags list', function () {
-    screen.getByRole('heading', {
-      name: 'Tags/Folders',
-    })
+    const header = screen.getByTestId('organize-projects')
+    expect(header.textContent).to.equal('Organize Tags')
+
     screen.getByRole('button', {
-      name: 'New Folder',
+      name: 'New Tag',
     })
     screen.getByRole('button', {
       name: 'Tag 1 (1)',
@@ -79,10 +79,10 @@ describe('<TagsList />', function () {
     )
   })
 
-  describe('create modal', function () {
+  describe('Create modal', function () {
     beforeEach(async function () {
       const newTagButton = screen.getByRole('button', {
-        name: 'New Folder',
+        name: 'New Tag',
       })
 
       await fireEvent.click(newTagButton)
@@ -90,7 +90,7 @@ describe('<TagsList />', function () {
 
     it('modal is open', async function () {
       const modal = screen.getAllByRole('dialog', { hidden: false })[0]
-      within(modal).getByRole('heading', { name: 'Create New Folder' })
+      within(modal).getByRole('heading', { name: 'Create new tag' })
     })
 
     it('click on cancel closes the modal', async function () {
@@ -156,22 +156,20 @@ describe('<TagsList />', function () {
     })
   })
 
-  describe('rename modal', function () {
+  describe('Edit modal', function () {
     beforeEach(async function () {
       const tag1Button = screen.getByText('Tag 1')
-
-      const renameButton = within(
+      const dropdownToggle = within(
         tag1Button.closest('li') as HTMLElement
-      ).getByRole('button', {
-        name: 'Rename',
-      })
-
-      await fireEvent.click(renameButton)
+      ).getByTestId('tag-dropdown-toggle')
+      await fireEvent.click(dropdownToggle)
+      const editMenuItem = await screen.findByRole('menuitem', { name: 'Edit' })
+      await fireEvent.click(editMenuItem)
     })
 
     it('modal is open', async function () {
       const modal = screen.getAllByRole('dialog', { hidden: false })[0]
-      within(modal).getByRole('heading', { name: 'Rename Folder' })
+      within(modal).getByRole('heading', { name: 'Edit Tag' })
     })
 
     it('click on cancel closes the modal', async function () {
@@ -182,14 +180,20 @@ describe('<TagsList />', function () {
       expect(screen.queryByRole('dialog', { hidden: false })).to.be.null
     })
 
-    it('Rename button is disabled when input is empty', async function () {
+    it('Save button is disabled when input is empty', async function () {
       const modal = screen.getAllByRole('dialog', { hidden: false })[0]
-      const renameButton = within(modal).getByRole('button', { name: 'Rename' })
+      const input = within(modal).getByRole('textbox')
+      fireEvent.change(input, {
+        target: {
+          value: '',
+        },
+      })
+      const saveButton = within(modal).getByRole('button', { name: 'Save' })
 
-      expect(renameButton.hasAttribute('disabled')).to.be.true
+      expect(saveButton.hasAttribute('disabled')).to.be.true
     })
 
-    it('Rename button is disabled with error message when tag name is too long', async function () {
+    it('Save button is disabled with error message when tag name is too long', async function () {
       const modal = screen.getAllByRole('dialog', { hidden: false })[0]
       const input = within(modal).getByRole('textbox')
       fireEvent.change(input, {
@@ -198,18 +202,18 @@ describe('<TagsList />', function () {
         },
       })
 
-      const createButton = within(modal).getByRole('button', { name: 'Rename' })
-      expect(createButton.hasAttribute('disabled')).to.be.true
+      const saveButton = within(modal).getByRole('button', { name: 'Save' })
+      expect(saveButton.hasAttribute('disabled')).to.be.true
       screen.getByText('Tag name cannot exceed 50 characters')
     })
 
-    it('Rename button is disabled with no error message when tag name is unchanged', async function () {
+    it('Save button is disabled with no error message when tag name is unchanged', async function () {
       const modal = screen.getAllByRole('dialog', { hidden: false })[0]
-      const createButton = within(modal).getByRole('button', { name: 'Rename' })
-      expect(createButton.hasAttribute('disabled')).to.be.true
+      const saveButton = within(modal).getByRole('button', { name: 'Save' })
+      expect(saveButton.hasAttribute('disabled')).to.be.true
     })
 
-    it('Rename button is disabled with error message when tag name is already used', async function () {
+    it('Save button is disabled with error message when tag name is already used', async function () {
       const modal = screen.getAllByRole('dialog', { hidden: false })[0]
       const input = within(modal).getByRole('textbox')
       fireEvent.change(input, {
@@ -218,20 +222,20 @@ describe('<TagsList />', function () {
         },
       })
 
-      const createButton = within(modal).getByRole('button', { name: 'Rename' })
-      expect(createButton.hasAttribute('disabled')).to.be.true
+      const saveButton = within(modal).getByRole('button', { name: 'Save' })
+      expect(saveButton.hasAttribute('disabled')).to.be.true
       screen.getByText('Tag "Another tag" already exists')
     })
 
-    it('filling the input and clicking Rename sends a request', async function () {
+    it('filling the input and clicking Save sends a request', async function () {
       const modal = screen.getAllByRole('dialog', { hidden: false })[0]
       const input = within(modal).getByRole('textbox')
       fireEvent.change(input, { target: { value: 'New Tag Name' } })
 
-      const renameButton = within(modal).getByRole('button', { name: 'Rename' })
-      expect(renameButton.hasAttribute('disabled')).to.be.false
+      const saveButton = within(modal).getByRole('button', { name: 'Save' })
+      expect(saveButton.hasAttribute('disabled')).to.be.false
 
-      await fireEvent.click(renameButton)
+      await fireEvent.click(saveButton)
 
       await waitFor(() => expect(fetchMock.called(`/tag/abc123def456/rename`)))
 
@@ -243,22 +247,22 @@ describe('<TagsList />', function () {
     })
   })
 
-  describe('delete modal', function () {
+  describe('Delete modal', function () {
     beforeEach(async function () {
-      const tag1Button = screen.getByText('Another tag')
-
-      const deleteButton = within(
+      const tag1Button = screen.getByText('Tag 1')
+      const dropdownToggle = within(
         tag1Button.closest('li') as HTMLElement
-      ).getByRole('button', {
+      ).getByTestId('tag-dropdown-toggle')
+      await fireEvent.click(dropdownToggle)
+      const deleteMenuItem = await screen.findByRole('menuitem', {
         name: 'Delete',
       })
-
-      await fireEvent.click(deleteButton)
+      await fireEvent.click(deleteMenuItem)
     })
 
     it('modal is open', async function () {
       const modal = screen.getAllByRole('dialog', { hidden: false })[0]
-      within(modal).getByRole('heading', { name: 'Delete Folder' })
+      within(modal).getByRole('heading', { name: 'Delete Tag' })
     })
 
     it('click on Cancel closes the modal', async function () {

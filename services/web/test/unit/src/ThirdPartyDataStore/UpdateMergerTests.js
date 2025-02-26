@@ -1,8 +1,8 @@
 const SandboxedModule = require('sandboxed-module')
 const sinon = require('sinon')
 const { expect } = require('chai')
-const BufferedStream = require('bufferedstream')
-const { ObjectId } = require('mongodb')
+const { Writable } = require('stream')
+const { ObjectId } = require('mongodb-legacy')
 
 const MODULE_PATH =
   '../../../../app/src/Features/ThirdPartyDataStore/UpdateMerger.js'
@@ -11,6 +11,8 @@ describe('UpdateMerger :', function () {
   beforeEach(function () {
     this.projectId = 'project_id_here'
     this.userId = 'mock-user-id'
+    this.randomUUID = 'random-uuid'
+    this.dumpPath = '/dump'
 
     this.docPath = this.newDocPath = '/folder/doc.tex'
     this.filePath = this.newFilePath = '/folder/file.png'
@@ -23,7 +25,7 @@ describe('UpdateMerger :', function () {
     this.existingDocs = [{ path: '/main.tex' }, { path: '/folder/other.tex' }]
     this.existingFiles = [{ path: '/figure.pdf' }, { path: '/folder/fig1.pdf' }]
 
-    this.fsPath = '/tmp/file/path'
+    this.fsPath = `${this.dumpPath}/${this.projectId}_${this.randomUUID}`
     this.fileContents = `\\documentclass{article}
 \\usepackage[utf8]{inputenc}
 
@@ -32,25 +34,31 @@ describe('UpdateMerger :', function () {
 \\date{June 2011}`
     this.docLines = this.fileContents.split('\n')
     this.source = 'dropbox'
-    this.updateRequest = new BufferedStream()
+    this.updateRequest = new Writable()
+    this.writeStream = new Writable()
 
     this.fsPromises = {
       unlink: sinon.stub().resolves(),
       readFile: sinon.stub().withArgs(this.fsPath).resolves(this.fileContents),
+      mkdir: sinon.stub().resolves(),
+    }
+
+    this.fs = {
+      createWriteStream: sinon.stub().returns(this.writeStream),
     }
 
     this.doc = {
-      _id: ObjectId(),
+      _id: new ObjectId(),
       rev: 2,
     }
 
     this.file = {
-      _id: ObjectId(),
+      _id: new ObjectId(),
       rev: 6,
     }
 
     this.folder = {
-      _id: ObjectId(),
+      _id: new ObjectId(),
     }
 
     this.EditorController = {
@@ -71,10 +79,8 @@ describe('UpdateMerger :', function () {
       },
     }
 
-    this.FileWriter = {
-      promises: {
-        writeStreamToDisk: sinon.stub().resolves(this.fsPath),
-      },
+    this.crypto = {
+      randomUUID: sinon.stub().returns(this.randomUUID),
     }
 
     this.ProjectEntityHandler = {
@@ -86,16 +92,20 @@ describe('UpdateMerger :', function () {
       },
     }
 
-    this.Settings = { path: { dumpPath: 'dump_here' } }
+    this.Settings = { path: { dumpFolder: this.dumpPath } }
+
+    this.stream = { pipeline: sinon.stub().resolves() }
 
     this.UpdateMerger = SandboxedModule.require(MODULE_PATH, {
       requires: {
         'fs/promises': this.fsPromises,
+        fs: this.fs,
         '../Editor/EditorController': this.EditorController,
         '../Uploads/FileTypeManager': this.FileTypeManager,
-        '../../infrastructure/FileWriter': this.FileWriter,
         '../Project/ProjectEntityHandler': this.ProjectEntityHandler,
         '@overleaf/settings': this.Settings,
+        'stream/promises': this.stream,
+        crypto: this.crypto,
       },
     })
   })

@@ -1,23 +1,23 @@
-const Metrics = require('@overleaf/metrics')
-Metrics.initialize('clsi')
+// Metrics must be initialized before importing anything else
+require('@overleaf/metrics/initialize')
 
 const CompileController = require('./app/js/CompileController')
 const ContentController = require('./app/js/ContentController')
 const Settings = require('@overleaf/settings')
 const logger = require('@overleaf/logger')
 logger.initialize('clsi')
-if (Settings.sentry.dsn != null) {
-  logger.initializeErrorReporting(Settings.sentry.dsn)
-}
+const Metrics = require('@overleaf/metrics')
 
 const smokeTest = require('./test/smoke/js/SmokeTests')
 const ContentTypeMapper = require('./app/js/ContentTypeMapper')
 const Errors = require('./app/js/Errors')
+const { createOutputZip } = require('./app/js/OutputController')
 
-const Path = require('path')
+const Path = require('node:path')
 
-Metrics.open_sockets.monitor(logger)
+Metrics.open_sockets.monitor(true)
 Metrics.memory.monitor(logger)
+Metrics.leaked_sockets.monitor(logger)
 
 const ProjectPersistenceManager = require('./app/js/ProjectPersistenceManager')
 const OutputCacheManager = require('./app/js/OutputCacheManager')
@@ -168,6 +168,20 @@ const staticOutputServer = ForbidSymlinks(
   }
 )
 
+// This needs to be before GET /project/:project_id/build/:build_id/output/*
+app.get(
+  '/project/:project_id/build/:build_id/output/output.zip',
+  bodyParser.json(),
+  createOutputZip
+)
+
+// This needs to be before GET /project/:project_id/user/:user_id/build/:build_id/output/*
+app.get(
+  '/project/:project_id/user/:user_id/build/:build_id/output/output.zip',
+  bodyParser.json(),
+  createOutputZip
+)
+
 app.get(
   '/project/:project_id/user/:user_id/build/:build_id/output/*',
   function (req, res, next) {
@@ -299,8 +313,8 @@ app.use(function (error, req, res, next) {
   }
 })
 
-const net = require('net')
-const os = require('os')
+const net = require('node:net')
+const os = require('node:os')
 
 let STATE = 'up'
 
@@ -329,7 +343,10 @@ const loadTcpServer = net.createServer(function (socket) {
     const freeLoadPercentage = Math.round(
       (freeLoad / availableWorkingCpus) * 100
     )
-    if (freeLoadPercentage <= 0) {
+    if (
+      Settings.internal.load_balancer_agent.allow_maintenance &&
+      freeLoadPercentage <= 0
+    ) {
       // When its 0 the server is set to drain implicitly.
       // Drain will move new projects to different servers.
       // Drain will keep existing projects assigned to the same server.
@@ -337,7 +354,7 @@ const loadTcpServer = net.createServer(function (socket) {
       socket.write(`maint, 0%\n`, 'ASCII')
     } else {
       // Ready will cancel the maint state.
-      socket.write(`up, ready, ${freeLoadPercentage}%\n`, 'ASCII')
+      socket.write(`up, ready, ${Math.max(freeLoadPercentage, 1)}%\n`, 'ASCII')
     }
     socket.end()
   } else {
@@ -366,8 +383,8 @@ loadHttpServer.post('/state/maint', function (req, res, next) {
   res.sendStatus(204)
 })
 
-const port = Settings.internal?.clsi?.port || 3013
-const host = Settings.internal?.clsi?.host || 'localhost'
+const port = Settings.internal.clsi.port
+const host = Settings.internal.clsi.host
 
 const loadTcpPort = Settings.internal.load_balancer_agent.load_port
 const loadHttpPort = Settings.internal.load_balancer_agent.local_port

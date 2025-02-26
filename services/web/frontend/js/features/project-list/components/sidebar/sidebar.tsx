@@ -12,7 +12,7 @@ function Sidebar() {
 
   return (
     <div
-      className="project-list-sidebar-wrapper-react hidden-xs"
+      className="project-list-sidebar-wrapper-react d-none d-md-block"
       {...getTargetProps({
         style: {
           ...(mousePos?.x && { flexBasis: `${mousePos.x}px` }),

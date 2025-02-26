@@ -1,15 +1,17 @@
-A nodejs tool for reading plans prices from an Excel file and creating JSON objects.
+A nodejs tool for reading plans prices from csv files and creating JSON objects.
 
-Run `npm install` in order to install the `xlsx` dependency.
+Run `npm install` in order to install the dependencies.
 
 The scripts will put the output results into the `output` folder.
 
-### Create group plans
+### Create localized and group plan pricing
 
-_Command_ `node groups.js fileName sheetName` - generates group plans prices. To be used for `/services/web/app/templates/plans/groups.json`
+_Command_ `node plans.mjs -f fileName -o outputdir` - generates two json files:
 
-### Create localized plan pricing
-
-_Command_ `node plans.js fileName sheetName` - generates two json files:
 - `localizedPlanPricing.json` for `/services/web/config/settings.overrides.saas.js`
-- `plans.json` for `/services/web/frontend/js/main/plans.js`
+- `groups.json` for `/services/web/app/templates/plans/groups.json`
+
+The input file can be in `.csv` or `.json` format
+
+- `.csv` csv format
+- `.json` json format from the `recurly_prices.mjs --download` script output

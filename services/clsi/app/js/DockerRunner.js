@@ -1,13 +1,13 @@
-const { promisify } = require('util')
+const { promisify } = require('node:util')
 const Settings = require('@overleaf/settings')
 const logger = require('@overleaf/logger')
 const Docker = require('dockerode')
 const dockerode = new Docker()
-const crypto = require('crypto')
+const crypto = require('node:crypto')
 const async = require('async')
 const LockManager = require('./DockerLockManager')
-const fs = require('fs')
-const Path = require('path')
+const fs = require('node:fs')
+const Path = require('node:path')
 const _ = require('lodash')
 
 const ONE_HOUR_IN_MS = 60 * 60 * 1000
@@ -42,9 +42,9 @@ const DockerRunner = {
         'altering bind path for sibling containers'
       )
       // Server Pro, example:
-      //   '/var/lib/sharelatex/data/compiles/<project-id>'
+      //   '/var/lib/overleaf/data/compiles/<project-id>'
       //   ... becomes ...
-      //   '/opt/sharelatex_data/data/compiles/<project-id>'
+      //   '/opt/overleaf_data/data/compiles/<project-id>'
       directory = Path.join(
         Settings.path.sandboxedCompilesHostDir,
         Path.basename(directory)
@@ -70,6 +70,10 @@ const DockerRunner = {
     if (Settings.texliveImageNameOveride != null) {
       const img = image.split('/')
       image = `${Settings.texliveImageNameOveride}/${img[2]}`
+    }
+
+    if (compileGroup === 'synctex' || compileGroup === 'wordcount') {
+      volumes[directory] += ':ro'
     }
 
     const options = DockerRunner._getContainerOptions(

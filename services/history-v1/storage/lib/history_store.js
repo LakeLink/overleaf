@@ -1,13 +1,17 @@
+// @ts-check
 'use strict'
 
-const BPromise = require('bluebird')
 const core = require('overleaf-editor-core')
 
 const config = require('config')
-const path = require('path')
+const path = require('node:path')
+const Stream = require('node:stream')
+const { promisify } = require('node:util')
+const zlib = require('node:zlib')
 
 const OError = require('@overleaf/o-error')
 const objectPersistor = require('@overleaf/object-persistor')
+const logger = require('@overleaf/logger')
 
 const assert = require('./assert')
 const persistor = require('./persistor')
@@ -16,26 +20,48 @@ const streams = require('./streams')
 
 const Chunk = core.Chunk
 
-const BUCKET = config.get('chunkStore.bucket')
+const gzip = promisify(zlib.gzip)
+const gunzip = promisify(zlib.gunzip)
 
 class LoadError extends OError {
-  constructor(projectId, chunkId) {
-    super('HistoryStore: failed to load chunk history', { projectId, chunkId })
+  /**
+   * @param {number|string} projectId
+   * @param {number|string} chunkId
+   * @param {any} cause
+   */
+  constructor(projectId, chunkId, cause) {
+    super(
+      'HistoryStore: failed to load chunk history',
+      { projectId, chunkId },
+      cause
+    )
     this.projectId = projectId
     this.chunkId = chunkId
   }
 }
-HistoryStore.LoadError = LoadError
 
 class StoreError extends OError {
-  constructor(projectId, chunkId) {
-    super('HistoryStore: failed to store chunk history', { projectId, chunkId })
+  /**
+   * @param {number|string} projectId
+   * @param {number|string} chunkId
+   * @param {any} cause
+   */
+  constructor(projectId, chunkId, cause) {
+    super(
+      'HistoryStore: failed to store chunk history',
+      { projectId, chunkId },
+      cause
+    )
     this.projectId = projectId
     this.chunkId = chunkId
   }
 }
-HistoryStore.StoreError = StoreError
 
+/**
+ * @param {number|string} projectId
+ * @param {number|string} chunkId
+ * @return {string}
+ */
 function getKey(projectId, chunkId) {
   return path.join(projectKey.format(projectId), projectKey.pad(chunkId))
 }
@@ -52,81 +78,125 @@ function getKey(projectId, chunkId) {
  *
  * @class
  */
-function HistoryStore() {}
+class HistoryStore {
+  #persistor
+  #bucket
+  constructor(persistor, bucket) {
+    this.#persistor = persistor
+    this.#bucket = bucket
+  }
 
-/**
- * Load the raw object for a History.
- *
- * @param {number} projectId
- * @param {number} chunkId
- * @return {Promise.<Object>}
- */
-HistoryStore.prototype.loadRaw = function historyStoreLoadRaw(
-  projectId,
-  chunkId
-) {
-  assert.projectId(projectId, 'bad projectId')
-  assert.chunkId(chunkId, 'bad chunkId')
+  /**
+   * Load the raw object for a History.
+   *
+   * @param {number|string} projectId
+   * @param {number|string} chunkId
+   * @return {Promise<import('overleaf-editor-core/lib/types').RawHistory>}
+   */
+  async loadRaw(projectId, chunkId) {
+    assert.projectId(projectId, 'bad projectId')
+    assert.chunkId(chunkId, 'bad chunkId')
 
-  const key = getKey(projectId, chunkId)
+    const key = getKey(projectId, chunkId)
 
-  return BPromise.resolve()
-    .then(() => persistor.getObjectStream(BUCKET, key))
-    .then(streams.gunzipStreamToBuffer)
-    .then(buffer => JSON.parse(buffer))
-    .catch(err => {
+    logger.debug({ projectId, chunkId }, 'loadRaw started')
+    try {
+      const buf = await streams.gunzipStreamToBuffer(
+        await this.#persistor.getObjectStream(this.#bucket, key)
+      )
+      return JSON.parse(buf.toString('utf-8'))
+    } catch (err) {
       if (err instanceof objectPersistor.Errors.NotFoundError) {
         throw new Chunk.NotPersistedError(projectId)
       }
-      throw new HistoryStore.LoadError(projectId, chunkId).withCause(err)
-    })
+      throw new LoadError(projectId, chunkId, err)
+    } finally {
+      logger.debug({ projectId, chunkId }, 'loadRaw finished')
+    }
+  }
+
+  async loadRawWithBuffer(projectId, chunkId) {
+    assert.projectId(projectId, 'bad projectId')
+    assert.chunkId(chunkId, 'bad chunkId')
+
+    const key = getKey(projectId, chunkId)
+
+    logger.debug({ projectId, chunkId }, 'loadBuffer started')
+    try {
+      const buf = await streams.readStreamToBuffer(
+        await this.#persistor.getObjectStream(this.#bucket, key)
+      )
+      const unzipped = await gunzip(buf)
+      return {
+        buffer: buf,
+        raw: JSON.parse(unzipped.toString('utf-8')),
+      }
+    } catch (err) {
+      if (err instanceof objectPersistor.Errors.NotFoundError) {
+        throw new Chunk.NotPersistedError(projectId)
+      }
+      throw new LoadError(projectId, chunkId, err)
+    } finally {
+      logger.debug({ projectId, chunkId }, 'loadBuffer finished')
+    }
+  }
+
+  /**
+   * Compress and store a {@link History}.
+   *
+   * @param {number|string} projectId
+   * @param {number|string} chunkId
+   * @param {import('overleaf-editor-core/lib/types').RawHistory} rawHistory
+   */
+  async storeRaw(projectId, chunkId, rawHistory) {
+    assert.projectId(projectId, 'bad projectId')
+    assert.chunkId(chunkId, 'bad chunkId')
+    assert.object(rawHistory, 'bad rawHistory')
+
+    const key = getKey(projectId, chunkId)
+
+    logger.debug({ projectId, chunkId }, 'storeRaw started')
+
+    const buf = await gzip(JSON.stringify(rawHistory))
+    try {
+      await this.#persistor.sendStream(
+        this.#bucket,
+        key,
+        Stream.Readable.from([buf]),
+        {
+          contentType: 'application/json',
+          contentEncoding: 'gzip',
+          contentLength: buf.byteLength,
+        }
+      )
+    } catch (err) {
+      throw new StoreError(projectId, chunkId, err)
+    } finally {
+      logger.debug({ projectId, chunkId }, 'storeRaw finished')
+    }
+  }
+
+  /**
+   * Delete multiple chunks from bucket. Expects an Array of objects with
+   * projectId and chunkId properties
+   * @param {Array<{projectId: string,chunkId:string}>} chunks
+   */
+  async deleteChunks(chunks) {
+    logger.debug({ chunks }, 'deleteChunks started')
+    try {
+      await Promise.all(
+        chunks.map(chunk => {
+          const key = getKey(chunk.projectId, chunk.chunkId)
+          return this.#persistor.deleteObject(this.#bucket, key)
+        })
+      )
+    } finally {
+      logger.debug({ chunks }, 'deleteChunks finished')
+    }
+  }
 }
 
-/**
- * Compress and store a {@link History}.
- *
- * @param {number} projectId
- * @param {number} chunkId
- * @param {Object} rawHistory
- * @return {Promise}
- */
-HistoryStore.prototype.storeRaw = function historyStoreStoreRaw(
-  projectId,
-  chunkId,
-  rawHistory
-) {
-  assert.projectId(projectId, 'bad projectId')
-  assert.chunkId(chunkId, 'bad chunkId')
-  assert.object(rawHistory, 'bad rawHistory')
-
-  const key = getKey(projectId, chunkId)
-  const stream = streams.gzipStringToStream(JSON.stringify(rawHistory))
-
-  return BPromise.resolve()
-    .then(() =>
-      persistor.sendStream(BUCKET, key, stream, {
-        contentType: 'application/json',
-        contentEncoding: 'gzip',
-      })
-    )
-    .catch(err => {
-      throw new HistoryStore.StoreError(projectId, chunkId).withCause(err)
-    })
+module.exports = {
+  HistoryStore,
+  historyStore: new HistoryStore(persistor, config.get('chunkStore.bucket')),
 }
-
-/**
- * Delete multiple chunks from bucket. Expects an Array of objects with
- * projectId and chunkId properties
- * @param {Array} chunks
- * @return {Promise}
- */
-HistoryStore.prototype.deleteChunks = function historyDeleteChunks(chunks) {
-  return BPromise.all(
-    chunks.map(chunk => {
-      const key = getKey(chunk.projectId, chunk.chunkId)
-      return persistor.deleteObject(BUCKET, key)
-    })
-  )
-}
-
-module.exports = new HistoryStore()

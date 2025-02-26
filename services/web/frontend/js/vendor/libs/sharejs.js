@@ -1,3 +1,8 @@
+import { generateSHA1Hash } from '../../shared/utils/sha1'
+import { debugging, debugConsole } from '@/utils/debugging'
+import getMeta from '@/utils/meta'
+import { postJSON } from '@/infrastructure/fetch-json'
+
 var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
 
 var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; };
@@ -26,7 +31,7 @@ function _classCallCheck(instance, Constructor) { if (!(instance instanceof Cons
  * DS207: Consider shorter variations of null checks
  * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
  */
-define(['ace/ace','crypto-js/sha1'], function (_ignore, CryptoJSSHA1) {
+export const { Doc } = (() => {
   var append = void 0,
       bootstrapTransform = void 0,
       exports = void 0,
@@ -691,6 +696,9 @@ define(['ace/ace','crypto-js/sha1'], function (_ignore, CryptoJSSHA1) {
       var op = { p: pos, i: text };
       if (fromUndo) {
         op.u = true;
+        // TODO: This flag is temporary. It is only necessary while we change
+        // the behaviour of tracked delete rejections in RangesTracker
+        op.fixedRemoveChange = true;
       }
       op = [op];
 
@@ -905,6 +913,7 @@ define(['ace/ace','crypto-js/sha1'], function (_ignore, CryptoJSSHA1) {
         openData = {};
       }
       this.version = openData.v;
+      this.lastServerActivity = performance.now()
       this.snapshot = openData.snaphot;
       if (openData.type) {
         this._setType(openData.type);
@@ -1013,7 +1022,7 @@ define(['ace/ace','crypto-js/sha1'], function (_ignore, CryptoJSSHA1) {
     }, {
       key: '_onMessage',
       value: function _onMessage(msg) {
-        // console.warn 's->c', msg
+        // debugConsole.warn('s->c', msg)
         if (msg.open === true) {
           // The document has been successfully opened.
           this.state = 'open';
@@ -1063,9 +1072,7 @@ define(['ace/ace','crypto-js/sha1'], function (_ignore, CryptoJSSHA1) {
           // The document has either been closed, or an open request has failed.
           if (msg.error) {
             // An error occurred opening the document.
-            if (typeof console !== 'undefined' && console !== null) {
-              console.error('Could not open document: ' + msg.error);
-            }
+            debugConsole.error('Could not open document: ' + msg.error);
             this.emit('error', msg.error);
             if (typeof this._openCallback === 'function') {
               this._openCallback(msg.error);
@@ -1080,11 +1087,42 @@ define(['ace/ace','crypto-js/sha1'], function (_ignore, CryptoJSSHA1) {
           }
           return this._closeCallback = null;
         } else if (msg.op === null && error === 'Op already submitted') {
+          // Overleaf: note that this branch is never reached, as `error` is always undefined
+
           // We've tried to resend an op to the server, which has already been received successfully. Do nothing.
           // The op will be confirmed normally when we get the op itself was echoed back from the server
           // (handled below).
 
         } else if (msg.op === undefined && msg.v !== undefined || msg.op && Array.from(this.inflightSubmittedIds).includes(msg.meta.source)) {
+          // Overleaf: avoid clearing inflightOp on repeated acknowledgement of operations on the same version
+          if (!msg.error) {
+            if (msg.op === undefined && msg.v !== undefined) {
+              if (msg.v < this.version) {
+                postJSON('/error/client', {
+                  body: {
+                    error: {
+                      message: 'out-of-order-ack-ignored'
+                    },
+                    meta: { msg, version: this.version }
+                  }
+                })
+                return
+              }
+            } else {
+              if (msg.v < this.version) {
+                postJSON('/error/client', {
+                  body: {
+                    error: {
+                      message: 'out-of-order-self-op-ignored'
+                    },
+                    meta: { msg: { v: msg.v }, version: this.version }
+                  }
+                })
+                // return // TODO: enable this?
+              }
+            }
+          }
+
           // Our inflight op has been acknowledged.
           var callback = void 0;
           var oldInflightOp = this.inflightOp;
@@ -1167,6 +1205,7 @@ define(['ace/ace','crypto-js/sha1'], function (_ignore, CryptoJSSHA1) {
             }
 
             this.version++;
+            this.lastServerActivity = performance.now()
             this.emit('acknowledge', oldInflightOp);
             var _iteratorNormalCompletion13 = true;
             var _didIteratorError13 = false;
@@ -1234,6 +1273,7 @@ define(['ace/ace','crypto-js/sha1'], function (_ignore, CryptoJSSHA1) {
           }
 
           this.version++;
+          this.lastServerActivity = performance.now()
           // Finally, apply the op to @snapshot and trigger any event listeners
           return this._otApply(docOp, true, msg);
         } else if (msg.meta) {
@@ -1246,10 +1286,10 @@ define(['ace/ace','crypto-js/sha1'], function (_ignore, CryptoJSSHA1) {
             case 'shout':
               return this.emit('shout', value);
             default:
-              return typeof console !== 'undefined' && console !== null ? console.warn('Unhandled meta op:', msg) : undefined;
+              return debugConsole.warn('Unhandled meta op:', msg);
           }
         } else {
-          return typeof console !== 'undefined' && console !== null ? console.warn('Unhandled document message:', msg) : undefined;
+          return debugConsole.warn('Unhandled document message:', msg);
         }
       }
 
@@ -1277,15 +1317,15 @@ define(['ace/ace','crypto-js/sha1'], function (_ignore, CryptoJSSHA1) {
 
         this.emit('flipped_pending_to_inflight');
 
-        if (window.useShareJsHash || window.sl_debugging) {
+        if (getMeta('ol-useShareJsHash') || debugging) {
           var now = Date.now()
           var age = this.__lastSubmitTimestamp && (now - this.__lastSubmitTimestamp)
           var RECOMPUTE_HASH_INTERVAL = 5000
           // check the document hash regularly (but not if we have checked in the last 5 seconds)
           var needToRecomputeHash = !this.__lastSubmitTimestamp || (age > RECOMPUTE_HASH_INTERVAL) || (age < 0)
-          if (needToRecomputeHash || window.sl_debugging) {
+          if (needToRecomputeHash || debugging) {
             // send git hash of current snapshot
-            var sha1 = CryptoJSSHA1("blob " + this.snapshot.length + "\x00" + this.snapshot).toString()
+            var sha1 = generateSHA1Hash("blob " + this.snapshot.length + "\x00" + this.snapshot)
             this.__lastSubmitTimestamp = now;
           }
         }
@@ -1412,291 +1452,8 @@ define(['ace/ace','crypto-js/sha1'], function (_ignore, CryptoJSSHA1) {
   MicroEvent.mixin(Doc);
 
   exports.Doc = Doc;
-  // This is some utility code to connect an ace editor to a sharejs document.
 
-  var _ace$require = ace.require('ace/range'),
-      Range = _ace$require.Range;
+  return exports;
+})()
 
-  // Convert an ace delta into an op understood by share.js
-
-
-  var applyAceToShareJS = function applyAceToShareJS(editorDoc, delta, doc, fromUndo) {
-    // Get the start position of the range, in no. of characters
-    var getStartOffsetPosition = function getStartOffsetPosition(start) {
-      // This is quite inefficient - getLines makes a copy of the entire
-      // lines array in the document. It would be nice if we could just
-      // access them directly.
-      var lines = editorDoc.getLines(0, start.row);
-
-      var offset = 0;
-
-      for (var i = 0; i < lines.length; i++) {
-        var line = lines[i];
-        offset += i < start.row ? line.length : start.column;
-      }
-
-      // Add the row number to include newlines.
-      return offset + start.row;
-    };
-
-    var pos = getStartOffsetPosition(delta.start);
-
-    // NOTE: Keep in sync with EditorWatchdogManager.
-    switch (delta.action) {
-      case 'insert':
-        text = delta.lines.join('\n');
-        doc.insert(pos, text, fromUndo);
-        break;
-
-      case 'remove':
-        text = delta.lines.join('\n');
-        doc.del(pos, text.length, fromUndo);
-        break;
-
-      default:
-        throw new Error('unknown action: ' + delta.action);
-    }
-  };
-
-  // Attach an ace editor to the document. The editor's contents are replaced
-  // with the document's contents.
-  window.sharejs.extendDoc('attach_ace', function (editor, maxDocLength) {
-    if (!this.provides['text']) {
-      throw new Error('Only text documents can be attached to ace');
-    }
-
-    var doc = this;
-    var editorDoc = editor.getSession().getDocument();
-    editorDoc.setNewLineMode('unix');
-
-    function check() {
-      return window.setTimeout(function () {
-        var editorText = editorDoc.getValue();
-        var otText = doc.getText();
-
-        if (editorText !== otText) {
-          doc.emit('error','Text does not match in ace')
-          console.error('Text does not match!');
-          console.error('editor: ' + editorText);
-          return console.error('ot:     ' + otText);
-        }
-      }
-      // Should probably also replace the editor text with the doc snapshot.
-      , 0);
-    };
-
-    onDelete(0, editorDoc.getValue());
-    onInsert(0, doc.getText());
-
-    check();
-
-    // Listen for edits in ace
-    function editorListener(change) {
-      if (change.origin === 'remote') {
-        // this change has been injected via sharejs
-        return;
-      }
-
-      if (maxDocLength != null && editorDoc.getValue().length >= maxDocLength) {
-        doc.emit('error', new Error('document length is greater than maxDocLength'));
-        return;
-      }
-
-      var fromUndo = !!(editor.getSession().$fromUndo || editor.getSession().$fromReject);
-
-      applyAceToShareJS(editorDoc, change, doc, fromUndo);
-
-      return check();
-    };
-
-    editorDoc.on('change', editorListener);
-
-    // Horribly inefficient.
-    function offsetToPos(offset) {
-      // Again, very inefficient.
-      var lines = editorDoc.getAllLines();
-
-      var row = 0;
-      for (row = 0; row < lines.length; row++) {
-        var line = lines[row];
-        if (offset <= line.length) {
-          break;
-        }
-
-        // +1 for the newline.
-        offset -= lines[row].length + 1;
-      }
-
-      return { row: row, column: offset };
-    };
-
-    // We want to insert the flag `origin: 'remote'` into the delta if the op
-    //  is the initial document write or comes from the underlying sharejs doc
-    //  (which means it is from a remote op), so we have to do the work of
-    //  editorDoc.insert and editorDoc.remove manually.
-    // These methods are copied from ace.js doc#insert and #remove, and then
-    //  inject the `origin: 'remote'` flag into the delta.
-    function onInsert(pos, text) {
-      if (editorDoc.getLength() <= 1) {
-        editorDoc.$detectNewLine(text);
-      }
-
-      var lines = editorDoc.$split(text);
-      var position = offsetToPos(pos);
-      var start = editorDoc.clippedPos(position.row, position.column);
-      var end = {
-        row: start.row + lines.length - 1,
-        column: (lines.length === 1 ? start.column : 0) + lines[lines.length - 1].length
-      };
-
-      editorDoc.applyDelta({
-        start: start,
-        end: end,
-        action: 'insert',
-        lines: lines,
-        origin: 'remote'
-      });
-      return check();
-    };
-
-    function onDelete(pos, text) {
-      var range = Range.fromPoints(offsetToPos(pos), offsetToPos(pos + text.length));
-      var start = editorDoc.clippedPos(range.start.row, range.start.column);
-      var end = editorDoc.clippedPos(range.end.row, range.end.column);
-      editorDoc.applyDelta({
-        start: start,
-        end: end,
-        action: 'remove',
-        lines: editorDoc.getLinesForRange({ start: start, end: end }),
-        origin: 'remote'
-      });
-      return check();
-    };
-
-    doc.on('insert', onInsert);
-    doc.on('delete', onDelete);
-
-    doc.detach_ace = function () {
-      doc.removeListener('insert', onInsert);
-      doc.removeListener('delete', onDelete);
-      editorDoc.removeListener('change', editorListener);
-      return delete doc.detach_ace;
-    };
-  });
-
-  // This is some utility code to connect a CodeMirror editor
-  // to a sharejs document.
-  // It is heavily inspired from the Ace editor hook.
-
-  // Convert a CodeMirror delta into an op understood by share.js
-  var applyCMToShareJS = function applyCMToShareJS(editorDoc, delta, doc, fromUndo) {
-    // CodeMirror deltas give a text replacement.
-    // I tuned this operation a little bit, for speed.
-    var startPos = 0; // Get character position from # of chars in each line.
-    var i = 0; // i goes through all lines.
-    // Compute the position from the shareJS snapshot because we are in the CodeMirror
-    // change event, where the change has already been applied to the editorDoc
-    var docLines = doc.snapshot.split('\n', delta.from.line) // only split the document as far as we need to
-    while (i < delta.from.line) {
-      startPos += docLines[i].length + 1; // Add 1 for '\n'
-      i++;
-    }
-    startPos += delta.from.ch;
-
-    // NOTE: Keep in sync with EditorWatchdogManager.
-    if (delta.removed) {
-      doc.del(startPos, delta.removed.join('\n').length, fromUndo);
-    }
-    if (delta.text) {
-      return doc.insert(startPos, delta.text.join('\n'), fromUndo);
-    }
-  };
-
-  // Attach a CodeMirror editor to the document. The editor's contents are replaced
-  // with the document's contents.
-  // NOTE: When upgrading CM, make sure to check for new special cases of
-  //        origin prefixes as documented for `doc.setSelection`. We are using
-  //        a custom `origin: 'remote'` which may conflict.
-  //       Perma link of the docs at the time of writing this note:
-  // https://web.archive.org/web/20201029163528/https://codemirror.net/doc/manual.html#selection_origin
-  window.sharejs.extendDoc('attach_cm', function (editor, maxDocLength) {
-    if (!this.provides.text) {
-      throw new Error('Only text documents can be attached to CodeMirror2');
-    }
-
-    var sharedoc = this;
-    var editorDoc = editor.getDoc();
-
-    function check() {
-      return window.setTimeout(function () {
-        var editorText = editor.getValue();
-        var otText = sharedoc.getText();
-
-        if (editorText !== otText) {
-          sharedoc.emit('error','Text does not match in CodeMirror')
-          console.error('Text does not match!');
-          console.error('editor: ' + editorText);
-          return console.error('ot:     ' + otText);
-        }
-      }
-      // Removed editor.setValue here as it would cause recursive loops if
-      // consistency check failed - because setting the value would trigger
-      // the change event
-      , 0);
-    };
-
-    onDelete(0, editor.getValue());
-    onInsert(0, sharedoc.getText());
-
-    check();
-
-    // Listen for edits in CodeMirror.
-    function editorListener(ed, change) {
-      if (change.origin === 'remote') {
-        // this change has been injected via sharejs
-        return;
-      }
-      if (maxDocLength != null && editorDoc.getValue().length >= maxDocLength) {
-        sharedoc.emit('error', new Error('document length is greater than maxDocLength'));
-        return;
-      }
-      var fromUndo = (change.origin === 'undo')
-      applyCMToShareJS(editorDoc, change, sharedoc, fromUndo);
-      return check();
-    };
-
-    editorDoc.on('change', editorListener);
-
-    function onInsert(pos, text) {
-      // All the primitives we need are already in CM's API.
-      // call signature: editor.replaceRange(text, from, to, origin)
-      editor.replaceRange(text, editor.posFromIndex(pos), undefined, 'remote');
-      // Clear CM's undo/redo history on remote edit. This prevents issues where
-      // a user can accidentally remove another user's edits
-      editor.clearHistory();
-      return check();
-    };
-
-    function onDelete(pos, text) {
-      var from = editor.posFromIndex(pos);
-      var to = editor.posFromIndex(pos + text.length);
-      editor.replaceRange('', from, to, 'remote');
-      // Clear CM's undo/redo history on remote edit. This prevents issues where
-      // a user can accidentally remove another user's edits
-      editor.clearHistory()
-      return check();
-    };
-
-    this.on('insert', onInsert);
-    this.on('delete', onDelete);
-
-    this.detach_cm = function () {
-      this.removeListener('insert', onInsert);
-      this.removeListener('delete', onDelete);
-      editorDoc.off('change', editorListener);
-      return delete this.detach_cm;
-    };
-  });
-
-  return window.sharejs;
-});
+export default window.sharejs

@@ -1,22 +1,25 @@
 import { memo, useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { MenuItem } from 'react-bootstrap'
+import OLDropdownMenuItem from '@/features/ui/components/ol/ol-dropdown-menu-item'
 import CloneProjectModal from '../../../../../clone-project-modal/components/clone-project-modal'
 import useIsMounted from '../../../../../../shared/hooks/use-is-mounted'
 import { useProjectListContext } from '../../../../context/project-list-context'
 import * as eventTracking from '../../../../../../infrastructure/event-tracking'
-import { Project } from '../../../../../../../../types/project/dashboard/api'
+import { ClonedProject } from '../../../../../../../../types/project/dashboard/api'
+import { useProjectTags } from '@/features/project-list/hooks/use-project-tags'
+import { isSmallDevice } from '../../../../../../infrastructure/event-tracking'
 
 function CopyProjectMenuItem() {
   const {
     addClonedProjectToViewData,
-    updateProjectViewData,
+    addProjectToTagInView,
+    toggleSelectedProject,
     selectedProjects,
   } = useProjectListContext()
   const { t } = useTranslation()
-
   const [showModal, setShowModal] = useState(false)
   const isMounted = useIsMounted()
+  const projectTags = useProjectTags(selectedProjects[0]?.id)
 
   const handleOpenModal = useCallback(() => {
     setShowModal(true)
@@ -29,15 +32,18 @@ function CopyProjectMenuItem() {
   }, [isMounted])
 
   const handleAfterCloned = useCallback(
-    (clonedProject: Project) => {
+    (clonedProject: ClonedProject, tags: { _id: string }[]) => {
       const project = selectedProjects[0]
-      eventTracking.send(
-        'project-list-page-interaction',
-        'project action',
-        'Clone'
-      )
+      eventTracking.sendMB('project-list-page-interaction', {
+        action: 'clone',
+        projectId: project.id,
+        isSmallDevice,
+      })
       addClonedProjectToViewData(clonedProject)
-      updateProjectViewData({ ...project, selected: false })
+      for (const tag of tags) {
+        addProjectToTagInView(tag._id, clonedProject.project_id)
+      }
+      toggleSelectedProject(project.id, false)
 
       if (isMounted.current) {
         setShowModal(false)
@@ -47,7 +53,8 @@ function CopyProjectMenuItem() {
       isMounted,
       selectedProjects,
       addClonedProjectToViewData,
-      updateProjectViewData,
+      addProjectToTagInView,
+      toggleSelectedProject,
     ]
   )
 
@@ -57,14 +64,17 @@ function CopyProjectMenuItem() {
 
   return (
     <>
+      <OLDropdownMenuItem onClick={handleOpenModal} as="button" tabIndex={-1}>
+        {t('make_a_copy')}
+      </OLDropdownMenuItem>
       <CloneProjectModal
         show={showModal}
         handleHide={handleCloseModal}
         handleAfterCloned={handleAfterCloned}
         projectId={selectedProjects[0].id}
         projectName={selectedProjects[0].name}
+        projectTags={projectTags}
       />
-      <MenuItem onClick={handleOpenModal}>{t('make_a_copy')}</MenuItem>
     </>
   )
 }

@@ -7,7 +7,7 @@ import {
   IndividualPlanSubscription,
 } from '../../../../../types/project/dashboard/subscription'
 import { DeepReadonly } from '../../../../../types/utils'
-import * as eventTracking from '../../../../../frontend/js/infrastructure/event-tracking'
+import * as eventTracking from '@/infrastructure/event-tracking'
 import CurrentPlanWidget from '../../../../../frontend/js/features/project-list/components/current-plan-widget/current-plan-widget'
 
 describe('<CurrentPlanWidget />', function () {
@@ -15,26 +15,49 @@ describe('<CurrentPlanWidget />', function () {
     /click to find out how you could benefit from overleaf premium features/i
   const paidPlanTooltipMessage =
     /click to find out how to make the most of your overleaf premium features/i
+  const pausedTooltipMessage =
+    /click to unpause and reactivate your overleaf premium features/i
+
+  let sendMBSpy: sinon.SinonSpy
 
   beforeEach(function () {
-    window.metaAttributesCache = window.metaAttributesCache || new Map()
+    sendMBSpy = sinon.spy(eventTracking, 'sendMB')
+  })
+  afterEach(function () {
+    sendMBSpy.restore()
   })
 
-  describe('free plan', function () {
-    let sendMBSpy: sinon.SinonSpy
-
+  describe('paused', function () {
     beforeEach(function () {
-      sendMBSpy = sinon.spy(eventTracking, 'sendMB')
-
       window.metaAttributesCache.set('ol-usersBestSubscription', {
-        type: 'free',
+        type: 'individual',
+        subscription: {
+          recurlyStatus: {
+            state: 'paused',
+          },
+        },
       })
 
       render(<CurrentPlanWidget />)
     })
 
-    afterEach(function () {
-      sendMBSpy.restore()
+    it('shows text and tooltip on mouseover', function () {
+      const link = screen.getByRole('link', {
+        name: /plan is paused/i,
+      })
+      fireEvent.mouseOver(link)
+
+      screen.getByRole('tooltip', { name: pausedTooltipMessage })
+    })
+  })
+
+  describe('free plan', function () {
+    beforeEach(function () {
+      window.metaAttributesCache.set('ol-usersBestSubscription', {
+        type: 'free',
+      })
+
+      render(<CurrentPlanWidget />)
     })
 
     it('shows text and tooltip on mouseover', function () {
@@ -248,14 +271,7 @@ describe('<CurrentPlanWidget />', function () {
     })
   })
 
-  describe('features page split test', function () {
-    let sendMBSpy: sinon.SinonSpy
-
-    const variants = [
-      { name: 'default', link: '/learn/how-to/Overleaf_premium_features' },
-      { name: 'new', link: '/about/features-overview' },
-    ]
-
+  describe('features page', function () {
     const plans = [
       { type: 'free' },
       {
@@ -285,46 +301,21 @@ describe('<CurrentPlanWidget />', function () {
       },
     ]
 
-    beforeEach(function () {
-      sendMBSpy = sinon.spy(eventTracking, 'sendMB')
-    })
-
-    afterEach(function () {
-      sendMBSpy.restore()
-    })
-
-    for (const variant of variants) {
-      describe(`${variant.name} variant`, function () {
-        beforeEach(function () {
-          window.metaAttributesCache.set('ol-splitTestVariants', {
-            'features-page': variant.name,
-          })
+    for (const plan of plans) {
+      it(`links to features page on ${plan.type} plan`, function () {
+        window.metaAttributesCache.set('ol-usersBestSubscription', {
+          ...plan,
         })
-        afterEach(function () {
-          window.metaAttributesCache.delete('ol-splitTestVariants')
-        })
+        render(<CurrentPlanWidget />)
 
-        for (const plan of plans) {
-          it(`links to ${variant.name} features page on ${plan.type} plan and sends analytics event`, function () {
-            window.metaAttributesCache.set('ol-usersBestSubscription', {
-              ...plan,
-            })
-            render(<CurrentPlanWidget />)
+        const links = screen.getAllByRole('link')
+        expect(links[0].getAttribute('href')).to.equal(
+          '/learn/how-to/Overleaf_premium_features'
+        )
 
-            const links = screen.getAllByRole('link')
-            expect(links[0].getAttribute('href')).to.equal(variant.link)
+        fireEvent.click(links[0])
 
-            fireEvent.click(links[0])
-            expect(sendMBSpy).to.be.calledOnce
-            expect(sendMBSpy).calledWith('features-page-link', {
-              splitTest: 'features-page',
-              splitTestVariant: variant.name,
-              page: '/',
-            })
-
-            window.metaAttributesCache.delete('ol-usersBestSubscription')
-          })
-        }
+        window.metaAttributesCache.delete('ol-usersBestSubscription')
       })
     }
   })

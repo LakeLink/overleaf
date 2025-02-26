@@ -2,8 +2,7 @@ const SandboxedModule = require('sandboxed-module')
 const path = require('path')
 const sinon = require('sinon')
 const { expect } = require('chai')
-const { ObjectId } = require('mongodb')
-const Errors = require('../../../../app/src/Features/Errors/Errors')
+const { ObjectId } = require('mongodb-legacy')
 
 const MODULE_PATH = path.join(
   __dirname,
@@ -12,10 +11,10 @@ const MODULE_PATH = path.join(
 
 describe('ProjectController', function () {
   beforeEach(function () {
-    this.project_id = ObjectId('abcdefabcdefabcdefabcdef')
+    this.project_id = new ObjectId('abcdefabcdefabcdefabcdef')
 
     this.user = {
-      _id: ObjectId('123456123456123456123456'),
+      _id: new ObjectId('123456123456123456123456'),
       email: 'test@overleaf.com',
       first_name: 'bjkdsjfk',
       features: {},
@@ -29,6 +28,8 @@ describe('ProjectController', function () {
       },
       siteUrl: 'https://overleaf.com',
       algolia: {},
+      plans: [],
+      features: {},
     }
     this.brandVariationDetails = {
       id: '12',
@@ -39,44 +40,78 @@ describe('ProjectController', function () {
     }
     this.token = 'some-token'
     this.ProjectDeleter = {
-      deleteProject: sinon.stub().callsArg(2),
-      restoreProject: sinon.stub().callsArg(1),
+      promises: {
+        deleteProject: sinon.stub().resolves(),
+        restoreProject: sinon.stub().resolves(),
+      },
       findArchivedProjects: sinon.stub(),
     }
     this.ProjectDuplicator = {
-      duplicate: sinon.stub().callsArgWith(3, null, { _id: this.project_id }),
+      promises: {
+        duplicate: sinon.stub().resolves({ _id: this.project_id }),
+      },
     }
     this.ProjectCreationHandler = {
-      createExampleProject: sinon
-        .stub()
-        .callsArgWith(2, null, { _id: this.project_id }),
-      createBasicProject: sinon
-        .stub()
-        .callsArgWith(2, null, { _id: this.project_id }),
+      promises: {
+        createExampleProject: sinon.stub().resolves({ _id: this.project_id }),
+        createBasicProject: sinon.stub().resolves({ _id: this.project_id }),
+      },
     }
-    this.SubscriptionLocator = { getUsersSubscription: sinon.stub() }
+    this.SubscriptionLocator = {
+      promises: {
+        getUsersSubscription: sinon.stub().resolves(),
+      },
+    }
+    this.SubscriptionController = {
+      promises: {
+        getRecommendedCurrency: sinon.stub().resolves({ currency: 'USD' }),
+      },
+    }
     this.LimitationsManager = {
       hasPaidSubscription: sinon.stub(),
-      userIsMemberOfGroupSubscription: sinon
-        .stub()
-        .callsArgWith(1, null, false),
+      promises: {
+        userIsMemberOfGroupSubscription: sinon.stub().resolves(false),
+      },
     }
-    this.TagsHandler = { getAllTags: sinon.stub() }
-    this.NotificationsHandler = { getUserNotifications: sinon.stub() }
-    this.UserModel = { findById: sinon.stub(), updateOne: sinon.stub() }
+    this.TagsHandler = {
+      promises: {
+        getTagsForProject: sinon.stub().resolves([
+          {
+            name: 'test',
+            project_ids: [this.project_id],
+          },
+        ]),
+      },
+      addProjectToTags: sinon.stub(),
+    }
+    this.UserModel = {
+      findById: sinon.stub().returns({ exec: sinon.stub().resolves() }),
+      updateOne: sinon.stub().returns({ exec: sinon.stub().resolves() }),
+    }
     this.AuthorizationManager = {
-      getPrivilegeLevelForProject: sinon.stub(),
+      promises: {
+        getPrivilegeLevelForProject: sinon.stub(),
+      },
       isRestrictedUser: sinon.stub().returns(false),
     }
-    this.EditorController = { renameProject: sinon.stub() }
-    this.InactiveProjectManager = { reactivateProjectIfRequired: sinon.stub() }
-    this.ProjectUpdateHandler = { markAsOpened: sinon.stub() }
-    this.UserPrimaryEmailCheckHandler = {
-      requiresPrimaryEmailCheck: sinon.stub().returns(false),
+    this.EditorController = {
+      promises: {
+        renameProject: sinon.stub().resolves(),
+      },
+    }
+    this.InactiveProjectManager = {
+      promises: { reactivateProjectIfRequired: sinon.stub() },
+    }
+    this.ProjectUpdateHandler = {
+      promises: {
+        markAsOpened: sinon.stub().resolves(),
+      },
     }
     this.ProjectGetter = {
-      findAllUsersProjects: sinon.stub(),
-      getProject: sinon.stub(),
+      promises: {
+        findAllUsersProjects: sinon.stub().resolves(),
+        getProject: sinon.stub().resolves(),
+      },
     }
     this.ProjectHelper = {
       isArchived: sinon.stub(),
@@ -85,7 +120,6 @@ describe('ProjectController', function () {
       getAllowedImagesForUser: sinon.stub().returns([]),
     }
     this.SessionManager = {
-      getLoggedInUser: sinon.stub().callsArgWith(1, null, this.user),
       getLoggedInUserId: sinon.stub().returns(this.user._id),
       getSessionUser: sinon.stub().returns(this.user),
       isUserLoggedIn: sinon.stub().returns(true),
@@ -95,36 +129,48 @@ describe('ProjectController', function () {
     }
     this.TokenAccessHandler = {
       getRequestToken: sinon.stub().returns(this.token),
-      protectTokens: sinon.stub(),
     }
     this.CollaboratorsGetter = {
-      userIsTokenMember: sinon.stub().callsArgWith(2, null, false),
-      isUserInvitedMemberOfProject: sinon.stub().callsArgWith(2, null, true),
+      promises: {
+        userIsTokenMember: sinon.stub().resolves(false),
+        isUserInvitedMemberOfProject: sinon.stub().resolves(true),
+        userIsReadWriteTokenMember: sinon.stub().resolves(false),
+        isUserInvitedReadWriteMemberOfProject: sinon.stub().resolves(true),
+      },
+    }
+    this.CollaboratorsHandler = {
+      promises: {
+        setCollaboratorPrivilegeLevel: sinon.stub().resolves(),
+      },
     }
     this.ProjectEntityHandler = {}
-    this.NotificationBuilder = {
-      ipMatcherAffiliation: sinon.stub().returns({ create: sinon.stub() }),
-    }
     this.UserGetter = {
       getUserFullEmails: sinon.stub().yields(null, []),
-      getUser: sinon
-        .stub()
-        .callsArgWith(2, null, { lastLoginIp: '192.170.18.2' }),
+      getUser: sinon.stub().resolves({ lastLoginIp: '192.170.18.2' }),
+      promises: {
+        getUserFeatures: sinon.stub().resolves(null, { collaborators: 1 }),
+      },
     }
     this.Features = {
       hasFeature: sinon.stub(),
     }
     this.FeaturesUpdater = {
       featuresEpochIsCurrent: sinon.stub().returns(true),
-      refreshFeatures: sinon.stub().yields(null, this.user),
+      promises: {
+        refreshFeatures: sinon.stub().resolves(this.user),
+      },
     }
     this.BrandVariationsHandler = {
-      getBrandVariationById: sinon
-        .stub()
-        .callsArgWith(1, null, this.brandVariationDetails),
+      promises: {
+        getBrandVariationById: sinon
+          .stub()
+          .resolves(this.brandVariationDetails),
+      },
     }
     this.TpdsProjectFlusher = {
-      flushProjectToTpdsIfNeeded: sinon.stub().yields(),
+      promises: {
+        flushProjectToTpdsIfNeeded: sinon.stub().resolves(),
+      },
     }
     this.Metrics = {
       Timer: class {
@@ -135,11 +181,24 @@ describe('ProjectController', function () {
     this.SplitTestHandler = {
       promises: {
         getAssignment: sinon.stub().resolves({ variant: 'default' }),
+        getAssignmentForUser: sinon.stub().resolves({ variant: 'default' }),
       },
       getAssignment: sinon.stub().yields(null, { variant: 'default' }),
     }
+    this.SplitTestSessionHandler = {
+      promises: {
+        sessionMaintenance: sinon.stub().resolves(),
+      },
+    }
     this.InstitutionsFeatures = {
-      hasLicence: sinon.stub().callsArgWith(1, null, false),
+      promises: {
+        hasLicence: sinon.stub().resolves(false),
+      },
+    }
+    this.InstitutionsGetter = {
+      promises: {
+        getCurrentAffiliations: sinon.stub().resolves([]),
+      },
     }
     this.SubscriptionViewModelBuilder = {
       getBestSubscription: sinon.stub().yields(null, { type: 'free' }),
@@ -148,15 +207,28 @@ describe('ProjectController', function () {
       getSurvey: sinon.stub().yields(null, {}),
     }
     this.ProjectAuditLogHandler = {
-      addEntry: sinon.stub().yields(),
+      promises: {
+        addEntry: sinon.stub().resolves(),
+      },
+    }
+    this.TutorialHandler = {
+      getInactiveTutorials: sinon.stub().returns([]),
+    }
+    this.OnboardingDataCollectionManager = {
+      getOnboardingDataValue: sinon.stub().resolves(null),
+    }
+    this.Modules = {
+      promises: { hooks: { fire: sinon.stub().resolves() } },
     }
 
     this.ProjectController = SandboxedModule.require(MODULE_PATH, {
       requires: {
-        mongodb: { ObjectId },
+        'mongodb-legacy': { ObjectId },
         '@overleaf/settings': this.settings,
         '@overleaf/metrics': this.Metrics,
+        '../Collaborators/CollaboratorsHandler': this.CollaboratorsHandler,
         '../SplitTests/SplitTestHandler': this.SplitTestHandler,
+        '../SplitTests/SplitTestSessionHandler': this.SplitTestSessionHandler,
         './ProjectDeleter': this.ProjectDeleter,
         './ProjectDuplicator': this.ProjectDuplicator,
         './ProjectCreationHandler': this.ProjectCreationHandler,
@@ -164,9 +236,9 @@ describe('ProjectController', function () {
         '../User/UserController': this.UserController,
         './ProjectHelper': this.ProjectHelper,
         '../Subscription/SubscriptionLocator': this.SubscriptionLocator,
+        '../Subscription/SubscriptionController': this.SubscriptionController,
         '../Subscription/LimitationsManager': this.LimitationsManager,
         '../Tags/TagsHandler': this.TagsHandler,
-        '../Notifications/NotificationsHandler': this.NotificationsHandler,
         '../../models/User': { User: this.UserModel },
         '../Authorization/AuthorizationManager': this.AuthorizationManager,
         '../InactiveData/InactiveProjectManager': this.InactiveProjectManager,
@@ -179,26 +251,34 @@ describe('ProjectController', function () {
         './ProjectEntityHandler': this.ProjectEntityHandler,
         '../../infrastructure/Features': this.Features,
         '../Subscription/FeaturesUpdater': this.FeaturesUpdater,
-        '../Notifications/NotificationsBuilder': this.NotificationBuilder,
         '../User/UserGetter': this.UserGetter,
         '../BrandVariations/BrandVariationsHandler':
           this.BrandVariationsHandler,
         '../ThirdPartyDataStore/TpdsProjectFlusher': this.TpdsProjectFlusher,
         '../../models/Project': {},
-        '../Analytics/AnalyticsManager': { recordEventForUser: () => {} },
+        '../Analytics/AnalyticsManager': {
+          recordEventForUserInBackground: () => {},
+        },
         '../Subscription/SubscriptionViewModelBuilder':
           this.SubscriptionViewModelBuilder,
-        '../../infrastructure/Modules': {
-          hooks: { fire: sinon.stub().yields(null, []) },
-        },
         '../Spelling/SpellingHandler': {
-          getUserDictionary: sinon.stub().yields(null, []),
+          promises: {
+            getUserDictionary: sinon.stub().resolves([]),
+          },
         },
         '../Institutions/InstitutionsFeatures': this.InstitutionsFeatures,
+        '../Institutions/InstitutionsGetter': this.InstitutionsGetter,
         '../Survey/SurveyHandler': this.SurveyHandler,
-        '../User/UserPrimaryEmailCheckHandler':
-          this.UserPrimaryEmailCheckHandler,
         './ProjectAuditLogHandler': this.ProjectAuditLogHandler,
+        '../Tutorial/TutorialHandler': this.TutorialHandler,
+        '../OnboardingDataCollection/OnboardingDataCollectionManager':
+          this.OnboardingDataCollectionManager,
+        '../User/UserUpdater': {
+          promises: {
+            updateUser: sinon.stub().resolves(),
+          },
+        },
+        '../../infrastructure/Modules': this.Modules,
       },
     })
 
@@ -233,10 +313,10 @@ describe('ProjectController', function () {
 
   describe('updateProjectSettings', function () {
     it('should update the name', function (done) {
-      this.EditorController.renameProject = sinon.stub().callsArg(2)
+      this.EditorController.promises.renameProject = sinon.stub().resolves()
       this.req.body = { name: (this.name = 'New name') }
       this.res.sendStatus = code => {
-        this.EditorController.renameProject
+        this.EditorController.promises.renameProject
           .calledWith(this.project_id, this.name)
           .should.equal(true)
         code.should.equal(204)
@@ -246,10 +326,10 @@ describe('ProjectController', function () {
     })
 
     it('should update the compiler', function (done) {
-      this.EditorController.setCompiler = sinon.stub().callsArg(2)
+      this.EditorController.promises.setCompiler = sinon.stub().resolves()
       this.req.body = { compiler: (this.compiler = 'pdflatex') }
       this.res.sendStatus = code => {
-        this.EditorController.setCompiler
+        this.EditorController.promises.setCompiler
           .calledWith(this.project_id, this.compiler)
           .should.equal(true)
         code.should.equal(204)
@@ -259,10 +339,10 @@ describe('ProjectController', function () {
     })
 
     it('should update the imageName', function (done) {
-      this.EditorController.setImageName = sinon.stub().callsArg(2)
+      this.EditorController.promises.setImageName = sinon.stub().resolves()
       this.req.body = { imageName: (this.imageName = 'texlive-1234.5') }
       this.res.sendStatus = code => {
-        this.EditorController.setImageName
+        this.EditorController.promises.setImageName
           .calledWith(this.project_id, this.imageName)
           .should.equal(true)
         code.should.equal(204)
@@ -272,10 +352,12 @@ describe('ProjectController', function () {
     })
 
     it('should update the spell check language', function (done) {
-      this.EditorController.setSpellCheckLanguage = sinon.stub().callsArg(2)
+      this.EditorController.promises.setSpellCheckLanguage = sinon
+        .stub()
+        .resolves()
       this.req.body = { spellCheckLanguage: (this.languageCode = 'fr') }
       this.res.sendStatus = code => {
-        this.EditorController.setSpellCheckLanguage
+        this.EditorController.promises.setSpellCheckLanguage
           .calledWith(this.project_id, this.languageCode)
           .should.equal(true)
         code.should.equal(204)
@@ -285,10 +367,10 @@ describe('ProjectController', function () {
     })
 
     it('should update the root doc', function (done) {
-      this.EditorController.setRootDoc = sinon.stub().callsArg(2)
+      this.EditorController.promises.setRootDoc = sinon.stub().resolves()
       this.req.body = { rootDocId: (this.rootDocId = 'root-doc-id') }
       this.res.sendStatus = code => {
-        this.EditorController.setRootDoc
+        this.EditorController.promises.setRootDoc
           .calledWith(this.project_id, this.rootDocId)
           .should.equal(true)
         code.should.equal(204)
@@ -300,12 +382,14 @@ describe('ProjectController', function () {
 
   describe('updateProjectAdminSettings', function () {
     it('should update the public access level', function (done) {
-      this.EditorController.setPublicAccessLevel = sinon.stub().callsArg(2)
+      this.EditorController.promises.setPublicAccessLevel = sinon
+        .stub()
+        .resolves()
       this.req.body = {
         publicAccessLevel: 'readOnly',
       }
       this.res.sendStatus = code => {
-        this.EditorController.setPublicAccessLevel
+        this.EditorController.promises.setPublicAccessLevel
           .calledWith(this.project_id, 'readOnly')
           .should.equal(true)
         code.should.equal(204)
@@ -315,16 +399,24 @@ describe('ProjectController', function () {
     })
 
     it('should record the change in the project audit log', function (done) {
-      this.EditorController.setPublicAccessLevel = sinon.stub().callsArg(2)
+      this.EditorController.promises.setPublicAccessLevel = sinon
+        .stub()
+        .resolves()
       this.req.body = {
         publicAccessLevel: 'readOnly',
       }
       this.res.sendStatus = code => {
-        this.ProjectAuditLogHandler.addEntry
-          .calledWith(this.project_id, 'toggle-access-level', this.user._id, {
-            publicAccessLevel: 'readOnly',
-            status: 'OK',
-          })
+        this.ProjectAuditLogHandler.promises.addEntry
+          .calledWith(
+            this.project_id,
+            'toggle-access-level',
+            this.user._id,
+            this.req.ip,
+            {
+              publicAccessLevel: 'readOnly',
+              status: 'OK',
+            }
+          )
           .should.equal(true)
         done()
       }
@@ -335,7 +427,7 @@ describe('ProjectController', function () {
   describe('deleteProject', function () {
     it('should call the project deleter', function (done) {
       this.res.sendStatus = code => {
-        this.ProjectDeleter.deleteProject
+        this.ProjectDeleter.promises.deleteProject
           .calledWith(this.project_id, {
             deleterUser: this.user,
             ipAddress: this.req.ip,
@@ -351,7 +443,7 @@ describe('ProjectController', function () {
   describe('restoreProject', function () {
     it('should tell the project deleter', function (done) {
       this.res.sendStatus = code => {
-        this.ProjectDeleter.restoreProject
+        this.ProjectDeleter.promises.restoreProject
           .calledWith(this.project_id)
           .should.equal(true)
         code.should.equal(200)
@@ -364,7 +456,7 @@ describe('ProjectController', function () {
   describe('cloneProject', function () {
     it('should call the project duplicator', function (done) {
       this.res.json = json => {
-        this.ProjectDuplicator.duplicate
+        this.ProjectDuplicator.promises.duplicate
           .calledWith(this.user, this.project_id, this.projectName)
           .should.equal(true)
         json.project_id.should.equal(this.project_id)
@@ -378,10 +470,10 @@ describe('ProjectController', function () {
     it('should call the projectCreationHandler with createExampleProject', function (done) {
       this.req.body.template = 'example'
       this.res.json = json => {
-        this.ProjectCreationHandler.createExampleProject
+        this.ProjectCreationHandler.promises.createExampleProject
           .calledWith(this.user._id, this.projectName)
           .should.equal(true)
-        this.ProjectCreationHandler.createBasicProject.called.should.equal(
+        this.ProjectCreationHandler.promises.createBasicProject.called.should.equal(
           false
         )
         done()
@@ -392,544 +484,15 @@ describe('ProjectController', function () {
     it('should call the projectCreationHandler with createBasicProject', function (done) {
       this.req.body.template = 'basic'
       this.res.json = json => {
-        this.ProjectCreationHandler.createExampleProject.called.should.equal(
+        this.ProjectCreationHandler.promises.createExampleProject.called.should.equal(
           false
         )
-        this.ProjectCreationHandler.createBasicProject
+        this.ProjectCreationHandler.promises.createBasicProject
           .calledWith(this.user._id, this.projectName)
           .should.equal(true)
         done()
       }
       this.ProjectController.newProject(this.req, this.res)
-    })
-  })
-
-  describe('projectListPage', function () {
-    beforeEach(function () {
-      this.tags = [
-        { name: 1, project_ids: ['1', '2', '3'] },
-        { name: 2, project_ids: ['a', '1'] },
-        { name: 3, project_ids: ['a', 'b', 'c', 'd'] },
-      ]
-      this.notifications = [
-        {
-          _id: '1',
-          user_id: '2',
-          templateKey: '3',
-          messageOpts: '4',
-          key: '5',
-        },
-      ]
-      this.projects = [
-        { _id: 1, lastUpdated: 1, owner_ref: 'user-1' },
-        {
-          _id: 2,
-          lastUpdated: 2,
-          owner_ref: 'user-2',
-          lastUpdatedBy: 'user-1',
-        },
-      ]
-      this.collabertions = [{ _id: 5, lastUpdated: 5, owner_ref: 'user-1' }]
-      this.readOnly = [{ _id: 3, lastUpdated: 3, owner_ref: 'user-1' }]
-      this.tokenReadAndWrite = [{ _id: 6, lastUpdated: 5, owner_ref: 'user-4' }]
-      this.tokenReadOnly = [{ _id: 7, lastUpdated: 4, owner_ref: 'user-5' }]
-      this.allProjects = {
-        owned: this.projects,
-        readAndWrite: this.collabertions,
-        readOnly: this.readOnly,
-        tokenReadAndWrite: this.tokenReadAndWrite,
-        tokenReadOnly: this.tokenReadOnly,
-      }
-
-      this.users = {
-        'user-1': {
-          first_name: 'James',
-        },
-        'user-2': {
-          first_name: 'Henry',
-        },
-      }
-      this.users[this.user._id] = this.user // Owner
-      this.UserModel.findById = (id, fields, callback) => {
-        callback(null, this.users[id])
-      }
-      this.UserGetter.getUser = (id, fields, callback) => {
-        callback(null, this.users[id])
-      }
-
-      this.LimitationsManager.hasPaidSubscription.callsArgWith(1, null, false)
-      this.TagsHandler.getAllTags.callsArgWith(1, null, this.tags)
-      this.NotificationsHandler.getUserNotifications = sinon
-        .stub()
-        .callsArgWith(1, null, this.notifications, {})
-      this.ProjectGetter.findAllUsersProjects.callsArgWith(
-        2,
-        null,
-        this.allProjects
-      )
-    })
-
-    it('should render the project/list page', function (done) {
-      this.res.render = (pageName, opts) => {
-        pageName.should.equal('project/list')
-        done()
-      }
-      this.ProjectController.projectListPage(this.req, this.res)
-    })
-
-    it('should send the tags', function (done) {
-      this.res.render = (pageName, opts) => {
-        opts.tags.length.should.equal(this.tags.length)
-        done()
-      }
-      this.ProjectController.projectListPage(this.req, this.res)
-    })
-
-    it('should create trigger ip matcher notifications', function (done) {
-      this.settings.overleaf = true
-      this.res.render = (pageName, opts) => {
-        this.NotificationBuilder.ipMatcherAffiliation.called.should.equal(true)
-        done()
-      }
-      this.ProjectController.projectListPage(this.req, this.res)
-    })
-
-    it('should send the projects', function (done) {
-      this.res.render = (pageName, opts) => {
-        opts.projects.length.should.equal(
-          this.projects.length +
-            this.collabertions.length +
-            this.readOnly.length +
-            this.tokenReadAndWrite.length +
-            this.tokenReadOnly.length
-        )
-        done()
-      }
-      this.ProjectController.projectListPage(this.req, this.res)
-    })
-
-    it('should send the user', function (done) {
-      this.res.render = (pageName, opts) => {
-        opts.user.should.deep.equal(this.user)
-        done()
-      }
-      this.ProjectController.projectListPage(this.req, this.res)
-    })
-
-    it('should inject the users', function (done) {
-      this.res.render = (pageName, opts) => {
-        opts.projects[0].owner.should.equal(
-          this.users[this.projects[0].owner_ref]
-        )
-        opts.projects[1].owner.should.equal(
-          this.users[this.projects[1].owner_ref]
-        )
-        opts.projects[1].lastUpdatedBy.should.equal(
-          this.users[this.projects[1].lastUpdatedBy]
-        )
-        done()
-      }
-      this.ProjectController.projectListPage(this.req, this.res)
-    })
-
-    it('should send hasSubscription == false when no subscription', function (done) {
-      this.res.render = (pageName, opts) => {
-        opts.hasSubscription.should.equal(false)
-        done()
-      }
-      this.ProjectController.projectListPage(this.req, this.res)
-    })
-
-    it('should send hasSubscription == true when there is a subscription', function (done) {
-      this.LimitationsManager.hasPaidSubscription = sinon
-        .stub()
-        .callsArgWith(1, null, true)
-      this.res.render = (pageName, opts) => {
-        opts.hasSubscription.should.equal(true)
-        done()
-      }
-      this.ProjectController.projectListPage(this.req, this.res)
-    })
-
-    it("should send the user's best subscription when saas feature present", function (done) {
-      this.Features.hasFeature.withArgs('saas').returns(true)
-      this.res.render = (pageName, opts) => {
-        expect(opts.usersBestSubscription).to.deep.include({ type: 'free' })
-        done()
-      }
-      this.ProjectController.projectListPage(this.req, this.res)
-    })
-
-    it('should not return a best subscription without saas feature', function (done) {
-      this.Features.hasFeature.withArgs('saas').returns(false)
-      this.res.render = (pageName, opts) => {
-        expect(opts.usersBestSubscription).to.be.undefined
-        done()
-      }
-      this.ProjectController.projectListPage(this.req, this.res)
-    })
-
-    describe('front widget', function (done) {
-      beforeEach(function () {
-        this.settings.overleaf = {
-          front_chat_widget_room_id: 'chat-room-id',
-        }
-      })
-
-      it('should show for paid users', function (done) {
-        this.user.features.github = true
-        this.user.features.dropbox = true
-        this.res.render = (pageName, opts) => {
-          opts.frontChatWidgetRoomId.should.equal(
-            this.settings.overleaf.front_chat_widget_room_id
-          )
-          done()
-        }
-        this.ProjectController.projectListPage(this.req, this.res)
-      })
-
-      it('should show for sample users', function (done) {
-        this.user._id = ObjectId('588f3ddae8ebc1bac07c9f00') // last two digits
-        this.res.render = (pageName, opts) => {
-          opts.frontChatWidgetRoomId.should.equal(
-            this.settings.overleaf.front_chat_widget_room_id
-          )
-          done()
-        }
-        this.ProjectController.projectListPage(this.req, this.res)
-      })
-
-      it('should not show for non sample users', function (done) {
-        this.user._id = ObjectId('588f3ddae8ebc1bac07c9fff') // last two digits
-        this.res.render = (pageName, opts) => {
-          expect(opts.frontChatWidgetRoomId).to.equal(undefined)
-          done()
-        }
-        this.ProjectController.projectListPage(this.req, this.res)
-      })
-    })
-
-    describe('With Institution SSO feature', function () {
-      beforeEach(function (done) {
-        this.institutionEmail = 'test@overleaf.com'
-        this.institutionName = 'Overleaf'
-        this.Features.hasFeature.withArgs('saml').returns(true)
-        this.Features.hasFeature.withArgs('affiliations').returns(true)
-        this.Features.hasFeature.withArgs('overleaf-integration').returns(true)
-        done()
-      })
-      it('should show institution SSO available notification for confirmed domains', function () {
-        this.UserGetter.getUserFullEmails.yields(null, [
-          {
-            email: 'test@overleaf.com',
-            affiliation: {
-              institution: {
-                id: 1,
-                confirmed: true,
-                name: 'Overleaf',
-                ssoBeta: false,
-                ssoEnabled: true,
-              },
-            },
-          },
-        ])
-        this.res.render = (pageName, opts) => {
-          expect(opts.notificationsInstitution).to.deep.include({
-            email: this.institutionEmail,
-            institutionId: 1,
-            institutionName: this.institutionName,
-            templateKey: 'notification_institution_sso_available',
-          })
-        }
-        this.ProjectController.projectListPage(this.req, this.res)
-      })
-      it('should show a linked notification', function () {
-        this.req.session.saml = {
-          institutionEmail: this.institutionEmail,
-          linked: {
-            hasEntitlement: false,
-            universityName: this.institutionName,
-          },
-        }
-        this.res.render = (pageName, opts) => {
-          expect(opts.notificationsInstitution).to.deep.include({
-            email: this.institutionEmail,
-            institutionName: this.institutionName,
-            templateKey: 'notification_institution_sso_linked',
-          })
-        }
-        this.ProjectController.projectListPage(this.req, this.res)
-      })
-      it('should show a linked another email notification', function () {
-        // when they request to link an email but the institution returns
-        // a different email
-        this.res.render = (pageName, opts) => {
-          expect(opts.notificationsInstitution).to.deep.include({
-            institutionEmail: this.institutionEmail,
-            requestedEmail: 'requested@overleaf.com',
-            templateKey: 'notification_institution_sso_non_canonical',
-          })
-        }
-        this.req.session.saml = {
-          emailNonCanonical: this.institutionEmail,
-          institutionEmail: this.institutionEmail,
-          requestedEmail: 'requested@overleaf.com',
-          linked: {
-            hasEntitlement: false,
-            universityName: this.institutionName,
-          },
-        }
-        this.ProjectController.projectListPage(this.req, this.res)
-      })
-
-      it('should show a notification when intent was to register via SSO but account existed', function () {
-        this.res.render = (pageName, opts) => {
-          expect(opts.notificationsInstitution).to.deep.include({
-            email: this.institutionEmail,
-            templateKey: 'notification_institution_sso_already_registered',
-          })
-        }
-        this.req.session.saml = {
-          institutionEmail: this.institutionEmail,
-          linked: {
-            hasEntitlement: false,
-            universityName: 'Overleaf',
-          },
-          registerIntercept: {
-            id: 1,
-            name: 'Example University',
-          },
-        }
-        this.ProjectController.projectListPage(this.req, this.res)
-      })
-
-      it('should not show a register notification if the flow was abandoned', function () {
-        // could initially start to register with an SSO email and then
-        // abandon flow and login with an existing non-institution SSO email
-        this.res.render = (pageName, opts) => {
-          expect(opts.notificationsInstitution).to.deep.not.include({
-            email: 'test@overleaf.com',
-            templateKey: 'notification_institution_sso_already_registered',
-          })
-        }
-        this.req.session.saml = {
-          registerIntercept: {
-            id: 1,
-            name: 'Example University',
-          },
-        }
-        this.ProjectController.projectListPage(this.req, this.res)
-      })
-
-      it('should show error notification', function () {
-        this.res.render = (pageName, opts) => {
-          expect(opts.notificationsInstitution.length).to.equal(1)
-          expect(opts.notificationsInstitution[0].templateKey).to.equal(
-            'notification_institution_sso_error'
-          )
-          expect(opts.notificationsInstitution[0].error).to.be.instanceof(
-            Errors.SAMLAlreadyLinkedError
-          )
-        }
-        this.req.session.saml = {
-          institutionEmail: this.institutionEmail,
-          error: new Errors.SAMLAlreadyLinkedError(),
-        }
-        this.ProjectController.projectListPage(this.req, this.res)
-      })
-
-      describe('for an unconfirmed domain for an SSO institution', function () {
-        beforeEach(function (done) {
-          this.UserGetter.getUserFullEmails.yields(null, [
-            {
-              email: 'test@overleaf-uncofirmed.com',
-              affiliation: {
-                institution: {
-                  id: 1,
-                  confirmed: false,
-                  name: 'Overleaf',
-                  ssoBeta: false,
-                  ssoEnabled: true,
-                },
-              },
-            },
-          ])
-          done()
-        })
-        it('should not show institution SSO available notification', function () {
-          this.res.render = (pageName, opts) => {
-            expect(opts.notificationsInstitution.length).to.equal(0)
-          }
-          this.ProjectController.projectListPage(this.req, this.res)
-        })
-      })
-      describe('when linking/logging in initiated on institution side', function () {
-        it('should not show a linked another email notification', function () {
-          // this is only used when initated on Overleaf,
-          // because we keep track of the requested email they tried to link
-          this.res.render = (pageName, opts) => {
-            expect(opts.notificationsInstitution).to.not.deep.include({
-              institutionEmail: this.institutionEmail,
-              requestedEmail: undefined,
-              templateKey: 'notification_institution_sso_non_canonical',
-            })
-          }
-          this.req.session.saml = {
-            emailNonCanonical: this.institutionEmail,
-            institutionEmail: this.institutionEmail,
-            linked: {
-              hasEntitlement: false,
-              universityName: this.institutionName,
-            },
-          }
-          this.ProjectController.projectListPage(this.req, this.res)
-        })
-      })
-      describe('Institution with SSO beta testable', function () {
-        beforeEach(function (done) {
-          this.UserGetter.getUserFullEmails.yields(null, [
-            {
-              email: 'beta@beta.com',
-              affiliation: {
-                institution: {
-                  id: 2,
-                  confirmed: true,
-                  name: 'Beta University',
-                  ssoBeta: true,
-                  ssoEnabled: false,
-                },
-              },
-            },
-          ])
-          done()
-        })
-        it('should show institution SSO available notification when on a beta testing session', function () {
-          this.req.session.samlBeta = true
-          this.res.render = (pageName, opts) => {
-            expect(opts.notificationsInstitution).to.deep.include({
-              email: 'beta@beta.com',
-              institutionId: 2,
-              institutionName: 'Beta University',
-              templateKey: 'notification_institution_sso_available',
-            })
-          }
-          this.ProjectController.projectListPage(this.req, this.res)
-        })
-        it('should not show institution SSO available notification when not on a beta testing session', function () {
-          this.req.session.samlBeta = false
-          this.res.render = (pageName, opts) => {
-            expect(opts.notificationsInstitution).to.deep.not.include({
-              email: 'test@overleaf.com',
-              institutionId: 1,
-              institutionName: 'Overleaf',
-              templateKey: 'notification_institution_sso_available',
-            })
-          }
-          this.ProjectController.projectListPage(this.req, this.res)
-        })
-      })
-    })
-
-    describe('Without Institution SSO feature', function () {
-      beforeEach(function (done) {
-        this.Features.hasFeature.withArgs('saml').returns(false)
-        done()
-      })
-      it('should not show institution sso available notification', function () {
-        this.res.render = (pageName, opts) => {
-          expect(opts.notificationsInstitution).to.deep.not.include({
-            email: 'test@overleaf.com',
-            institutionId: 1,
-            institutionName: 'Overleaf',
-            templateKey: 'notification_institution_sso_available',
-          })
-        }
-        this.ProjectController.projectListPage(this.req, this.res)
-      })
-    })
-  })
-
-  describe('projectListPage with duplicate projects', function () {
-    beforeEach(function () {
-      this.tags = [
-        { name: 1, project_ids: ['1', '2', '3'] },
-        { name: 2, project_ids: ['a', '1'] },
-        { name: 3, project_ids: ['a', 'b', 'c', 'd'] },
-      ]
-      this.notifications = [
-        {
-          _id: '1',
-          user_id: '2',
-          templateKey: '3',
-          messageOpts: '4',
-          key: '5',
-        },
-      ]
-      this.projects = [
-        { _id: 1, lastUpdated: 1, owner_ref: 'user-1' },
-        { _id: 2, lastUpdated: 2, owner_ref: 'user-2' },
-      ]
-      this.collabertions = [{ _id: 5, lastUpdated: 5, owner_ref: 'user-1' }]
-      this.readOnly = [{ _id: 3, lastUpdated: 3, owner_ref: 'user-1' }]
-      this.tokenReadAndWrite = [{ _id: 6, lastUpdated: 5, owner_ref: 'user-4' }]
-      this.tokenReadOnly = [
-        { _id: 6, lastUpdated: 5, owner_ref: 'user-4' }, // Also in tokenReadAndWrite
-        { _id: 7, lastUpdated: 4, owner_ref: 'user-5' },
-      ]
-      this.allProjects = {
-        owned: this.projects,
-        readAndWrite: this.collabertions,
-        readOnly: this.readOnly,
-        tokenReadAndWrite: this.tokenReadAndWrite,
-        tokenReadOnly: this.tokenReadOnly,
-      }
-
-      this.users = {
-        'user-1': {
-          first_name: 'James',
-        },
-        'user-2': {
-          first_name: 'Henry',
-        },
-      }
-      this.users[this.user._id] = this.user // Owner
-      this.UserModel.findById = (id, fields, callback) => {
-        callback(null, this.users[id])
-      }
-
-      this.LimitationsManager.hasPaidSubscription.callsArgWith(1, null, false)
-      this.TagsHandler.getAllTags.callsArgWith(1, null, this.tags)
-      this.NotificationsHandler.getUserNotifications = sinon
-        .stub()
-        .callsArgWith(1, null, this.notifications, {})
-      this.ProjectGetter.findAllUsersProjects.callsArgWith(
-        2,
-        null,
-        this.allProjects
-      )
-    })
-
-    it('should render the project/list page', function (done) {
-      this.res.render = (pageName, opts) => {
-        pageName.should.equal('project/list')
-        done()
-      }
-      this.ProjectController.projectListPage(this.req, this.res)
-    })
-
-    it('should omit one of the projects', function (done) {
-      this.res.render = (pageName, opts) => {
-        opts.projects.length.should.equal(
-          this.projects.length +
-            this.collabertions.length +
-            this.readOnly.length +
-            this.tokenReadAndWrite.length +
-            this.tokenReadOnly.length -
-            1
-        )
-        done()
-      }
-      this.ProjectController.projectListPage(this.req, this.res)
     })
   })
 
@@ -940,10 +503,10 @@ describe('ProjectController', function () {
     })
 
     it('should call the editor controller', function (done) {
-      this.EditorController.renameProject.callsArgWith(2)
+      this.EditorController.promises.renameProject.resolves()
       this.res.sendStatus = code => {
         code.should.equal(200)
-        this.EditorController.renameProject
+        this.EditorController.promises.renameProject
           .calledWith(this.project_id, this.newProjectName)
           .should.equal(true)
         done()
@@ -953,8 +516,7 @@ describe('ProjectController', function () {
 
     it('should send an error to next() if there is a problem', function (done) {
       let error
-      this.EditorController.renameProject.callsArgWith(
-        2,
+      this.EditorController.promises.renameProject.rejects(
         (error = new Error('problem'))
       )
       const next = e => {
@@ -991,22 +553,22 @@ describe('ProjectController', function () {
           zotero: { encrypted: 'bbbb' },
         },
       }
-      this.ProjectGetter.getProject.callsArgWith(2, null, this.project)
-      this.UserModel.findById.callsArgWith(2, null, this.user)
-      this.SubscriptionLocator.getUsersSubscription.callsArgWith(1, null, {})
-      this.AuthorizationManager.getPrivilegeLevelForProject.callsArgWith(
-        3,
-        null,
+      this.ProjectGetter.promises.getProject.resolves(this.project)
+      this.UserModel.findById.returns({
+        exec: sinon.stub().resolves(this.user),
+      })
+      this.SubscriptionLocator.promises.getUsersSubscription.resolves({})
+      this.AuthorizationManager.promises.getPrivilegeLevelForProject.resolves(
         'owner'
       )
       this.ProjectDeleter.unmarkAsDeletedByExternalSource = sinon.stub()
-      this.InactiveProjectManager.reactivateProjectIfRequired.callsArgWith(1)
-      this.ProjectUpdateHandler.markAsOpened.callsArgWith(1)
+      this.InactiveProjectManager.promises.reactivateProjectIfRequired.resolves()
+      this.ProjectUpdateHandler.promises.markAsOpened.resolves()
     })
 
-    it('should render the project/editor page', function (done) {
+    it('should render the project/ide-react page', function (done) {
       this.res.render = (pageName, opts) => {
-        pageName.should.equal('project/editor')
+        pageName.should.equal('project/ide-react')
         done()
       }
       this.ProjectController.loadEditor(this.req, this.res)
@@ -1047,7 +609,7 @@ describe('ProjectController', function () {
         opts.isRestrictedTokenMember.should.equal(false)
         return done()
       }
-      return this.ProjectController.loadEditor(this.req, this.res)
+      this.ProjectController.loadEditor(this.req, this.res)
     })
 
     it('should set isRestrictedTokenMember when appropriate', function (done) {
@@ -1057,7 +619,29 @@ describe('ProjectController', function () {
         opts.isRestrictedTokenMember.should.equal(true)
         return done()
       }
-      return this.ProjectController.loadEditor(this.req, this.res)
+      this.ProjectController.loadEditor(this.req, this.res)
+    })
+
+    it('should invoke the session maintenance for logged in user', function (done) {
+      this.res.render = () => {
+        this.SplitTestSessionHandler.promises.sessionMaintenance.should.have.been.calledWith(
+          this.req,
+          this.user
+        )
+        done()
+      }
+      this.ProjectController.loadEditor(this.req, this.res)
+    })
+
+    it('should invoke the session maintenance for anonymous user', function (done) {
+      this.SessionManager.getLoggedInUserId.returns(null)
+      this.res.render = () => {
+        this.SplitTestSessionHandler.promises.sessionMaintenance.should.have.been.calledWith(
+          this.req
+        )
+        done()
+      }
+      this.ProjectController.loadEditor(this.req, this.res)
     })
 
     it('should render the closed page if the editor is closed', function (done) {
@@ -1070,11 +654,16 @@ describe('ProjectController', function () {
     })
 
     it('should not render the page if the project can not be accessed', function (done) {
-      this.AuthorizationManager.getPrivilegeLevelForProject = sinon
+      this.AuthorizationManager.promises.getPrivilegeLevelForProject = sinon
         .stub()
-        .callsArgWith(3, null, null)
+        .resolves(null)
       this.res.sendStatus = (resCode, opts) => {
         resCode.should.equal(401)
+        this.AuthorizationManager.promises.getPrivilegeLevelForProject.should.have.been.calledWith(
+          this.user._id,
+          this.project_id,
+          'some-token'
+        )
         done()
       }
       this.ProjectController.loadEditor(this.req, this.res)
@@ -1082,7 +671,7 @@ describe('ProjectController', function () {
 
     it('should reactivateProjectIfRequired', function (done) {
       this.res.render = (pageName, opts) => {
-        this.InactiveProjectManager.reactivateProjectIfRequired
+        this.InactiveProjectManager.promises.reactivateProjectIfRequired
           .calledWith(this.project_id)
           .should.equal(true)
         done()
@@ -1094,7 +683,7 @@ describe('ProjectController', function () {
       this.res.render = (pageName, opts) => {
         expect(this.UserModel.updateOne).to.have.been.calledOnce
         expect(this.UserModel.updateOne.args[0][0]).to.deep.equal({
-          _id: ObjectId(this.user._id),
+          _id: new ObjectId(this.user._id),
         })
         expect(this.UserModel.updateOne.args[0][1].$set.lastActive).to.exist
         done()
@@ -1104,7 +693,7 @@ describe('ProjectController', function () {
 
     it('should mark project as opened', function (done) {
       this.res.render = (pageName, opts) => {
-        this.ProjectUpdateHandler.markAsOpened
+        this.ProjectUpdateHandler.promises.markAsOpened
           .calledWith(this.project_id)
           .should.equal(true)
         done()
@@ -1113,9 +702,9 @@ describe('ProjectController', function () {
     })
 
     it('should call the brand variations handler for branded projects', function (done) {
-      this.ProjectGetter.getProject.callsArgWith(2, null, this.brandedProject)
+      this.ProjectGetter.promises.getProject.resolves(this.brandedProject)
       this.res.render = (pageName, opts) => {
-        this.BrandVariationsHandler.getBrandVariationById
+        this.BrandVariationsHandler.promises.getBrandVariationById
           .calledWith()
           .should.equal(true)
         done()
@@ -1125,7 +714,7 @@ describe('ProjectController', function () {
 
     it('should not call the brand variations handler for unbranded projects', function (done) {
       this.res.render = (pageName, opts) => {
-        this.BrandVariationsHandler.getBrandVariationById.called.should.equal(
+        this.BrandVariationsHandler.promises.getBrandVariationById.called.should.equal(
           false
         )
         done()
@@ -1134,7 +723,7 @@ describe('ProjectController', function () {
     })
 
     it('should expose the brand variation details as locals for branded projects', function (done) {
-      this.ProjectGetter.getProject.callsArgWith(2, null, this.brandedProject)
+      this.ProjectGetter.promises.getProject.resolves(this.brandedProject)
       this.res.render = (pageName, opts) => {
         opts.brandVariation.should.deep.equal(this.brandVariationDetails)
         done()
@@ -1144,7 +733,7 @@ describe('ProjectController', function () {
 
     it('flushes the project to TPDS if a flush is pending', function (done) {
       this.res.render = () => {
-        this.TpdsProjectFlusher.flushProjectToTpdsIfNeeded.should.have.been.calledWith(
+        this.TpdsProjectFlusher.promises.flushProjectToTpdsIfNeeded.should.have.been.calledWith(
           this.project_id
         )
         done()
@@ -1155,7 +744,7 @@ describe('ProjectController', function () {
     it('should refresh the user features if the epoch is outdated', function (done) {
       this.FeaturesUpdater.featuresEpochIsCurrent = sinon.stub().returns(false)
       this.res.render = () => {
-        this.FeaturesUpdater.refreshFeatures.should.have.been.calledWith(
+        this.FeaturesUpdater.promises.refreshFeatures.should.have.been.calledWith(
           this.user._id,
           'load-editor'
         )
@@ -1397,9 +986,9 @@ describe('ProjectController', function () {
         // default to saas enabled
         this.Features.hasFeature.withArgs('saas').returns(true)
         // default to without a subscription
-        this.SubscriptionLocator.getUsersSubscription = sinon
+        this.SubscriptionLocator.promises.getUsersSubscription = sinon
           .stub()
-          .callsArgWith(1, null, null)
+          .resolves(null)
       })
       it('should not show without the saas feature', function (done) {
         this.Features.hasFeature.withArgs('saas').returns(false)
@@ -1417,9 +1006,9 @@ describe('ProjectController', function () {
         this.ProjectController.loadEditor(this.req, this.res)
       })
       it('should not show for a user with a personal subscription', function (done) {
-        this.SubscriptionLocator.getUsersSubscription = sinon
+        this.SubscriptionLocator.promises.getUsersSubscription = sinon
           .stub()
-          .callsArgWith(1, null, {})
+          .resolves({})
         this.res.render = (pageName, opts) => {
           expect(opts.showUpgradePrompt).to.equal(false)
           done()
@@ -1427,9 +1016,9 @@ describe('ProjectController', function () {
         this.ProjectController.loadEditor(this.req, this.res)
       })
       it('should not show for a user who is a member of a group subscription', function (done) {
-        this.LimitationsManager.userIsMemberOfGroupSubscription = sinon
+        this.LimitationsManager.promises.userIsMemberOfGroupSubscription = sinon
           .stub()
-          .callsArgWith(1, null, true)
+          .resolves({ isMember: true })
         this.res.render = (pageName, opts) => {
           expect(opts.showUpgradePrompt).to.equal(false)
           done()
@@ -1437,11 +1026,95 @@ describe('ProjectController', function () {
         this.ProjectController.loadEditor(this.req, this.res)
       })
       it('should not show for a user with an affiliated paid university', function (done) {
-        this.InstitutionsFeatures.hasLicence = sinon
+        this.InstitutionsFeatures.promises.hasLicence = sinon
           .stub()
-          .callsArgWith(1, null, true)
+          .resolves(true)
         this.res.render = (pageName, opts) => {
           expect(opts.showUpgradePrompt).to.equal(false)
+          done()
+        }
+        this.ProjectController.loadEditor(this.req, this.res)
+      })
+    })
+
+    describe('when user is a read write token member (and not already a named editor)', function () {
+      beforeEach(function () {
+        this.CollaboratorsGetter.promises.userIsTokenMember.resolves(true)
+        this.CollaboratorsGetter.promises.userIsReadWriteTokenMember.resolves(
+          true
+        )
+        this.CollaboratorsGetter.promises.isUserInvitedReadWriteMemberOfProject.resolves(
+          false
+        )
+      })
+
+      it('should redirect to the sharing-updates page', function (done) {
+        this.res.redirect = url => {
+          expect(url).to.equal(`/project/${this.project_id}/sharing-updates`)
+          done()
+        }
+        this.ProjectController.loadEditor(this.req, this.res)
+      })
+    })
+
+    describe('when user is a read write token member but also a named editor', function () {
+      beforeEach(function () {
+        this.CollaboratorsGetter.promises.userIsTokenMember.resolves(true)
+        this.CollaboratorsGetter.promises.userIsReadWriteTokenMember.resolves(
+          true
+        )
+        this.CollaboratorsGetter.promises.isUserInvitedReadWriteMemberOfProject.resolves(
+          true
+        )
+      })
+
+      it('should not redirect to the sharing-updates page, and should load the editor', function (done) {
+        this.res.render = (pageName, opts) => {
+          done()
+        }
+        this.ProjectController.loadEditor(this.req, this.res)
+      })
+    })
+
+    it('should call the collaborator limit enforcement check', function (done) {
+      this.res.render = (pageName, opts) => {
+        this.Modules.promises.hooks.fire.should.have.been.calledWith(
+          'enforceCollaboratorLimit',
+          this.project_id
+        )
+        done()
+      }
+      this.ProjectController.loadEditor(this.req, this.res)
+    })
+
+    describe('chatEnabled flag', function () {
+      it('should be set to false when the feature is disabled', function (done) {
+        this.Features.hasFeature = sinon.stub().withArgs('chat').returns(false)
+
+        this.res.render = (pageName, opts) => {
+          expect(opts.chatEnabled).to.be.false
+          done()
+        }
+        this.ProjectController.loadEditor(this.req, this.res)
+      })
+
+      it('should be set to false when the feature is enabled but the capability is not available', function (done) {
+        this.Features.hasFeature = sinon.stub().withArgs('chat').returns(false)
+        this.req.capabilitySet = new Set()
+
+        this.res.render = (pageName, opts) => {
+          expect(opts.chatEnabled).to.be.false
+          done()
+        }
+        this.ProjectController.loadEditor(this.req, this.res)
+      })
+
+      it('should be set to true when the feature is enabled and the capability is available', function (done) {
+        this.Features.hasFeature = sinon.stub().withArgs('chat').returns(true)
+        this.req.capabilitySet = new Set(['chat'])
+
+        this.res.render = (pageName, opts) => {
+          expect(opts.chatEnabled).to.be.true
           done()
         }
         this.ProjectController.loadEditor(this.req, this.res)
@@ -1498,9 +1171,9 @@ describe('ProjectController', function () {
         .withArgs(projects[3], this.user._id)
         .returns(false)
 
-      this.ProjectGetter.findAllUsersProjects = sinon
+      this.ProjectGetter.promises.findAllUsersProjects = sinon
         .stub()
-        .callsArgWith(2, null, [])
+        .resolves([])
       this.ProjectController._buildProjectList = sinon.stub().returns(projects)
       this.SessionManager.getLoggedInUserId = sinon
         .stub()
@@ -1532,9 +1205,9 @@ describe('ProjectController', function () {
         { path: '/main.tex', doc: true },
       ]
       this.files = [{ path: '/things/a.txt' }]
-      this.ProjectGetter.getProject = sinon
+      this.ProjectGetter.promises.getProject = sinon
         .stub()
-        .callsArgWith(1, null, this.project)
+        .resolves(this.project)
       this.ProjectEntityHandler.getAllEntitiesFromProject = sinon
         .stub()
         .returns({ docs: this.docs, files: this.files })
@@ -1550,10 +1223,21 @@ describe('ProjectController', function () {
             { path: '/things/b.txt', type: 'doc' },
           ],
         })
-        expect(this.ProjectGetter.getProject.callCount).to.equal(1)
+        expect(this.ProjectGetter.promises.getProject.callCount).to.equal(1)
         expect(
           this.ProjectEntityHandler.getAllEntitiesFromProject.callCount
         ).to.equal(1)
+        done()
+      }
+      this.ProjectController.projectEntitiesJson(this.req, this.res, this.next)
+    })
+
+    it('should call next with an error if the project file tree is invalid', function (done) {
+      this.ProjectEntityHandler.getAllEntitiesFromProject = sinon
+        .stub()
+        .throws()
+      this.next = err => {
+        expect(err).to.be.an.instanceof(Error)
         done()
       }
       this.ProjectController.projectEntitiesJson(this.req, this.res, this.next)

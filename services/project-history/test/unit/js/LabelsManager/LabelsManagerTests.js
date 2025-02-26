@@ -1,19 +1,9 @@
-/* eslint-disable
-    no-return-assign,
-    no-undef,
-*/
-// TODO: This file was created by bulk-decaffeinate.
-// Fix any style issues and re-enable lint.
-/*
- * decaffeinate suggestions:
- * DS102: Remove unnecessary code created because of implicit returns
- * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
- */
 import sinon from 'sinon'
 import { expect } from 'chai'
-import { ObjectId } from 'mongodb'
+import mongodb from 'mongodb-legacy'
 import tk from 'timekeeper'
 import { strict as esmock } from 'esmock'
+const { ObjectId } = mongodb
 
 const MODULE_PATH = '../../../../app/js/LabelsManager.js'
 
@@ -52,20 +42,20 @@ describe('LabelsManager', function () {
     this.historyId = 123
     this.user_id = new ObjectId().toString()
     this.label_id = new ObjectId().toString()
-    return (this.callback = sinon.stub())
+    this.callback = sinon.stub()
   })
 
   afterEach(function () {
-    return tk.reset()
+    tk.reset()
   })
 
   describe('getLabels', function () {
     beforeEach(function () {
       this.label = {
-        _id: ObjectId(),
+        _id: new ObjectId(),
         comment: 'some comment',
         version: 123,
-        user_id: ObjectId(),
+        user_id: new ObjectId(),
         created_at: new Date(),
       }
 
@@ -76,17 +66,17 @@ describe('LabelsManager', function () {
 
     describe('with valid project id', function () {
       beforeEach(function () {
-        return this.LabelsManager.getLabels(this.project_id, this.callback)
+        this.LabelsManager.getLabels(this.project_id, this.callback)
       })
 
       it('gets the labels state from mongo', function () {
-        return expect(
-          this.db.projectHistoryLabels.find
-        ).to.have.been.calledWith({ project_id: ObjectId(this.project_id) })
+        expect(this.db.projectHistoryLabels.find).to.have.been.calledWith({
+          project_id: new ObjectId(this.project_id),
+        })
       })
 
-      return it('returns formatted labels', function () {
-        return expect(this.callback).to.have.been.calledWith(null, [
+      it('returns formatted labels', function () {
+        expect(this.callback).to.have.been.calledWith(null, [
           sinon.match({
             id: this.label._id,
             comment: this.label.comment,
@@ -98,11 +88,11 @@ describe('LabelsManager', function () {
       })
     })
 
-    return describe('with invalid project id', function () {
-      return it('returns an error', function (done) {
-        return this.LabelsManager.getLabels('invalid id', error => {
+    describe('with invalid project id', function () {
+      it('returns an error', function (done) {
+        this.LabelsManager.getLabels('invalid id', error => {
           expect(error).to.exist
-          return done()
+          done()
         })
       })
     })
@@ -119,9 +109,9 @@ describe('LabelsManager', function () {
       beforeEach(function () {
         this.createdAt = new Date(1)
         this.db.projectHistoryLabels.insertOne.yields(null, {
-          insertedId: ObjectId(this.label_id),
+          insertedId: new ObjectId(this.label_id),
         })
-        return this.LabelsManager.createLabel(
+        this.LabelsManager.createLabel(
           this.project_id,
           this.user_id,
           this.version,
@@ -133,44 +123,42 @@ describe('LabelsManager', function () {
       })
 
       it('flushes unprocessed updates', function () {
-        return expect(
+        expect(
           this.UpdatesProcessor.processUpdatesForProject
         ).to.have.been.calledWith(this.project_id)
       })
 
       it('finds the V1 project id', function () {
-        return expect(this.WebApiManager.getHistoryId).to.have.been.calledWith(
+        expect(this.WebApiManager.getHistoryId).to.have.been.calledWith(
           this.project_id
         )
       })
 
       it('checks there is a chunk for the project + version', function () {
-        return expect(
+        expect(
           this.HistoryStoreManager.getChunkAtVersion
         ).to.have.been.calledWith(this.project_id, this.historyId, this.version)
       })
 
       it('create the label in mongo', function () {
-        return expect(
-          this.db.projectHistoryLabels.insertOne
-        ).to.have.been.calledWith(
+        expect(this.db.projectHistoryLabels.insertOne).to.have.been.calledWith(
           sinon.match({
-            project_id: ObjectId(this.project_id),
+            project_id: new ObjectId(this.project_id),
             comment: this.comment,
             version: this.version,
-            user_id: ObjectId(this.user_id),
+            user_id: new ObjectId(this.user_id),
             created_at: this.createdAt,
           }),
           sinon.match.any
         )
       })
 
-      return it('returns the label', function () {
-        return expect(this.callback).to.have.been.calledWith(null, {
-          id: ObjectId(this.label_id),
+      it('returns the label', function () {
+        expect(this.callback).to.have.been.calledWith(null, {
+          id: new ObjectId(this.label_id),
           comment: this.comment,
           version: this.version,
-          user_id: ObjectId(this.user_id),
+          user_id: new ObjectId(this.user_id),
           created_at: this.createdAt,
         })
       })
@@ -179,9 +167,9 @@ describe('LabelsManager', function () {
     describe('without createdAt', function () {
       beforeEach(function () {
         this.db.projectHistoryLabels.insertOne.yields(null, {
-          insertedId: ObjectId(this.label_id),
+          insertedId: new ObjectId(this.label_id),
         })
-        return this.LabelsManager.createLabel(
+        this.LabelsManager.createLabel(
           this.project_id,
           this.user_id,
           this.version,
@@ -192,28 +180,26 @@ describe('LabelsManager', function () {
         )
       })
 
-      return it('create the label with the current date', function () {
-        return expect(
-          this.db.projectHistoryLabels.insertOne
-        ).to.have.been.calledWith(
+      it('create the label with the current date', function () {
+        expect(this.db.projectHistoryLabels.insertOne).to.have.been.calledWith(
           sinon.match({
-            project_id: ObjectId(this.project_id),
+            project_id: new ObjectId(this.project_id),
             comment: this.comment,
             version: this.version,
-            user_id: ObjectId(this.user_id),
+            user_id: new ObjectId(this.user_id),
             created_at: this.now,
           })
         )
       })
     })
 
-    return describe('with shouldValidateExists = false', function () {
+    describe('with shouldValidateExists = false', function () {
       beforeEach(function () {
         this.createdAt = new Date(1)
         this.db.projectHistoryLabels.insertOne.yields(null, {
-          insertedId: ObjectId(this.label_id),
+          insertedId: new ObjectId(this.label_id),
         })
-        return this.LabelsManager.createLabel(
+        this.LabelsManager.createLabel(
           this.project_id,
           this.user_id,
           this.version,
@@ -224,17 +210,47 @@ describe('LabelsManager', function () {
         )
       })
 
-      return it('checks there is a chunk for the project + version', function () {
-        return expect(this.HistoryStoreManager.getChunkAtVersion).to.not.have
-          .been.called
+      it('checks there is a chunk for the project + version', function () {
+        expect(this.HistoryStoreManager.getChunkAtVersion).to.not.have.been
+          .called
+      })
+    })
+
+    describe('with no userId', function () {
+      beforeEach(function () {
+        this.db.projectHistoryLabels.insertOne.yields(null, {
+          insertedId: new ObjectId(this.label_id),
+        })
+        const userId = undefined
+        this.LabelsManager.createLabel(
+          this.project_id,
+          userId,
+          this.version,
+          this.comment,
+          this.createdAt,
+          false,
+          this.callback
+        )
+      })
+
+      it('creates the label without user_id', function () {
+        expect(this.db.projectHistoryLabels.insertOne).to.have.been.calledWith(
+          sinon.match({
+            project_id: new ObjectId(this.project_id),
+            comment: this.comment,
+            version: this.version,
+            user_id: undefined,
+            created_at: this.now,
+          })
+        )
       })
     })
   })
 
-  return describe('deleteLabel', function () {
+  describe('deleteLabelForUser', function () {
     beforeEach(function () {
       this.db.projectHistoryLabels.deleteOne.yields()
-      return this.LabelsManager.deleteLabel(
+      this.LabelsManager.deleteLabelForUser(
         this.project_id,
         this.user_id,
         this.label_id,
@@ -242,14 +258,33 @@ describe('LabelsManager', function () {
       )
     })
 
-    return it('removes the label from the database', function () {
-      return expect(
-        this.db.projectHistoryLabels.deleteOne
-      ).to.have.been.calledWith(
+    it('removes the label from the database', function () {
+      expect(this.db.projectHistoryLabels.deleteOne).to.have.been.calledWith(
         {
-          _id: ObjectId(this.label_id),
-          project_id: ObjectId(this.project_id),
-          user_id: ObjectId(this.user_id),
+          _id: new ObjectId(this.label_id),
+          project_id: new ObjectId(this.project_id),
+          user_id: new ObjectId(this.user_id),
+        },
+        this.callback
+      )
+    })
+  })
+
+  describe('deleteLabel', function () {
+    beforeEach(function () {
+      this.db.projectHistoryLabels.deleteOne.yields()
+      this.LabelsManager.deleteLabel(
+        this.project_id,
+        this.label_id,
+        this.callback
+      )
+    })
+
+    it('removes the label from the database', function () {
+      expect(this.db.projectHistoryLabels.deleteOne).to.have.been.calledWith(
+        {
+          _id: new ObjectId(this.label_id),
+          project_id: new ObjectId(this.project_id),
         },
         this.callback
       )

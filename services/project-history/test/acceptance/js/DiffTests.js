@@ -1,13 +1,14 @@
 import { expect } from 'chai'
 import request from 'request'
-import crypto from 'crypto'
-import { ObjectId } from 'mongodb'
+import crypto from 'node:crypto'
+import mongodb from 'mongodb-legacy'
 import nock from 'nock'
 import * as ProjectHistoryClient from './helpers/ProjectHistoryClient.js'
 import * as ProjectHistoryApp from './helpers/ProjectHistoryApp.js'
+const { ObjectId } = mongodb
 
-const MockHistoryStore = () => nock('http://localhost:3100')
-const MockWeb = () => nock('http://localhost:3000')
+const MockHistoryStore = () => nock('http://127.0.0.1:3100')
+const MockWeb = () => nock('http://127.0.0.1:3000')
 
 function createMockBlob(historyId, content) {
   const sha = crypto.createHash('sha1').update(content).digest('hex')
@@ -25,8 +26,8 @@ describe('Diffs', function () {
         throw error
       }
 
-      this.historyId = ObjectId().toString()
-      this.projectId = ObjectId().toString()
+      this.historyId = new ObjectId().toString()
+      this.projectId = new ObjectId().toString()
 
       MockHistoryStore().post('/api/projects').reply(200, {
         projectId: this.historyId,
@@ -315,7 +316,7 @@ describe('Diffs', function () {
 
     request.get(
       {
-        url: `http://localhost:3054/project/${this.projectId}/diff`,
+        url: `http://127.0.0.1:3054/project/${this.projectId}/diff`,
         qs: {
           pathname: 'not_here.tex',
           from: 3,

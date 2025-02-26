@@ -1,4 +1,5 @@
-import GroupManagers from '../../../../../frontend/js/features/group-management/components/group-managers'
+import '../../../helpers/bootstrap-3'
+import GroupManagers from '@/features/group-management/components/group-managers'
 
 const JOHN_DOE = {
   _id: 'abc123def456',
@@ -25,7 +26,6 @@ const PATHS = {
 describe('group managers', function () {
   beforeEach(function () {
     cy.window().then(win => {
-      win.metaAttributesCache = new Map()
       win.metaAttributesCache.set('ol-users', [JOHN_DOE, BOBBY_LAPOINTE])
       win.metaAttributesCache.set('ol-groupId', GROUP_ID)
       win.metaAttributesCache.set('ol-groupName', 'My Awesome Team')
