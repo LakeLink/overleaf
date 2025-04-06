@@ -1,43 +1,47 @@
-import { screen, within } from '@testing-library/dom'
+import { screen, within, render } from '@testing-library/react'
 import { expect } from 'chai'
-import sinon from 'sinon'
 import fetchMock from 'fetch-mock'
 import SettingsDocument from '../../../../../../frontend/js/features/editor-left-menu/components/settings/settings-document'
-import * as isValidTeXFileModule from '../../../../../../frontend/js/main/is-valid-tex-file'
-import { renderWithEditorContext } from '../../../../helpers/render-with-context'
-import type { MainDocument } from '../../../../../../types/project-settings'
+import { Folder } from '../../../../../../types/folder'
+import { EditorLeftMenuProvider } from '@/features/editor-left-menu/components/editor-left-menu-context'
+import { EditorProviders } from '../../../../helpers/editor-providers'
 
 describe('<SettingsDocument />', function () {
-  let isValidTeXFileStub: sinon.SinonStub
-  const docs: MainDocument[] = [
-    {
-      path: 'main.tex',
-      doc: {
+  const rootFolder: Folder = {
+    _id: 'root-folder-id',
+    name: 'rootFolder',
+    docs: [
+      {
+        _id: '123abc',
         name: 'main.tex',
-        id: '123abc',
-        type: 'doc',
-        selected: false,
       },
-    },
-  ]
+    ],
+    fileRefs: [],
+    folders: [],
+  }
+
+  let originalSettings: typeof window.metaAttributesCache
 
   beforeEach(function () {
-    isValidTeXFileStub = sinon
-      .stub(isValidTeXFileModule, 'default')
-      .returns(true)
+    originalSettings = window.metaAttributesCache.get('ol-ExposedSettings')
+    window.metaAttributesCache.set('ol-ExposedSettings', {
+      validRootDocExtensions: ['tex'],
+    })
   })
 
   afterEach(function () {
     fetchMock.reset()
-    isValidTeXFileStub.restore()
+    window.metaAttributesCache.set('ol-ExposedSettings', originalSettings)
   })
 
   it('shows correct menu', async function () {
-    renderWithEditorContext(<SettingsDocument />, {
-      scope: {
-        docs,
-      },
-    })
+    render(
+      <EditorProviders rootFolder={[rootFolder as any]}>
+        <EditorLeftMenuProvider>
+          <SettingsDocument />
+        </EditorLeftMenuProvider>
+      </EditorProviders>
+    )
 
     const select = screen.getByLabelText('Main document')
 

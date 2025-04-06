@@ -1,9 +1,9 @@
 'use strict'
 
 const config = require('config')
-const fs = require('fs')
+const fs = require('node:fs')
 const isValidUtf8 = require('utf-8-validate')
-const stringToStream = require('string-to-stream')
+const { ReadableString } = require('@overleaf/stream-utils')
 
 const core = require('overleaf-editor-core')
 const objectPersistor = require('@overleaf/object-persistor')
@@ -20,6 +20,9 @@ const projectKey = require('../project_key')
 const streams = require('../streams')
 const postgresBackend = require('./postgres')
 const mongoBackend = require('./mongo')
+const logger = require('@overleaf/logger')
+
+/** @import { Readable } from 'stream' */
 
 const GLOBAL_BLOBS = new Map()
 
@@ -31,12 +34,18 @@ function makeProjectKey(projectId, hash) {
   return `${projectKey.format(projectId)}/${hash.slice(0, 2)}/${hash.slice(2)}`
 }
 
-async function uploadBlob(projectId, blob, stream) {
+async function uploadBlob(projectId, blob, stream, opts = {}) {
   const bucket = config.get('blobStore.projectBucket')
   const key = makeProjectKey(projectId, blob.getHash())
-  await persistor.sendStream(bucket, key, stream, {
-    contentType: 'application/octet-stream',
-  })
+  logger.debug({ projectId, blob }, 'uploadBlob started')
+  try {
+    await persistor.sendStream(bucket, key, stream, {
+      contentType: 'application/octet-stream',
+      ...opts,
+    })
+  } finally {
+    logger.debug({ projectId, blob }, 'uploadBlob finished')
+  }
 }
 
 function getBlobLocation(projectId, hash) {
@@ -70,23 +79,12 @@ function getBackend(projectId) {
 }
 
 async function makeBlobForFile(pathname) {
-  async function getByteLengthOfFile() {
-    const stat = await fs.promises.stat(pathname)
-    return stat.size
-  }
-
-  async function getHashOfFile(blob) {
-    const stream = fs.createReadStream(pathname)
-    const hash = await blobHash.fromStream(blob.getByteLength(), stream)
-    return hash
-  }
-
-  const blob = new Blob()
-  const byteLength = await getByteLengthOfFile()
-  blob.setByteLength(byteLength)
-  const hash = await getHashOfFile(blob)
-  blob.setHash(hash)
-  return blob
+  const { size: byteLength } = await fs.promises.stat(pathname)
+  const hash = await blobHash.fromStream(
+    byteLength,
+    fs.createReadStream(pathname)
+  )
+  return new Blob(hash, byteLength)
 }
 
 async function getStringLengthOfFile(byteLength, pathname) {
@@ -109,7 +107,12 @@ async function getStringLengthOfFile(byteLength, pathname) {
 async function deleteBlobsInBucket(projectId) {
   const bucket = config.get('blobStore.projectBucket')
   const prefix = `${projectKey.format(projectId)}/`
-  await persistor.deleteDirectory(bucket, prefix)
+  logger.debug({ projectId }, 'deleteBlobsInBucket started')
+  try {
+    await persistor.deleteDirectory(bucket, prefix)
+  } finally {
+    logger.debug({ projectId }, 'deleteBlobsInBucket finished')
+  }
 }
 
 async function loadGlobalBlobs() {
@@ -120,6 +123,34 @@ async function loadGlobalBlobs() {
       demoted: Boolean(blob.demoted),
     })
   }
+}
+
+/**
+ * Return metadata for all blobs in the given project
+ * @param {Array<string|number>} projectIds
+ * @return {Promise<{nBlobs:number, blobs:Map<string,Array<core.Blob>>}>}
+ */
+async function getProjectBlobsBatch(projectIds) {
+  const mongoProjects = []
+  const postgresProjects = []
+  for (const projectId of projectIds) {
+    if (typeof projectId === 'number') {
+      postgresProjects.push(projectId)
+    } else {
+      mongoProjects.push(projectId)
+    }
+  }
+  const [
+    { nBlobs: nBlobsPostgres, blobs: blobsPostgres },
+    { nBlobs: nBlobsMongo, blobs: blobsMongo },
+  ] = await Promise.all([
+    postgresBackend.getProjectBlobsBatch(postgresProjects),
+    mongoBackend.getProjectBlobsBatch(mongoProjects),
+  ])
+  for (const [id, blobs] of blobsPostgres.entries()) {
+    blobsMongo.set(id.toString(), blobs)
+  }
+  return { nBlobs: nBlobsPostgres + nBlobsMongo, blobs: blobsMongo }
 }
 
 /**
@@ -151,7 +182,7 @@ class BlobStore {
    * string content.
    *
    * @param {string} string
-   * @return {Promise.<Blob>}
+   * @return {Promise.<core.Blob>}
    */
   async putString(string) {
     assert.string(string, 'bad string')
@@ -162,9 +193,9 @@ class BlobStore {
       return existingBlob
     }
     const newBlob = new Blob(hash, Buffer.byteLength(string), string.length)
-    // Note: the stringToStream is to work around a bug in the AWS SDK: it won't
+    // Note: the ReadableString is to work around a bug in the AWS SDK: it won't
     // allow Body to be blank.
-    await uploadBlob(this.projectId, newBlob, stringToStream(string))
+    await uploadBlob(this.projectId, newBlob, new ReadableString(string))
     await this.backend.insertBlob(this.projectId, newBlob)
     return newBlob
   }
@@ -174,7 +205,7 @@ class BlobStore {
    * temporary file).
    *
    * @param {string} pathname
-   * @return {Promise.<Blob>}
+   * @return {Promise<core.Blob>}
    */
   async putFile(pathname) {
     assert.string(pathname, 'bad pathname')
@@ -188,12 +219,42 @@ class BlobStore {
       pathname
     )
     newBlob.setStringLength(stringLength)
-    await uploadBlob(this.projectId, newBlob, fs.createReadStream(pathname))
-    await this.backend.insertBlob(this.projectId, newBlob)
+    await this.putBlob(pathname, newBlob)
     return newBlob
   }
 
   /**
+   * Write a new blob, the stringLength must have been added already. It should
+   * have been checked that the blob does not exist yet. Consider using
+   * {@link putFile} instead of this lower-level method.
+   *
+   * @param {string} pathname
+   * @param {core.Blob} finializedBlob
+   * @return {Promise<void>}
+   */
+  async putBlob(pathname, finializedBlob) {
+    await uploadBlob(
+      this.projectId,
+      finializedBlob,
+      fs.createReadStream(pathname)
+    )
+    await this.backend.insertBlob(this.projectId, finializedBlob)
+  }
+
+  /**
+   * Stores an object as a JSON string in a blob.
+   *
+   * @param {object} obj
+   * @returns {Promise.<core.Blob>}
+   */
+  async putObject(obj) {
+    assert.object(obj, 'bad object')
+    const string = JSON.stringify(obj)
+    return await this.putString(string)
+  }
+
+  /**
+   *
    * Fetch a blob's content by its hash as a UTF-8 encoded string.
    *
    * @param {string} hash hexadecimal SHA-1 hash
@@ -202,9 +263,43 @@ class BlobStore {
   async getString(hash) {
     assert.blobHash(hash, 'bad hash')
 
-    const stream = await this.getStream(hash)
-    const buffer = await streams.readStreamToBuffer(stream)
-    return buffer.toString()
+    const projectId = this.projectId
+    logger.debug({ projectId, hash }, 'getString started')
+    try {
+      const stream = await this.getStream(hash)
+      const buffer = await streams.readStreamToBuffer(stream)
+      return buffer.toString()
+    } finally {
+      logger.debug({ projectId, hash }, 'getString finished')
+    }
+  }
+
+  /**
+   * Fetch a JSON encoded blob by its hash and deserialize it.
+   *
+   * @template [T=unknown]
+   * @param {string} hash hexadecimal SHA-1 hash
+   * @return {Promise.<T>} promise for the content of the file
+   */
+  async getObject(hash) {
+    assert.blobHash(hash, 'bad hash')
+    const projectId = this.projectId
+    logger.debug({ projectId, hash }, 'getObject started')
+    try {
+      const jsonString = await this.getString(hash)
+      const object = JSON.parse(jsonString)
+      return object
+    } catch (error) {
+      // Maybe this is blob is gzipped. Try to gunzip it.
+      // TODO: Remove once we've ensured this is not reached
+      const stream = await this.getStream(hash)
+      const buffer = await streams.gunzipStreamToBuffer(stream)
+      const object = JSON.parse(buffer.toString())
+      logger.warn('getObject: Gzipped object in BlobStore')
+      return object
+    } finally {
+      logger.debug({ projectId, hash }, 'getObject finished')
+    }
   }
 
   /**
@@ -214,14 +309,15 @@ class BlobStore {
    * failure, so the caller must be prepared to retry on errors, if appropriate.
    *
    * @param {string} hash hexadecimal SHA-1 hash
-   * @return {stream} a stream to read the file
+   * @param {Object} opts
+   * @return {Promise.<Readable>} a stream to read the file
    */
-  async getStream(hash) {
+  async getStream(hash, opts = {}) {
     assert.blobHash(hash, 'bad hash')
 
     const { bucket, key } = getBlobLocation(this.projectId, hash)
     try {
-      const stream = await persistor.getObjectStream(bucket, key)
+      const stream = await persistor.getObjectStream(bucket, key, opts)
       return stream
     } catch (err) {
       if (err instanceof objectPersistor.Errors.NotFoundError) {
@@ -235,7 +331,7 @@ class BlobStore {
    * Read a blob metadata record by hexadecimal hash.
    *
    * @param {string} hash hexadecimal SHA-1 hash
-   * @return {Promise.<Blob?>}
+   * @return {Promise<core.Blob | null>}
    */
   async getBlob(hash) {
     assert.blobHash(hash, 'bad hash')
@@ -259,12 +355,25 @@ class BlobStore {
         nonGlobalHashes.push(hash)
       }
     }
+    if (nonGlobalHashes.length === 0) {
+      return blobs // to avoid unnecessary database lookup
+    }
     const projectBlobs = await this.backend.findBlobs(
       this.projectId,
       nonGlobalHashes
     )
     blobs.push(...projectBlobs)
     return blobs
+  }
+
+  /**
+   * Retrieve all blobs associated with the project.
+   * @returns {Promise<core.Blob[]>} A promise that resolves to an array of blobs.
+   */
+
+  async getProjectBlobs() {
+    const projectBlobs = await this.backend.getProjectBlobs(this.projectId)
+    return projectBlobs
   }
 
   /**
@@ -285,6 +394,40 @@ class BlobStore {
     const blob = await this.backend.findBlob(this.projectId, hash)
     return blob
   }
+
+  /**
+   * Copy an existing sourceBlob in this project to a target project.
+   * @param {Blob} sourceBlob
+   * @param {string} targetProjectId
+   * @return {Promise<void>}
+   */
+  async copyBlob(sourceBlob, targetProjectId) {
+    assert.instance(sourceBlob, Blob, 'bad sourceBlob')
+    assert.projectId(targetProjectId, 'bad targetProjectId')
+    const hash = sourceBlob.getHash()
+    const sourceProjectId = this.projectId
+    const { bucket, key: sourceKey } = getBlobLocation(sourceProjectId, hash)
+    const destKey = makeProjectKey(targetProjectId, hash)
+    const targetBackend = getBackend(targetProjectId)
+    logger.debug({ sourceProjectId, targetProjectId, hash }, 'copyBlob started')
+    try {
+      await persistor.copyObject(bucket, sourceKey, destKey)
+      await targetBackend.insertBlob(targetProjectId, sourceBlob)
+    } finally {
+      logger.debug(
+        { sourceProjectId, targetProjectId, hash },
+        'copyBlob finished'
+      )
+    }
+  }
 }
 
-module.exports = { BlobStore, loadGlobalBlobs }
+module.exports = {
+  BlobStore,
+  getProjectBlobsBatch,
+  loadGlobalBlobs,
+  makeProjectKey,
+  makeBlobForFile,
+  getStringLengthOfFile,
+  GLOBAL_BLOBS,
+}

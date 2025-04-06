@@ -1,4 +1,4 @@
-import { createRequiredParameterApplier } from './apply'
+import { extendRequiredParameter } from './apply'
 import { Completions } from './types'
 import { metadataState } from '../../../extensions/language'
 import { CompletionContext } from '@codemirror/autocomplete'
@@ -16,17 +16,11 @@ export function buildLabelCompletions(
     return
   }
 
-  const uniqueLabels = new Set(
-    Object.values(metadata.documents)
-      .map(doc => doc.labels)
-      .flat(1)
-  )
-
-  for (const label of uniqueLabels) {
+  for (const label of metadata.labels) {
     completions.labels.push({
       type: 'label',
       label,
-      apply: createRequiredParameterApplier(label),
+      extend: extendRequiredParameter,
     })
   }
 }

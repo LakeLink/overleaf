@@ -28,21 +28,39 @@ module.exports = FixturesManager = {
     if (!options.project) {
       options.project = { name: 'Test Project' }
     }
-    const {
+    let {
       project_id: projectId,
       user_id: userId,
       privilegeLevel,
       project,
       publicAccess,
+      userMetadata,
+      anonymousAccessToken,
     } = options
+
+    if (privilegeLevel === 'owner') {
+      project.owner = { _id: userId }
+    } else {
+      project.owner = { _id: '404404404404404404404404' }
+    }
 
     const privileges = {}
     privileges[userId] = privilegeLevel
     if (publicAccess) {
-      privileges['anonymous-user'] = publicAccess
+      anonymousAccessToken =
+        anonymousAccessToken || FixturesManager.getRandomId()
+      privileges[anonymousAccessToken] = publicAccess
     }
 
-    MockWebServer.createMockProject(projectId, privileges, project)
+    const metadataByUser = {}
+    metadataByUser[userId] = userMetadata
+
+    MockWebServer.createMockProject(
+      projectId,
+      privileges,
+      project,
+      metadataByUser
+    )
     return MockWebServer.run(error => {
       if (error != null) {
         throw error
@@ -64,6 +82,7 @@ module.exports = FixturesManager = {
             user_id: userId,
             privilegeLevel,
             project,
+            anonymousAccessToken,
           })
         }
       )
@@ -128,7 +147,7 @@ module.exports = FixturesManager = {
   },
 
   getRandomId() {
-    return require('crypto')
+    return require('node:crypto')
       .createHash('sha1')
       .update(Math.random().toString())
       .digest('hex')

@@ -1,6 +1,6 @@
 const Path = require('path')
 const OError = require('@overleaf/o-error')
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 
 module.exports = { buildFolderStructure }
 
@@ -63,7 +63,7 @@ class FolderStructureBuilder {
 
   createFolder(name) {
     return {
-      _id: ObjectId(),
+      _id: new ObjectId(),
       name,
       folders: [],
       docs: [],

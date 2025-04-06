@@ -1,5 +1,5 @@
 import _ from 'lodash'
-import { promisify, callbackify } from 'util'
+import { promisify, callbackify } from 'node:util'
 import logger from '@overleaf/logger'
 import OError from '@overleaf/o-error'
 import * as UpdatesProcessor from './UpdatesProcessor.js'
@@ -20,6 +20,7 @@ const TEMPORARY_FAILURES = [
 
 const HARD_FAILURES = [
   'Error: history store a non-success status code: 422',
+  'OError: history store a non-success status code: 422',
   'OpsOutOfOrderError: project structure version out of order',
   'OpsOutOfOrderError: project structure version out of order on incoming updates',
   'OpsOutOfOrderError: doc version out of order',
@@ -72,11 +73,11 @@ function isTemporaryFailure(failure) {
   return TEMPORARY_FAILURES.includes(failure.error)
 }
 
-function isHardFailure(failure) {
+export function isHardFailure(failure) {
   return HARD_FAILURES.includes(failure.error)
 }
 
-function isFirstFailure(failure) {
+export function isFirstFailure(failure) {
   return failure.attempts <= 1
 }
 
@@ -146,7 +147,7 @@ async function resyncProject(projectId, options = {}) {
   try {
     if (!/^[0-9a-f]{24}$/.test(projectId)) {
       logger.debug({ projectId }, 'clearing bad project id')
-      await ErrorRecorder.promises.record(projectId, 0, null)
+      await ErrorRecorder.promises.clearError(projectId)
       return
     }
 
@@ -175,9 +176,8 @@ async function checkProjectHasHistoryId(projectId) {
 
 async function waitUntilRedisQueueIsEmpty(projectId) {
   for (let attempts = 0; attempts < 30; attempts++) {
-    const updatesCount = await RedisManager.promises.countUnprocessedUpdates(
-      projectId
-    )
+    const updatesCount =
+      await RedisManager.promises.countUnprocessedUpdates(projectId)
     if (updatesCount === 0) {
       return
     }

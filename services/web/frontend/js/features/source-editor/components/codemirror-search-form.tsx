@@ -1,7 +1,7 @@
 import {
   useCodeMirrorStateContext,
   useCodeMirrorViewContext,
-} from './codemirror-editor'
+} from './codemirror-context'
 import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { runScopeHandlers } from '@codemirror/view'
 import {
@@ -15,23 +15,43 @@ import {
   getSearchQuery,
   SearchCursor,
 } from '@codemirror/search'
-import { Button, ButtonGroup, FormControl, InputGroup } from 'react-bootstrap'
+import OLTooltip from '@/features/ui/components/ol/ol-tooltip'
+import OLButton from '@/features/ui/components/ol/ol-button'
+import MaterialIcon from '@/shared/components/material-icon'
+import OLButtonGroup from '@/features/ui/components/ol/ol-button-group'
+import OLFormControl from '@/features/ui/components/ol/ol-form-control'
+import OLCloseButton from '@/features/ui/components/ol/ol-close-button'
 import { useTranslation } from 'react-i18next'
-import Tooltip from '../../../shared/components/tooltip'
-import Icon from '../../../shared/components/icon'
 import classnames from 'classnames'
-import useScopeValue from '../../../shared/hooks/use-scope-value'
+import { useUserSettingsContext } from '@/shared/context/user-settings-context'
+import { getStoredSelection, setStoredSelection } from '../extensions/search'
+import { debounce } from 'lodash'
+import { EditorSelection, EditorState } from '@codemirror/state'
+import { sendSearchEvent } from '@/features/event-tracking/search-events'
 
-const MAX_MATCH_COUNT = 1000
+const MATCH_COUNT_DEBOUNCE_WAIT = 100 // the amount of ms to wait before counting matches
+const MAX_MATCH_COUNT = 999 // the maximum number of matches to count
+const MAX_MATCH_TIME = 100 // the maximum amount of ms allowed for counting matches
 
-type ActiveSearchOption = 'caseSensitive' | 'regexp' | 'wholeWord' | null
+type ActiveSearchOption =
+  | 'caseSensitive'
+  | 'regexp'
+  | 'wholeWord'
+  | 'withinSelection'
+  | null
+
+type MatchPositions = {
+  current: number | null
+  total: number
+  interrupted: boolean
+}
 
 const CodeMirrorSearchForm: FC = () => {
   const view = useCodeMirrorViewContext()
   const state = useCodeMirrorStateContext()
 
-  const [keybindings] = useScopeValue<string>('settings.mode')
-  const emacsKeybindingsActive = keybindings === 'emacs'
+  const { userSettings } = useUserSettingsContext()
+  const emacsKeybindingsActive = userSettings.mode === 'emacs'
   const [activeSearchOption, setActiveSearchOption] =
     useState<ActiveSearchOption>(null)
 
@@ -42,13 +62,11 @@ const CodeMirrorSearchForm: FC = () => {
   const caseSensitiveId = 'caseSensitive' + idSuffix
   const regexpId = 'regexp' + idSuffix
   const wholeWordId = 'wholeWord' + idSuffix
+  const withinSelectionId = 'withinSelection' + idSuffix
 
   const { t } = useTranslation()
 
-  const [position, setPosition] = useState<{
-    current: number
-    total: number
-  } | null>(null)
+  const [position, setPosition] = useState<MatchPositions | null>(null)
 
   const formRef = useRef<HTMLFormElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -73,34 +91,7 @@ const CodeMirrorSearchForm: FC = () => {
   }, [])
 
   useEffect(() => {
-    const { from, to } = state.selection.main
-
-    const query = getSearchQuery(state)
-
-    if (query.valid) {
-      const cursor = query.getCursor(state.doc) as SearchCursor
-
-      let total = 0
-      let current = 0
-
-      while (!cursor.next().done) {
-        total++
-
-        if (total >= MAX_MATCH_COUNT) {
-          break
-        }
-
-        const item = cursor.value
-
-        if (current === 0 && item.from === from && item.to === to) {
-          current = total
-        }
-      }
-
-      setPosition({ current, total })
-    } else {
-      setPosition(null)
-    }
+    buildPosition(state, setPosition)
   }, [state])
 
   const handleChange = useCallback(() => {
@@ -112,13 +103,20 @@ const CodeMirrorSearchForm: FC = () => {
         replace: data.replace as string,
         caseSensitive: data.caseSensitive === 'on',
         regexp: data.regexp === 'on',
-        literal: true,
+        literal: data.regexp !== 'on',
         wholeWord: data.wholeWord === 'on',
+        scope: getStoredSelection(view.state)?.ranges,
       })
 
       view.dispatch({ effects: setSearchQuery.of(query) })
     }
   }, [view])
+
+  const handleWithinSelectionChange = useCallback(() => {
+    const storedSelection = getStoredSelection(state)
+    view.dispatch(setStoredSelection(storedSelection ? null : state.selection))
+    handleChange()
+  }, [handleChange, state, view])
 
   const handleFormKeyDown = useCallback(
     event => {
@@ -175,7 +173,12 @@ const CodeMirrorSearchForm: FC = () => {
       switch (event.key) {
         case 'Enter':
           event.preventDefault()
-          if (event.shiftKey) {
+          if (emacsKeybindingsActive) {
+            closeSearchPanel(view)
+            view.dispatch({
+              selection: EditorSelection.cursor(view.state.selection.main.to),
+            })
+          } else if (event.shiftKey) {
             findPrevious(view)
           } else {
             findNext(view)
@@ -184,7 +187,7 @@ const CodeMirrorSearchForm: FC = () => {
       }
       handleEmacsNavigation(event)
     },
-    [view, handleEmacsNavigation]
+    [view, handleEmacsNavigation, emacsKeybindingsActive]
   )
 
   const handleReplaceKeyDown = useCallback(
@@ -193,6 +196,11 @@ const CodeMirrorSearchForm: FC = () => {
         case 'Enter':
           event.preventDefault()
           replaceNext(view)
+          sendSearchEvent('search-replace-click', {
+            searchType: 'document',
+            action: 'replace',
+            method: 'keyboard',
+          })
           break
 
         case 'Tab': {
@@ -215,6 +223,8 @@ const CodeMirrorSearchForm: FC = () => {
     return getSearchQuery(state)
   }, [state])
 
+  const showReplace = !state.readOnly
+
   return (
     // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <form
@@ -225,8 +235,14 @@ const CodeMirrorSearchForm: FC = () => {
       role="search"
     >
       <div className="ol-cm-search-controls">
-        <InputGroup bsSize="small" className="ol-cm-search-input-group">
-          <FormControl
+        <span
+          className={classnames('ol-cm-search-input-group', {
+            'ol-cm-search-input-error':
+              query.regexp && isInvalidRegExp(query.search),
+          })}
+        >
+          <OLFormControl
+            ref={handleInputRef}
             type="text"
             name="search"
             // IMPORTANT: CodeMirror uses this attribute to focus the input
@@ -238,96 +254,107 @@ const CodeMirrorSearchForm: FC = () => {
             onChange={handleChange}
             onKeyDown={handleSearchKeyDown}
             className="ol-cm-search-form-input"
-            bsSize="small"
-            inputRef={handleInputRef}
+            size="sm"
             aria-label={t('search_command_find')}
           />
 
-          <InputGroup.Button>
-            <Tooltip
-              id="search-match-case"
-              description={t('search_match_case')}
+          <OLTooltip
+            id="search-match-case"
+            description={t('search_match_case')}
+          >
+            <label
+              className={classnames(
+                'btn btn-sm btn-default ol-cm-search-input-button',
+                {
+                  checked: query.caseSensitive,
+                  focused: activeSearchOption === 'caseSensitive',
+                }
+              )}
+              htmlFor={caseSensitiveId}
+              aria-label={t('search_match_case')}
             >
-              <label
-                className={classnames(
-                  'btn btn-sm btn-default ol-cm-search-input-button',
-                  {
-                    checked: query.caseSensitive,
-                    focused: activeSearchOption === 'caseSensitive',
-                  }
-                )}
-                htmlFor={caseSensitiveId}
-                aria-label={t('search_match_case')}
-              >
-                Aa
-              </label>
-            </Tooltip>
-          </InputGroup.Button>
+              Aa
+            </label>
+          </OLTooltip>
 
-          <InputGroup.Button>
-            <Tooltip id="search-regexp" description={t('search_regexp')}>
-              <label
-                className={classnames(
-                  'btn btn-sm btn-default ol-cm-search-input-button',
-                  {
-                    checked: query.regexp,
-                    focused: activeSearchOption === 'regexp',
-                  }
-                )}
-                htmlFor={regexpId}
-                aria-label={t('search_regexp')}
-              >
-                [.*]
-              </label>
-            </Tooltip>
-          </InputGroup.Button>
-
-          <InputGroup.Button>
-            <Tooltip
-              id="search-whole-word"
-              description={t('search_whole_word')}
+          <OLTooltip id="search-regexp" description={t('search_regexp')}>
+            <label
+              className={classnames(
+                'btn btn-sm btn-default ol-cm-search-input-button',
+                {
+                  checked: query.regexp,
+                  focused: activeSearchOption === 'regexp',
+                }
+              )}
+              htmlFor={regexpId}
+              aria-label={t('search_regexp')}
             >
-              <label
-                className={classnames(
-                  'btn btn-sm btn-default ol-cm-search-input-button',
-                  {
-                    checked: query.wholeWord,
-                    focused: activeSearchOption === 'wholeWord',
-                  }
-                )}
-                htmlFor={wholeWordId}
-                aria-label={t('search_whole_word')}
-              >
-                W
-              </label>
-            </Tooltip>
-          </InputGroup.Button>
-        </InputGroup>
+              [.*]
+            </label>
+          </OLTooltip>
 
-        <InputGroup
-          bsSize="small"
-          className="ol-cm-search-input-group ol-cm-search-replace-input"
-        >
-          <FormControl
-            type="text"
-            name="replace"
-            placeholder={t('search_replace_with')}
-            autoComplete="off"
-            value={query.replace || ''}
-            onChange={handleChange}
-            onKeyDown={handleReplaceKeyDown}
-            className="ol-cm-search-form-input"
-            bsSize="small"
-            inputRef={handleReplaceRef}
-            aria-label={t('search_command_replace')}
-          />
-        </InputGroup>
+          <OLTooltip
+            id="search-whole-word"
+            description={t('search_whole_word')}
+          >
+            <label
+              className={classnames(
+                'btn btn-sm btn-default ol-cm-search-input-button',
+                {
+                  checked: query.wholeWord,
+                  focused: activeSearchOption === 'wholeWord',
+                }
+              )}
+              htmlFor={wholeWordId}
+              aria-label={t('search_whole_word')}
+            >
+              W
+            </label>
+          </OLTooltip>
+          <OLTooltip
+            id="search-within-selection"
+            description={t('search_within_selection')}
+          >
+            <label
+              className={classnames(
+                'btn btn-sm btn-default ol-cm-search-input-button',
+                {
+                  checked: !!query.scope,
+                  focused: activeSearchOption === 'withinSelection',
+                }
+              )}
+              htmlFor={withinSelectionId}
+              aria-label={t('search_within_selection')}
+            >
+              <MaterialIcon type="format_align_left" />
+            </label>
+          </OLTooltip>
+        </span>
+
+        {showReplace && (
+          <span className="ol-cm-search-input-group ol-cm-search-replace-input">
+            <OLFormControl
+              ref={handleReplaceRef}
+              type="text"
+              name="replace"
+              placeholder={t('search_replace_with')}
+              autoComplete="off"
+              value={query.replace || ''}
+              onChange={handleChange}
+              onKeyDown={handleReplaceKeyDown}
+              className="ol-cm-search-form-input"
+              size="sm"
+              aria-label={t('search_command_replace')}
+            />
+          </span>
+        )}
 
         <div className="ol-cm-search-hidden-inputs">
           <input
             id={caseSensitiveId}
             name="caseSensitive"
             type="checkbox"
+            autoComplete="off"
             checked={query.caseSensitive}
             onChange={handleChange}
             onClick={focusSearchBox}
@@ -339,6 +366,7 @@ const CodeMirrorSearchForm: FC = () => {
             id={regexpId}
             name="regexp"
             type="checkbox"
+            autoComplete="off"
             checked={query.regexp}
             onChange={handleChange}
             onClick={focusSearchBox}
@@ -350,73 +378,169 @@ const CodeMirrorSearchForm: FC = () => {
             id={wholeWordId}
             name="wholeWord"
             type="checkbox"
+            autoComplete="off"
             checked={query.wholeWord}
             onChange={handleChange}
             onClick={focusSearchBox}
             onFocus={() => setActiveSearchOption('wholeWord')}
             onBlur={() => setActiveSearchOption(null)}
           />
+
+          <input
+            id={withinSelectionId}
+            name="withinSelection"
+            type="checkbox"
+            autoComplete="off"
+            checked={!!query.scope}
+            onChange={handleWithinSelectionChange}
+            onClick={focusSearchBox}
+            onFocus={() => setActiveSearchOption('withinSelection')}
+            onBlur={() => setActiveSearchOption(null)}
+          />
         </div>
 
         <div className="ol-cm-search-form-group ol-cm-search-next-previous">
-          <ButtonGroup className="ol-cm-search-form-button-group">
-            <Button type="button" bsSize="small" onClick={() => findNext(view)}>
-              <Icon
-                type="chevron-down"
-                fw
-                accessibilityLabel={t('search_next')}
-              />
-            </Button>
-
-            <Button
-              type="button"
-              bsSize="small"
+          <OLButtonGroup className="ol-cm-search-form-button-group">
+            <OLButton
+              variant="secondary"
+              size="sm"
               onClick={() => findPrevious(view)}
             >
-              <Icon
-                type="chevron-up"
-                fw
+              <MaterialIcon
+                type="keyboard_arrow_up"
                 accessibilityLabel={t('search_previous')}
               />
-            </Button>
-          </ButtonGroup>
+            </OLButton>
+
+            <OLButton
+              variant="secondary"
+              size="sm"
+              onClick={() => findNext(view)}
+            >
+              <MaterialIcon
+                type="keyboard_arrow_down"
+                accessibilityLabel={t('search_next')}
+              />
+            </OLButton>
+          </OLButtonGroup>
 
           {position !== null && (
             <div className="ol-cm-search-form-position">
-              {position.total === MAX_MATCH_COUNT
-                ? `${position.current} ${t('of')} ${MAX_MATCH_COUNT}+`
-                : `${position.current} ${t('of')} ${position.total}`}
+              {position.current === null ? '?' : position.current} {t('of')}{' '}
+              {position.total}
+              {position.interrupted && '+'}
             </div>
           )}
         </div>
 
-        <div className="ol-cm-search-form-group ol-cm-search-replace-buttons">
-          <Button
-            type="button"
-            bsSize="small"
-            onClick={() => replaceNext(view)}
-          >
-            {t('search_replace')}
-          </Button>
+        {showReplace && (
+          <div className="ol-cm-search-form-group ol-cm-search-replace-buttons">
+            <OLButton
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                sendSearchEvent('search-replace-click', {
+                  searchType: 'document',
+                  action: 'replace',
+                  method: 'button',
+                })
+                replaceNext(view)
+              }}
+            >
+              {t('search_replace')}
+            </OLButton>
 
-          <Button type="button" bsSize="small" onClick={() => replaceAll(view)}>
-            {t('search_replace_all')}
-          </Button>
-        </div>
+            <OLButton
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                sendSearchEvent('search-replace-click', {
+                  searchType: 'document',
+                  action: 'replace-all',
+                  method: 'button',
+                })
+                replaceAll(view)
+              }}
+            >
+              {t('search_replace_all')}
+            </OLButton>
+          </div>
+        )}
       </div>
 
       <div className="ol-cm-search-form-close">
-        <button
-          className="close"
-          onClick={() => closeSearchPanel(view)}
-          type="button"
-          aria-label={t('close')}
-        >
-          <span aria-hidden="true">&times;</span>
-        </button>
+        <OLTooltip id="search-close" description={<>{t('close')} (Esc)</>}>
+          <OLCloseButton onClick={() => closeSearchPanel(view)} />
+        </OLTooltip>
       </div>
     </form>
   )
 }
 
+function isInvalidRegExp(source: string) {
+  try {
+    RegExp(source)
+    return false
+  } catch {
+    return true
+  }
+}
+
 export default CodeMirrorSearchForm
+
+const buildPosition = debounce(
+  (
+    state: EditorState,
+    setPosition: (position: MatchPositions | null) => void
+  ) => {
+    const { main } = state.selection
+
+    const query = getSearchQuery(state)
+
+    if (!query.valid) {
+      return setPosition(null)
+    }
+
+    const cursor = query.getCursor(state.doc) as SearchCursor
+
+    const startTime = Date.now()
+
+    let total = 0
+    let current = null
+
+    while (!cursor.next().done) {
+      total++
+
+      // if there are too many matches, bail out
+      if (total >= MAX_MATCH_COUNT) {
+        return setPosition({
+          current,
+          total,
+          interrupted: true,
+        })
+      }
+
+      const { from, to } = cursor.value
+
+      if (current === null && main.from === from && main.to === to) {
+        current = total
+      }
+
+      // if finding matches is taking too long, bail out
+      if (Date.now() - startTime > MAX_MATCH_TIME) {
+        return setPosition({
+          current,
+          total,
+          interrupted: true,
+        })
+      }
+    }
+
+    setPosition({
+      current: current ?? 0,
+      total,
+      interrupted: false,
+    })
+  },
+  MATCH_COUNT_DEBOUNCE_WAIT
+)

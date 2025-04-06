@@ -1,19 +1,12 @@
 import _ from 'lodash'
 import type { FileDiff, FileRenamed } from '../services/types/file'
-import type { DiffOperation } from '../services/types/diff-operation'
+import { isFileEditable, isFileRemoved } from './file-diff'
 
-// `Partial` because the `reducePathsToTree` function was copied directly
-// from a javascript file without proper type system and the logic is not typescript-friendly.
-// TODO: refactor the function to have a proper type system
-type FileTreeEntity = Partial<{
-  name: string
-  type: 'file' | 'folder'
-  oldPathname: string
-  newPathname: string
-  pathname: string
-  children: FileTreeEntity[]
-  operation: DiffOperation
-}>
+export type FileTreeEntity = {
+  name?: string
+  type?: 'file' | 'folder'
+  children?: FileTreeEntity[]
+} & FileDiff
 
 export function reducePathsToTree(
   currentFileTree: FileTreeEntity[],
@@ -21,25 +14,32 @@ export function reducePathsToTree(
 ) {
   const filePathParts = fileObject?.pathname?.split('/') ?? ''
   let currentFileTreeLocation = currentFileTree
+
   for (let index = 0; index < filePathParts.length; index++) {
-    let fileTreeEntity: FileTreeEntity | null = {}
     const pathPart = filePathParts[index]
     const isFile = index === filePathParts.length - 1
+
     if (isFile) {
-      fileTreeEntity = _.clone(fileObject)
+      const fileTreeEntity: FileTreeEntity = _.clone(fileObject)
       fileTreeEntity.name = pathPart
       fileTreeEntity.type = 'file'
+
       currentFileTreeLocation.push(fileTreeEntity)
     } else {
-      fileTreeEntity =
-        _.find(currentFileTreeLocation, entity => entity.name === pathPart) ??
-        null
-      if (fileTreeEntity == null) {
+      let fileTreeEntity: FileTreeEntity | undefined = _.find(
+        currentFileTreeLocation,
+        entity => entity.name === pathPart
+      )
+
+      if (fileTreeEntity === undefined) {
         fileTreeEntity = {
           name: pathPart,
           type: 'folder',
-          children: [],
+          children: <FileTreeEntity[]>[],
+          pathname: pathPart,
+          editable: false,
         }
+
         currentFileTreeLocation.push(fileTreeEntity)
       }
       currentFileTreeLocation = fileTreeEntity.children ?? []
@@ -49,9 +49,8 @@ export function reducePathsToTree(
 }
 
 export type HistoryDoc = {
-  pathname: string
   name: string
-} & Pick<FileTreeEntity, 'operation'>
+} & FileDiff
 
 export type HistoryFileTree = {
   docs?: HistoryDoc[]
@@ -68,11 +67,17 @@ export function fileTreeDiffToFileTreeData(
 
   for (const file of fileTreeDiff) {
     if (file.type === 'file') {
-      docs.push({
+      const deletedAtV = isFileRemoved(file) ? file.deletedAtV : undefined
+
+      const newDoc: HistoryDoc = {
         pathname: file.pathname ?? '',
         name: file.name ?? '',
-        operation: file.operation,
-      })
+        deletedAtV,
+        editable: isFileEditable(file),
+        operation: 'operation' in file ? file.operation : undefined,
+      }
+
+      docs.push(newDoc)
     } else if (file.type === 'folder') {
       if (file.children) {
         const folder = fileTreeDiffToFileTreeData(file.children, file.name)
@@ -106,9 +111,6 @@ export function renamePathnameKey(file: FileRenamed): FileRenamed {
     oldPathname: file.pathname,
     pathname: file.newPathname as string,
     operation: file.operation,
+    editable: file.editable,
   }
-}
-
-export function isFileRenamed(fileDiff: FileDiff): fileDiff is FileRenamed {
-  return (fileDiff as FileRenamed).operation === 'renamed'
 }

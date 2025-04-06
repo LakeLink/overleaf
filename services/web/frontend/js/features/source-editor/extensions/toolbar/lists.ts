@@ -6,7 +6,6 @@ import {
   SelectionRange,
 } from '@codemirror/state'
 import {
-  getIndentation,
   getIndentUnit,
   IndentContext,
   indentString,
@@ -17,9 +16,11 @@ import {
   ancestorOfNodeWithType,
   ancestorWithType,
   descendantsOfNodeWithType,
+  wrappedNodeOfType,
 } from '../../utils/tree-operations/ancestors'
 import { getEnvironmentName } from '../../utils/tree-operations/environments'
 import { ListEnvironment } from '../../lezer-latex/latex.terms.mjs'
+import { SyntaxNode } from '@lezer/common'
 
 export const ancestorListType = (state: EditorState): string | null => {
   const ancestorNode = ancestorWithType(state, ListEnvironment)
@@ -36,7 +37,7 @@ const wrapRangeInList = (
   prefix = ''
 ) => {
   const cx = new IndentContext(state)
-  const columns = getIndentation(cx, range.from) ?? 0
+  const columns = cx.lineIndent(range.from)
   const unit = getIndentUnit(state)
   const indent = indentString(state, columns)
   const itemIndent = indentString(state, columns + unit)
@@ -67,7 +68,7 @@ const wrapRangeInList = (
   ]
 
   // map through the prefix
-  range = EditorSelection.cursor(range.to).map(state.changes(changes), 1)
+  range = EditorSelection.cursor(range.to, -1).map(state.changes(changes), 1)
 
   changes.push({
     from: toLine.to,
@@ -111,7 +112,7 @@ const unwrapRangeFromList = (
   const listToLine = state.doc.lineAt(list.to)
 
   const cx = new IndentContext(state)
-  const columns = getIndentation(cx, range.from) ?? 0
+  const columns = cx.lineIndent(range.from)
   const unit = getIndentUnit(state)
   const indent = indentString(state, columns - unit) // decrease indent depth
 
@@ -194,11 +195,9 @@ const toggleListForRange = (
   range: SelectionRange,
   environment: string
 ) => {
-  const ancestorNode = ancestorNodeOfType(
-    view.state,
-    range.head,
-    ListEnvironment
-  )
+  const ancestorNode =
+    ancestorNodeOfType(view.state, range.head, ListEnvironment) ??
+    wrappedNodeOfType(view.state, range, ListEnvironment)
 
   if (ancestorNode) {
     const beginEnvNode = ancestorNode.getChild('BeginEnv')
@@ -229,39 +228,53 @@ const toggleListForRange = (
           // toggle list off
           const changeSpec: ChangeSpec[] = [
             {
-              from: emptyBeginLine ? beginLine.from - 1 : beginEnvNode.from,
-              to: emptyBeginLine ? beginLine.to : beginEnvNode.to,
+              from: emptyBeginLine ? beginLine.from : beginEnvNode.from,
+              to: emptyBeginLine
+                ? Math.min(beginLine.to + 1, view.state.doc.length)
+                : beginEnvNode.to,
               insert: '',
             },
             {
-              from: emptyEndLine ? endLine.from : endEnvNode.from,
-              to: emptyEndLine ? endLine.to + 1 : endEnvNode.to,
+              from: emptyEndLine
+                ? Math.max(endLine.from - 1, 0)
+                : endEnvNode.from,
+              to: emptyEndLine ? endLine.to : endEnvNode.to,
               insert: '',
             },
           ]
 
-          const commandNodes = descendantsOfNodeWithType(
+          // items that aren't within nested list environments
+          const itemNodes = descendantsOfNodeWithType(
             ancestorNode,
-            'Item'
-          ).filter(
-            commandNode =>
-              view.state.sliceDoc(commandNode.from, commandNode.to) === '\\item'
+            'Item',
+            ListEnvironment
           )
 
-          if (commandNodes.length > 0) {
-            // whether the command is the only content on this line, apart from whitespace
-            const emptyLineBeforeItem = /^\s*\\item\{/.test(beginLine.text)
+          if (itemNodes.length > 0) {
+            const indentUnit = getIndentUnit(view.state)
 
-            const indentUnit = emptyLineBeforeItem
-              ? getIndentUnit(view.state)
-              : 0
-
-            for (const commandNode of commandNodes) {
-              changeSpec.push({
-                from: commandNode.from - indentUnit,
-                to: commandNode.to + 1,
+            for (const itemNode of itemNodes) {
+              const change: ChangeSpec = {
+                from: itemNode.from,
+                to: itemNode.to,
                 insert: '',
-              })
+              }
+
+              const line = view.state.doc.lineAt(itemNode.from)
+
+              const lineBeforeCommand = view.state.sliceDoc(
+                line.from,
+                itemNode.from
+              )
+
+              // if the line before the command is empty, remove one unit of indentation
+              if (lineBeforeCommand.trim().length === 0) {
+                const cx = new IndentContext(view.state)
+                const indentation = cx.lineIndent(itemNode.from)
+                change.from -= Math.min(indentation ?? 0, indentUnit)
+              }
+
+              changeSpec.push(change)
             }
           }
 
@@ -303,6 +316,21 @@ const toggleListForRange = (
   return { range }
 }
 
+export const getListItems = (node: SyntaxNode): SyntaxNode[] => {
+  const items: SyntaxNode[] = []
+
+  node.cursor().iterate(nodeRef => {
+    if (nodeRef.type.is('Item')) {
+      items.push(nodeRef.node)
+    }
+    if (nodeRef.type.is('ListEnvironment') && nodeRef.node !== node) {
+      return false
+    }
+  })
+
+  return items
+}
+
 export const toggleListForRanges =
   (environment: string) => (view: EditorView) => {
     view.dispatch(
@@ -315,5 +343,7 @@ export const toggleListForRanges =
 
 export const wrapInBulletList = wrapRangesInList('itemize')
 export const wrapInNumberedList = wrapRangesInList('enumerate')
+export const wrapInDescriptionList = wrapRangesInList('description')
 export const unwrapBulletList = unwrapRangesFromList('itemize')
 export const unwrapNumberedList = unwrapRangesFromList('enumerate')
+export const unwrapDescriptionList = unwrapRangesFromList('description')

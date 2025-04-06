@@ -220,23 +220,57 @@ describe('LatexLinter', function () {
 
   it('should accept \\url|...|', function () {
     const { errors } = Parse(
-      'this is text \\url|http://www.sharelatex.com/| and more\n'
+      'this is text \\url|http://www.overleaf.com/| and more\n'
     )
     assert.equal(errors.length, 0)
   })
 
   it('should accept \\url{...}', function () {
     const { errors } = Parse(
-      'this is text \\url{http://www.sharelatex.com/} and more\n'
+      'this is text \\url{http://www.overleaf.com/} and more\n'
     )
     assert.equal(errors.length, 0)
   })
 
   it('should accept \\url{...} with % chars', function () {
     const { errors } = Parse(
-      'this is text \\url{http://www.sharelatex.com/hello%20world} and more\n'
+      'this is text \\url{http://www.overleaf.com/hello%20world} and more\n'
     )
     assert.equal(errors.length, 0)
+  })
+
+  it('should accept \\href{...}{...}', function () {
+    const { errors } = Parse(
+      'this is text \\href{http://www.overleaf.com/}{test} and more\n'
+    )
+    assert.equal(errors.length, 0)
+  })
+
+  it('should accept \\href{...}{...} with dollarsign in url', function () {
+    const { errors } = Parse(
+      'this is text \\href{http://www.overleaf.com/foo=$bar}{test} and more\n'
+    )
+    assert.equal(errors.length, 0)
+  })
+
+  it('should not accept \\href|...|{...}', function () {
+    const { errors } = Parse(
+      'this is text \\href|http://www.overleaf.com|{test} and more\n'
+    )
+    assert.equal(errors.length, 1)
+    assert.equal(errors[0].text, 'invalid href command')
+    assert.equal(errors[0].type, 'error')
+  })
+
+  it('should catch error in text argument of \\href{...}{...}', function () {
+    const { errors } = Parse(
+      'this is text \\href{http://www.overleaf.com/foo=$bar}{i have made an $error} and more\n'
+    )
+    assert.equal(errors.length, 2)
+    assert.equal(errors[0].text, 'unclosed $ found at close group }')
+    assert.equal(errors[0].type, 'error')
+    assert.equal(errors[1].text, 'unexpected close group } after $')
+    assert.equal(errors[1].type, 'error')
   })
 
   it('should accept \\left( and \\right)', function () {
@@ -407,6 +441,73 @@ describe('LatexLinter', function () {
 
   it('should accept incomplete \\newcommand*', function () {
     const { errors } = Parse('\\newcommand*{\\beq' + '}')
+    assert.equal(errors.length, 0)
+  })
+
+  it('should accept a plain hyperref command', function () {
+    const { errors } = Parse('\\hyperref{http://www.overleaf.com/}')
+    assert.equal(errors.length, 0)
+  })
+
+  it('should accept a hyperref command with underscores in the url ', function () {
+    const { errors } = Parse('\\hyperref{http://www.overleaf.com/my_page.html}')
+    assert.equal(errors.length, 0)
+  })
+
+  it('should accept a hyperref command with category, name and text arguments ', function () {
+    const { errors } = Parse(
+      '\\hyperref{http://www.overleaf.com/}{category}{name}{text}'
+    )
+    assert.equal(errors.length, 0)
+  })
+
+  it('should accept an underscore in a hyperref label', function () {
+    const { errors } = Parse('\\hyperref[foo_bar]{foo bar}')
+    assert.equal(errors.length, 0)
+  })
+
+  it('should reject a $ in a hyperref label', function () {
+    const { errors } = Parse('\\hyperref[foo$bar]{foo bar}')
+    assert.equal(errors.length, 1)
+  })
+
+  it('should reject an unclosed hyperref label', function () {
+    const { errors } = Parse('\\hyperref[foo_bar{foo bar}')
+    assert.equal(errors.length, 2)
+    assert.equal(errors[0].text, 'invalid hyperref label')
+    assert.equal(errors[1].text, 'unexpected close group }')
+  })
+
+  it('should accept a hyperref command without an optional argument', function () {
+    const { errors } = Parse('{\\hyperref{hello}}')
+    assert.equal(errors.length, 0)
+  })
+
+  it('should accept a hyperref command without an optional argument and multiple other arguments', function () {
+    const { errors } = Parse('{\\hyperref{}{}{fig411}}')
+    assert.equal(errors.length, 0)
+  })
+
+  it('should accept a hyperref command without an optional argument in an unclosed group', function () {
+    const { errors } = Parse('{\\hyperref{}{}{fig411}')
+    assert.equal(errors.length, 1)
+    assert.equal(errors[0].text, 'unclosed group {')
+  })
+
+  it('should accept documentclass with no options', function () {
+    const { errors } = Parse('\\documentclass{article}')
+    assert.equal(errors.length, 0)
+  })
+
+  it('should accept documentclass with options', function () {
+    const { errors } = Parse('\\documentclass[a4paper]{article}')
+    assert.equal(errors.length, 0)
+  })
+
+  it('should accept documentclass with underscore in options', function () {
+    const { errors } = Parse(
+      '\\documentclass[my_custom_document_class_option]{my-custom-class}'
+    )
     assert.equal(errors.length, 0)
   })
 

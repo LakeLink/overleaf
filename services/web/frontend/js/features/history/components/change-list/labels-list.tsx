@@ -1,61 +1,54 @@
-import { useTranslation } from 'react-i18next'
-import { Fragment } from 'react'
-import TagTooltip from './tag-tooltip'
-import UserNameWithColoredBadge from './user-name-with-colored-badge'
-import { useHistoryContext } from '../../context/history-context'
 import { useUserContext } from '../../../../shared/context/user-context'
-import { isPseudoLabel } from '../../utils/label'
-import { formatTime } from '../../../utils/format-date'
-import { groupBy, orderBy } from 'lodash'
-import { LoadedLabel } from '../../services/types/label'
+import { isVersionSelected } from '../../utils/history-details'
+import { useMemo } from 'react'
+import LabelListItem from './label-list-item'
+import useDropdownActiveItem from '../../hooks/use-dropdown-active-item'
+import { getVersionWithLabels } from '../../utils/label'
+import { useHistoryContext } from '../../context/history-context'
 
 function LabelsList() {
-  const { t } = useTranslation()
-  const { labels } = useHistoryContext()
   const { id: currentUserId } = useUserContext()
+  const { projectId, labels, selection, setSelection } = useHistoryContext()
+  const { activeDropdownItem, setActiveDropdownItem, closeDropdownForItem } =
+    useDropdownActiveItem()
 
-  let versionWithLabels: { version: number; labels: LoadedLabel[] }[] = []
-  if (labels) {
-    const groupedLabelsHash = groupBy(labels, 'version')
-    versionWithLabels = Object.keys(groupedLabelsHash).map(key => ({
-      version: parseInt(key, 10),
-      labels: groupedLabelsHash[key],
-    }))
-    versionWithLabels = orderBy(versionWithLabels, ['version'], ['desc'])
-  }
+  const versionWithLabels = useMemo(
+    () => getVersionWithLabels(labels),
+    [labels]
+  )
 
   return (
     <>
-      {versionWithLabels.map(({ version, labels }) => (
-        <div key={version} className="history-version-details">
-          {labels.map(label => (
-            <Fragment key={label.id}>
-              <TagTooltip
-                showTooltip={false}
-                currentUserId={currentUserId}
-                label={label}
-              />
-              <time className="history-version-metadata-time">
-                {formatTime(label.created_at, 'Do MMMM, h:mm a')}
-              </time>
-              {!isPseudoLabel(label) && (
-                <div className="history-version-saved-by">
-                  <span className="history-version-saved-by-label">
-                    {t('saved_by')}
-                  </span>
-                  <UserNameWithColoredBadge
-                    user={{
-                      id: label.user_id,
-                      displayName: label.user_display_name,
-                    }}
-                    currentUserId={currentUserId}
-                  />
-                </div>
-              )}
-            </Fragment>
-          ))}
-        </div>
-      ))}
+      {versionWithLabels.map(({ version, labels }) => {
+        const selectionState = isVersionSelected(selection, version)
+        const dropdownActive =
+          version === activeDropdownItem.item &&
+          activeDropdownItem.whichDropDown === 'moreOptions'
+        const compareDropdownActive =
+          version === activeDropdownItem.item &&
+          activeDropdownItem.whichDropDown === 'compare'
+
+        return (
+          <LabelListItem
+            key={version}
+            labels={labels}
+            version={version}
+            currentUserId={currentUserId!}
+            projectId={projectId}
+            selectionState={selectionState}
+            selectable={selectionState !== 'selected'}
+            setSelection={setSelection}
+            dropdownOpen={activeDropdownItem.isOpened && dropdownActive}
+            dropdownActive={dropdownActive}
+            compareDropdownActive={compareDropdownActive}
+            compareDropdownOpen={
+              activeDropdownItem.isOpened && compareDropdownActive
+            }
+            setActiveDropdownItem={setActiveDropdownItem}
+            closeDropdownForItem={closeDropdownForItem}
+          />
+        )
+      })}
     </>
   )
 }

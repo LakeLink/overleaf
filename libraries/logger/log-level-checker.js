@@ -1,5 +1,5 @@
-const fetch = require('node-fetch')
-const fs = require('fs')
+const { fetchString } = require('@overleaf/fetch-utils')
+const fs = require('node:fs')
 
 class LogLevelChecker {
   constructor(logger, defaultLevel) {
@@ -12,6 +12,7 @@ class LogLevelChecker {
     this.checkLogLevel()
     // re-check log level every minute
     this.checkInterval = setInterval(this.checkLogLevel.bind(this), 1000 * 60)
+    this.checkInterval.unref()
   }
 
   stop() {
@@ -51,11 +52,7 @@ class GCEMetadataLogLevelChecker extends LogLevelChecker {
       },
     }
     const uri = `http://metadata.google.internal/computeMetadata/v1/project/attributes/${this.logger.fields.name}-setLogLevelEndTime`
-    const res = await fetch(uri, options)
-    if (!res.ok) {
-      throw new Error('Metadata not okay')
-    }
-    const strEndTime = await res.text()
+    const strEndTime = await fetchString(uri, options)
     return parseInt(strEndTime, 10)
   }
 }

@@ -19,16 +19,22 @@ export type ExposedSettings = {
   hasLinkedProjectOutputFileFeature: boolean
   hasSamlBeta?: boolean
   hasSamlFeature: boolean
+  hotjarId?: string
+  hotjarVersion?: string
+  ieeeBrandId: number
   isOverleaf: boolean
   maxEntitiesPerProject: number
+  projectUploadTimeout: number
   maxUploadSize: number
   recaptchaDisabled: {
     invite: boolean
     login: boolean
     passwordReset: boolean
     register: boolean
+    addEmail: boolean
   }
   recaptchaSiteKeyV3?: string
+  recaptchaSiteKey?: string
   samlInitPath?: string
   sentryAllowedOriginRegex: string
   sentryDsn?: string
@@ -36,7 +42,11 @@ export type ExposedSettings = {
   sentryRelease?: string
   siteUrl: string
   textExtensions: string[]
+  editableFilenames: string[]
   validRootDocExtensions: string[]
+  fileIgnorePattern: string
   templateLinks?: TemplateLink[]
   labsEnabled: boolean
+  wikiEnabled?: boolean
+  templatesEnabled?: boolean
 }

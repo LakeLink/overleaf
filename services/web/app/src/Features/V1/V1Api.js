@@ -10,7 +10,7 @@
 const request = require('request')
 const settings = require('@overleaf/settings')
 const Errors = require('../Errors/Errors')
-const { promisifyAll } = require('../../util/promises')
+const { promisifyAll } = require('@overleaf/promise-utils')
 
 // TODO: check what happens when these settings aren't defined
 const DEFAULT_V1_PARAMS = {
@@ -71,17 +71,17 @@ const V1Api = {
       )
     }
     if (
-      (response.statusCode >= 200 && response.statusCode < 300) ||
+      (response && response.statusCode >= 200 && response.statusCode < 300) ||
       Array.from(options.expectedStatusCodes || []).includes(
-        response.statusCode
+        response?.statusCode
       )
     ) {
       return callback(null, response, body)
-    } else if (response.statusCode === 403) {
+    } else if (response?.statusCode === 403) {
       error = new Errors.ForbiddenError('overleaf v1 returned forbidden')
       error.statusCode = response.statusCode
       return callback(error)
-    } else if (response.statusCode === 404) {
+    } else if (response?.statusCode === 404) {
       error = new Errors.NotFoundError(
         `overleaf v1 returned non-success code: ${response.statusCode} ${options.method} ${options.uri}`
       )
@@ -89,9 +89,9 @@ const V1Api = {
       return callback(error)
     } else {
       error = new Error(
-        `overleaf v1 returned non-success code: ${response.statusCode} ${options.method} ${options.uri}`
+        `overleaf v1 returned non-success code: ${response?.statusCode} ${options.method} ${options.uri}`
       )
-      error.statusCode = response.statusCode
+      error.statusCode = response?.statusCode
       return callback(error)
     }
   },

@@ -16,7 +16,7 @@ const request = require('request')
 const drain = function (rate, callback) {
   request.post(
     {
-      url: `http://localhost:3026/drain?rate=${rate}`,
+      url: `http://127.0.0.1:3026/drain?rate=${rate}`,
     },
     (error, response, data) => callback(error, data)
   )
@@ -63,29 +63,11 @@ describe('DrainManagerTests', function () {
       return async.series(
         [
           cb => {
-            this.clientA = RealTimeClient.connect()
-            return this.clientA.on('connectionAccepted', cb)
+            this.clientA = RealTimeClient.connect(this.project_id, cb)
           },
 
           cb => {
-            this.clientB = RealTimeClient.connect()
-            return this.clientB.on('connectionAccepted', cb)
-          },
-
-          cb => {
-            return this.clientA.emit(
-              'joinProject',
-              { project_id: this.project_id },
-              cb
-            )
-          },
-
-          cb => {
-            return this.clientB.emit(
-              'joinProject',
-              { project_id: this.project_id },
-              cb
-            )
+            this.clientB = RealTimeClient.connect(this.project_id, cb)
           },
         ],
         done

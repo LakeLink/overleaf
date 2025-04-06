@@ -1,8 +1,7 @@
 import { useTranslation, Trans } from 'react-i18next'
 import { GroupPlanSubscription } from '../../../../../../types/project/dashboard/subscription'
-import Tooltip from '../../../../shared/components/tooltip'
-import getMeta from '../../../../utils/meta'
-import * as eventTracking from '../../../../infrastructure/event-tracking'
+import OLTooltip from '@/features/ui/components/ol/ol-tooltip'
+import MaterialIcon from '@/shared/components/material-icon'
 
 type GroupPlanProps = Pick<
   GroupPlanSubscription,
@@ -25,24 +24,18 @@ function GroupPlan({
           i18nKey="trial_remaining_days"
           components={{ b: <strong /> }}
           values={{ days: remainingTrialDays }}
+          shouldUnescape
+          tOptions={{ interpolation: { escapeValue: true } }}
         />
       )
     ) : (
       <Trans i18nKey="premium_plan_label" components={{ b: <strong /> }} />
     )
 
-  const featuresPageVariant = getMeta('ol-splitTestVariants')?.['features-page']
-  function handleLinkClick() {
-    eventTracking.sendMB('features-page-link', {
-      splitTest: 'features-page',
-      splitTestVariant: featuresPageVariant,
-    })
-  }
-
   return (
     <>
-      <span className="current-plan-label visible-xs">{currentPlanLabel}</span>
-      <Tooltip
+      <span className="current-plan-label d-md-none">{currentPlanLabel}</span>
+      <OLTooltip
         description={
           subscription.teamName != null
             ? t('group_plan_with_name_tooltip', {
@@ -56,12 +49,12 @@ function GroupPlan({
       >
         <a
           href={featuresPageURL}
-          className="current-plan-label hidden-xs"
-          onClick={handleLinkClick}
+          className="current-plan-label d-none d-md-inline-block"
         >
-          {currentPlanLabel} <span className="info-badge" />
+          {currentPlanLabel}&nbsp;
+          <MaterialIcon type="info" className="current-plan-label-icon" />
         </a>
-      </Tooltip>
+      </OLTooltip>
     </>
   )
 }

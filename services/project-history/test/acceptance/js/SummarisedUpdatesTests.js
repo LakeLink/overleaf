@@ -14,22 +14,23 @@ import sinon from 'sinon'
 import { expect } from 'chai'
 import Settings from '@overleaf/settings'
 import request from 'request'
-import assert from 'assert'
-import { ObjectId } from 'mongodb'
+import assert from 'node:assert'
+import mongodb from 'mongodb-legacy'
 import nock from 'nock'
 import * as ProjectHistoryClient from './helpers/ProjectHistoryClient.js'
 import * as ProjectHistoryApp from './helpers/ProjectHistoryApp.js'
+const { ObjectId } = mongodb
 
-const MockHistoryStore = () => nock('http://localhost:3100')
-const MockFileStore = () => nock('http://localhost:3009')
-const MockWeb = () => nock('http://localhost:3000')
+const MockHistoryStore = () => nock('http://127.0.0.1:3100')
+const MockFileStore = () => nock('http://127.0.0.1:3009')
+const MockWeb = () => nock('http://127.0.0.1:3000')
 
 const fixture = path => new URL(`../fixtures/${path}`, import.meta.url)
 
 describe('Summarized updates', function () {
   beforeEach(function (done) {
-    this.projectId = ObjectId().toString()
-    this.historyId = ObjectId().toString()
+    this.projectId = new ObjectId().toString()
+    this.historyId = new ObjectId().toString()
     return ProjectHistoryApp.ensureRunning(error => {
       if (error != null) {
         throw error

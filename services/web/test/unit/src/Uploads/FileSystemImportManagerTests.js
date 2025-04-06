@@ -2,7 +2,8 @@ const sinon = require('sinon')
 const { expect } = require('chai')
 const mockFs = require('mock-fs')
 const SandboxedModule = require('sandboxed-module')
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
+const Settings = require('@overleaf/settings')
 
 const MODULE_PATH =
   '../../../../app/src/Features/Uploads/FileSystemImportManager.js'
@@ -27,6 +28,13 @@ describe('FileSystemImportManager', function () {
       requires: {
         '@overleaf/settings': {
           textExtensions: ['tex', 'txt'],
+          editableFilenames: [
+            'latexmkrc',
+            '.latexmkrc',
+            'makefile',
+            'gnumakefile',
+          ],
+          fileIgnorePattern: Settings.fileIgnorePattern, // use the real pattern from the default settings
         },
         '../Editor/EditorController': this.EditorController,
       },
@@ -56,9 +64,8 @@ describe('FileSystemImportManager', function () {
         },
         symlink: mockFs.symlink({ path: 'import-test' }),
       })
-      this.entries = await this.FileSystemImportManager.promises.importDir(
-        'import-test'
-      )
+      this.entries =
+        await this.FileSystemImportManager.promises.importDir('import-test')
       this.projectPaths = this.entries.map(x => x.projectPath)
     })
 

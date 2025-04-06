@@ -1,4 +1,3 @@
-import Settings from '@overleaf/settings'
 import Metrics from '@overleaf/metrics'
 import logger from '@overleaf/logger'
 import express from 'express'
@@ -9,13 +8,10 @@ import * as Validation from './Validation.js'
 
 const HistoryLogger = logger.initialize('project-history').logger
 
-if (Settings.sentry.dsn) {
-  logger.initializeErrorReporting(Settings.sentry.dsn)
-}
-
-Metrics.initialize('project-history')
 Metrics.event_loop.monitor(logger)
 Metrics.memory.monitor(logger)
+Metrics.leaked_sockets.monitor(logger)
+Metrics.open_sockets.monitor()
 
 // log updates as truncated strings
 function truncateFn(updates) {

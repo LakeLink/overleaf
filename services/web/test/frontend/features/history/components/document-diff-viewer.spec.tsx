@@ -86,22 +86,98 @@ describe('document diff viewer', function () {
       </Container>
     )
 
-    cy.get('.ol-addition-marker').should('have.length', 1)
-    cy.get('.ol-addition-marker').first().as('addition')
+    cy.get('.ol-cm-addition-marker').should('have.length', 1)
+    cy.get('.ol-cm-addition-marker').first().as('addition')
     cy.get('@addition').should('have.text', 'article')
 
-    cy.get('.ol-deletion-marker').should('have.length', 1)
-    cy.get('.ol-deletion-marker').first().as('deletion')
+    cy.get('.ol-cm-deletion-marker').should('have.length', 1)
+    cy.get('.ol-cm-deletion-marker').first().as('deletion')
     cy.get('@deletion').should('have.text', 'Language')
 
     // Check hover tooltips
-    cy.get('@addition').trigger('mousemove')
+    cy.get('@addition').trigger('mouseover')
     cy.get('.ol-cm-highlight-tooltip').should('have.length', 1)
     cy.get('.ol-cm-highlight-tooltip')
       .first()
       .should('have.text', 'Added by Wombat on Monday')
 
-    cy.get('@deletion').trigger('mousemove')
+    cy.get('@deletion').trigger('mouseover')
+    cy.get('.ol-cm-highlight-tooltip').should('have.length', 1)
+    cy.get('.ol-cm-highlight-tooltip')
+      .first()
+      .should('have.text', 'Deleted by Wombat on Tuesday')
+  })
+
+  it('displays highlights with hover tooltips for empty lines', function () {
+    const scope = mockScope()
+
+    const doc = `1
+Addition
+
+
+End
+2
+Deletion
+
+End
+3`
+    const highlights: Highlight[] = [
+      {
+        type: 'addition',
+        range: { from: 2, to: 16 },
+        hue: 200,
+        label: 'Added by Wombat on Monday',
+      },
+      {
+        type: 'deletion',
+        range: { from: 19, to: 32 },
+        hue: 200,
+        label: 'Deleted by Wombat on Tuesday',
+      },
+    ]
+
+    cy.mount(
+      <Container>
+        <EditorProviders scope={scope}>
+          <DocumentDiffViewer doc={doc} highlights={highlights} />
+        </EditorProviders>
+      </Container>
+    )
+
+    cy.get('.ol-cm-empty-line-addition-marker').should('have.length', 2)
+    cy.get('.ol-cm-empty-line-deletion-marker').should('have.length', 1)
+
+    // For an empty line marker, we need to trigger mouseover on the containing
+    // line beause the marker itself does not trigger mouseover
+    cy.get('.ol-cm-empty-line-addition-marker')
+      .first()
+      .parent()
+      .as('firstAdditionLine')
+    cy.get('.ol-cm-empty-line-addition-marker')
+      .first()
+      .parent()
+      .as('lastAdditionLine')
+    cy.get('.ol-cm-empty-line-deletion-marker')
+      .last()
+      .parent()
+      .as('deletionLine')
+
+    // Check hover tooltips
+    cy.get('@lastAdditionLine').trigger('mouseover')
+    cy.get('.ol-cm-highlight-tooltip').should('have.length', 1)
+    cy.get('.ol-cm-highlight-tooltip')
+      .first()
+      .should('have.text', 'Added by Wombat on Monday')
+
+    cy.get('@lastAdditionLine').trigger('mouseleave')
+
+    cy.get('@firstAdditionLine').trigger('mouseover')
+    cy.get('.ol-cm-highlight-tooltip').should('have.length', 1)
+    cy.get('.ol-cm-highlight-tooltip')
+      .first()
+      .should('have.text', 'Added by Wombat on Monday')
+
+    cy.get('@deletionLine').trigger('mouseover')
     cy.get('.ol-cm-highlight-tooltip').should('have.length', 1)
     cy.get('.ol-cm-highlight-tooltip')
       .first()
@@ -123,8 +199,8 @@ describe('document diff viewer', function () {
 
     // Check the initial state, which should be a "More updates below" button
     // but no "More updates above", with the editor scrolled to the top
-    cy.get('.ol-addition-marker').should('have.length', 1)
-    cy.get('.ol-deletion-marker').should('have.length', 1)
+    cy.get('.ol-cm-addition-marker').should('have.length', 1)
+    cy.get('.ol-cm-deletion-marker').should('have.length', 1)
     cy.get('.previous-highlight-button').should('have.length', 0)
     cy.get('.next-highlight-button').should('have.length', 1)
     cy.get('@scroller').invoke('scrollTop').should('equal', 0)
@@ -140,8 +216,41 @@ describe('document diff viewer', function () {
     // Click the "More updates above" button, which should scroll the editor up
     // but not quite to the top, and check the new state
     cy.get('.previous-highlight-button').first().click()
-    cy.get('@scroller').invoke('scrollTop').should('not.equal', 0)
-    cy.get('.previous-highlight-button').should('have.length', 1)
+    cy.get('@scroller').invoke('scrollTop').should('equal', 0)
+    cy.get('.previous-highlight-button').should('not.exist')
     cy.get('.next-highlight-button').should('have.length', 1)
+  })
+
+  it('scrolls to first change', function () {
+    const scope = mockScope()
+    const finalHighlightOnly = highlights.slice(-1)
+
+    cy.mount(
+      <Container>
+        <EditorProviders scope={scope}>
+          <DocumentDiffViewer doc={doc} highlights={finalHighlightOnly} />
+        </EditorProviders>
+      </Container>
+    )
+
+    cy.get('.cm-scroller').first().invoke('scrollTop').should('not.equal', 0)
+    cy.get('.ol-cm-addition-marker')
+      .first()
+      .then($marker => {
+        cy.get('.cm-content')
+          .first()
+          .then($content => {
+            const contentRect = $content[0].getBoundingClientRect()
+            const markerRect = $marker[0].getBoundingClientRect()
+            expect(markerRect.top).to.be.within(
+              contentRect.top,
+              contentRect.bottom
+            )
+            expect(markerRect.bottom).to.be.within(
+              contentRect.top,
+              contentRect.bottom
+            )
+          })
+      })
   })
 })

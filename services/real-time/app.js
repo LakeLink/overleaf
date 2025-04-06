@@ -1,18 +1,18 @@
+// Metrics must be initialized before importing anything else
+require('@overleaf/metrics/initialize')
+
 const Metrics = require('@overleaf/metrics')
 const Settings = require('@overleaf/settings')
-Metrics.initialize(process.env.METRICS_APP_NAME || 'real-time')
 const async = require('async')
 
 const logger = require('@overleaf/logger')
 logger.initialize('real-time')
 Metrics.event_loop.monitor(logger)
+Metrics.open_sockets.monitor()
 
 const express = require('express')
 const session = require('express-session')
 const redis = require('@overleaf/redis-wrapper')
-if (Settings.sentry && Settings.sentry.dsn) {
-  logger.initializeErrorReporting(Settings.sentry.dsn)
-}
 
 const sessionRedisClient = redis.createClient(Settings.redis.websessions)
 
@@ -24,7 +24,7 @@ const DrainManager = require('./app/js/DrainManager')
 const HealthCheckManager = require('./app/js/HealthCheckManager')
 const DeploymentManager = require('./app/js/DeploymentManager')
 
-const Path = require('path')
+const Path = require('node:path')
 
 // NOTE: debug is invoked for every blob that is put on the wire
 const socketIoLogger = {
@@ -45,14 +45,25 @@ DeploymentManager.initialise()
 // Set up socket.io server
 const app = express()
 
-const server = require('http').createServer(app)
+const server = require('node:http').createServer(app)
+server.keepAliveTimeout = Settings.keepAliveTimeoutMs
 const io = require('socket.io').listen(server, {
   logger: socketIoLogger,
 })
 
 // Bind to sessions
 const sessionStore = new RedisStore({ client: sessionRedisClient })
-const cookieParser = CookieParser(Settings.security.sessionSecret)
+
+if (!Settings.security.sessionSecret) {
+  throw new Error('No SESSION_SECRET provided.')
+}
+
+const sessionSecrets = [
+  Settings.security.sessionSecret,
+  Settings.security.sessionSecretUpcoming,
+  Settings.security.sessionSecretFallback,
+].filter(Boolean)
+const cookieParser = CookieParser(sessionSecrets)
 
 const sessionSockets = new SessionSockets(
   io,
@@ -71,16 +82,7 @@ io.configure(function () {
   // See http://answers.dotcloud.com/question/578/problem-with-websocket-over-ssl-in-safari-with
   io.set('match origin protocol', true)
 
-  // gzip uses a Node 0.8.x method of calling the gzip program which
-  // doesn't work with 0.6.x
-  // io.enable('browser client gzip')
-  io.set('transports', [
-    'websocket',
-    'flashsocket',
-    'htmlfile',
-    'xhr-polling',
-    'jsonp-polling',
-  ])
+  io.set('transports', ['websocket', 'xhr-polling'])
 })
 
 // Serve socket.io.js client file from imported dist folder
@@ -172,17 +174,17 @@ server.listen(port, host, function (error) {
 // Stop huge stack traces in logs from all the socket.io parsing steps.
 Error.stackTraceLimit = 10
 
-function shutdownCleanly(signal) {
+function shutdownAfterAllClientsHaveDisconnected() {
   const connectedClients = io.sockets.clients().length
   if (connectedClients === 0) {
-    logger.info('no clients connected, exiting')
+    logger.info({}, 'no clients connected, exiting')
     process.exit()
   } else {
     logger.info(
       { connectedClients },
       'clients still connected, not shutting down yet'
     )
-    setTimeout(() => shutdownCleanly(signal), 30 * 1000)
+    setTimeout(() => shutdownAfterAllClientsHaveDisconnected(), 5_000)
   }
 }
 
@@ -204,6 +206,7 @@ function drainAndShutdown(signal) {
         `received interrupt, starting drain over ${shutdownDrainTimeWindow} mins`
       )
       DrainManager.startDrainTimeWindow(io, shutdownDrainTimeWindow, () => {
+        shutdownAfterAllClientsHaveDisconnected()
         setTimeout(() => {
           const staleClients = io.sockets.clients()
           if (staleClients.length !== 0) {
@@ -219,7 +222,6 @@ function drainAndShutdown(signal) {
           Settings.shutDownComplete = true
         }, Settings.gracefulReconnectTimeoutMs)
       })
-      shutdownCleanly(signal)
     }, statusCheckInterval)
   }
 }
@@ -251,7 +253,11 @@ if (Settings.shutdownDrainTimeWindow) {
           'EPIPE',
           'ECONNRESET',
           'ERR_STREAM_WRITE_AFTER_END',
-        ].includes(error.code)
+        ].includes(error.code) ||
+        // socket.io error handler sending on polling connection again.
+        (error.code === 'ERR_HTTP_HEADERS_SENT' &&
+          error.stack &&
+          error.stack.includes('Transport.error'))
       ) {
         Metrics.inc('disconnected_write', 1, { status: error.code })
         return logger.warn(

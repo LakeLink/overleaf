@@ -1,8 +1,8 @@
 const SandboxedModule = require('sandboxed-module')
 const sinon = require('sinon')
 const { expect } = require('chai')
-const BufferedStream = require('bufferedstream')
-const { ObjectId } = require('mongodb')
+const { Writable } = require('stream')
+const { ObjectId } = require('mongodb-legacy')
 
 const MODULE_PATH =
   '../../../../app/src/Features/ThirdPartyDataStore/UpdateMerger.js'
@@ -11,6 +11,8 @@ describe('UpdateMerger :', function () {
   beforeEach(function () {
     this.projectId = 'project_id_here'
     this.userId = 'mock-user-id'
+    this.randomUUID = 'random-uuid'
+    this.dumpPath = '/dump'
 
     this.docPath = this.newDocPath = '/folder/doc.tex'
     this.filePath = this.newFilePath = '/folder/file.png'
@@ -23,7 +25,7 @@ describe('UpdateMerger :', function () {
     this.existingDocs = [{ path: '/main.tex' }, { path: '/folder/other.tex' }]
     this.existingFiles = [{ path: '/figure.pdf' }, { path: '/folder/fig1.pdf' }]
 
-    this.fsPath = '/tmp/file/path'
+    this.fsPath = `${this.dumpPath}/${this.projectId}_${this.randomUUID}`
     this.fileContents = `\\documentclass{article}
 \\usepackage[utf8]{inputenc}
 
@@ -32,30 +34,36 @@ describe('UpdateMerger :', function () {
 \\date{June 2011}`
     this.docLines = this.fileContents.split('\n')
     this.source = 'dropbox'
-    this.updateRequest = new BufferedStream()
+    this.updateRequest = new Writable()
+    this.writeStream = new Writable()
 
     this.fsPromises = {
       unlink: sinon.stub().resolves(),
       readFile: sinon.stub().withArgs(this.fsPath).resolves(this.fileContents),
+      mkdir: sinon.stub().resolves(),
+    }
+
+    this.fs = {
+      createWriteStream: sinon.stub().returns(this.writeStream),
     }
 
     this.doc = {
-      _id: ObjectId(),
+      _id: new ObjectId(),
       rev: 2,
     }
 
     this.file = {
-      _id: ObjectId(),
+      _id: new ObjectId(),
       rev: 6,
     }
 
     this.folder = {
-      _id: ObjectId(),
+      _id: new ObjectId(),
     }
 
     this.EditorController = {
       promises: {
-        deleteEntityWithPath: sinon.stub().resolves(),
+        deleteEntityWithPath: sinon.stub().resolves(new ObjectId()),
         upsertDocWithPath: sinon
           .stub()
           .resolves({ doc: this.doc, folder: this.folder }),
@@ -71,10 +79,8 @@ describe('UpdateMerger :', function () {
       },
     }
 
-    this.FileWriter = {
-      promises: {
-        writeStreamToDisk: sinon.stub().resolves(this.fsPath),
-      },
+    this.crypto = {
+      randomUUID: sinon.stub().returns(this.randomUUID),
     }
 
     this.ProjectEntityHandler = {
@@ -86,16 +92,20 @@ describe('UpdateMerger :', function () {
       },
     }
 
-    this.Settings = { path: { dumpPath: 'dump_here' } }
+    this.Settings = { path: { dumpFolder: this.dumpPath } }
+
+    this.stream = { pipeline: sinon.stub().resolves() }
 
     this.UpdateMerger = SandboxedModule.require(MODULE_PATH, {
       requires: {
         'fs/promises': this.fsPromises,
+        fs: this.fs,
         '../Editor/EditorController': this.EditorController,
         '../Uploads/FileTypeManager': this.FileTypeManager,
-        '../../infrastructure/FileWriter': this.FileWriter,
         '../Project/ProjectEntityHandler': this.ProjectEntityHandler,
         '@overleaf/settings': this.Settings,
+        'stream/promises': this.stream,
+        crypto: this.crypto,
       },
     })
   })
@@ -107,7 +117,7 @@ describe('UpdateMerger :', function () {
           binary: false,
           encoding: 'utf-8',
         })
-        await this.UpdateMerger.promises.mergeUpdate(
+        this.mergeUpdateResult = await this.UpdateMerger.promises.mergeUpdate(
           this.userId,
           this.projectId,
           this.docPath,
@@ -135,12 +145,17 @@ describe('UpdateMerger :', function () {
       it('removes the temp file from disk', function () {
         expect(this.fsPromises.unlink).to.have.been.calledWith(this.fsPath)
       })
+
+      it('returns the entity id and rev', function () {
+        expect(this.mergeUpdateResult.entityId).to.be.instanceOf(ObjectId)
+        expect(this.mergeUpdateResult.rev).to.equal(2)
+      })
     })
 
     describe('file updates for a new file ', function () {
       beforeEach(async function () {
         this.FileTypeManager.promises.getType.resolves({ binary: true })
-        await this.UpdateMerger.promises.mergeUpdate(
+        this.mergeUpdateResult = await this.UpdateMerger.promises.mergeUpdate(
           this.userId,
           this.projectId,
           this.filePath,
@@ -168,6 +183,11 @@ describe('UpdateMerger :', function () {
 
       it('removes the temp file from disk', function () {
         expect(this.fsPromises.unlink).to.have.been.calledWith(this.fsPath)
+      })
+
+      it('returns the entity id and rev', function () {
+        expect(this.mergeUpdateResult.entityId).to.be.instanceOf(ObjectId)
+        expect(this.mergeUpdateResult.rev).to.equal(6)
       })
     })
 
@@ -177,7 +197,7 @@ describe('UpdateMerger :', function () {
           binary: false,
           encoding: 'utf-8',
         })
-        await this.UpdateMerger.promises.mergeUpdate(
+        this.mergeUpdateResult = await this.UpdateMerger.promises.mergeUpdate(
           this.userId,
           this.projectId,
           this.existingDocPath,
@@ -205,12 +225,17 @@ describe('UpdateMerger :', function () {
       it('removes the temp file from disk', function () {
         expect(this.fsPromises.unlink).to.have.been.calledWith(this.fsPath)
       })
+
+      it('returns the entity id and rev', function () {
+        expect(this.mergeUpdateResult.entityId).to.be.instanceOf(ObjectId)
+        expect(this.mergeUpdateResult.rev).to.equal(2)
+      })
     })
 
     describe('file updates for an existing file', function () {
       beforeEach(async function () {
         this.FileTypeManager.promises.getType.resolves({ binary: true })
-        await this.UpdateMerger.promises.mergeUpdate(
+        this.mergeUpdateResult = await this.UpdateMerger.promises.mergeUpdate(
           this.userId,
           this.projectId,
           this.existingFilePath,
@@ -239,13 +264,18 @@ describe('UpdateMerger :', function () {
       it('removes the temp file from disk', function () {
         expect(this.fsPromises.unlink).to.have.been.calledWith(this.fsPath)
       })
+
+      it('returns the entity id and rev', function () {
+        expect(this.mergeUpdateResult.entityId).to.be.instanceOf(ObjectId)
+        expect(this.mergeUpdateResult.rev).to.equal(6)
+      })
     })
   })
 
   describe('file updates for an existing doc', function () {
     beforeEach(async function () {
       this.FileTypeManager.promises.getType.resolves({ binary: true })
-      await this.UpdateMerger.promises.mergeUpdate(
+      this.mergeUpdateResult = await this.UpdateMerger.promises.mergeUpdate(
         this.userId,
         this.projectId,
         this.existingDocPath,
@@ -274,12 +304,17 @@ describe('UpdateMerger :', function () {
     it('removes the temp file from disk', function () {
       expect(this.fsPromises.unlink).to.have.been.calledWith(this.fsPath)
     })
+
+    it('returns the entity id and rev', function () {
+      expect(this.mergeUpdateResult.entityId).to.be.instanceOf(ObjectId)
+      expect(this.mergeUpdateResult.rev).to.equal(6)
+    })
   })
 
   describe('doc updates for an existing file', function () {
     beforeEach(async function () {
       this.FileTypeManager.promises.getType.resolves({ binary: true })
-      await this.UpdateMerger.promises.mergeUpdate(
+      this.mergeUpdateResult = await this.UpdateMerger.promises.mergeUpdate(
         this.userId,
         this.projectId,
         this.existingFilePath,
@@ -313,16 +348,25 @@ describe('UpdateMerger :', function () {
     it('removes the temp file from disk', function () {
       expect(this.fsPromises.unlink).to.have.been.calledWith(this.fsPath)
     })
+
+    it('returns the entity id and rev', function () {
+      expect(this.mergeUpdateResult.entityId).to.be.instanceOf(ObjectId)
+      expect(this.mergeUpdateResult.rev).to.equal(6)
+    })
   })
 
   describe('deleteUpdate', function () {
     beforeEach(async function () {
-      await this.UpdateMerger.promises.deleteUpdate(
+      this.deleteUpdateResult = await this.UpdateMerger.promises.deleteUpdate(
         this.userId,
         this.projectId,
         this.docPath,
         this.source
       )
+    })
+
+    afterEach(function () {
+      delete this.deleteUpdateResult
     })
 
     it('should delete the entity in the editor controller', function () {
@@ -334,6 +378,10 @@ describe('UpdateMerger :', function () {
         this.source,
         this.userId
       )
+    })
+
+    it('returns the entity id', function () {
+      expect(this.deleteUpdateResult).to.be.instanceOf(ObjectId)
     })
   })
 })

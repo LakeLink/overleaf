@@ -1,7 +1,6 @@
-import { useEffect, useMemo } from 'react'
+import React, { FC, useEffect, useState } from 'react'
 import { get } from 'lodash'
-import { ContextRoot } from '../../js/shared/context/root-context'
-import { User } from '../../../types/user'
+import { User, UserId } from '../../../types/user'
 import { Project } from '../../../types/project'
 import {
   mockBuildFile,
@@ -9,21 +8,34 @@ import {
   mockCompileError,
 } from '../fixtures/compile'
 import useFetchMock from '../hooks/use-fetch-mock'
+import { useMeta } from '../hooks/use-meta'
+import SocketIOShim, { SocketIOMock } from '@/ide/connection/SocketIoShim'
+import { IdeContext } from '@/shared/context/ide-context'
+import {
+  IdeReactContext,
+  createReactScopeValueStore,
+} from '@/features/ide-react/context/ide-react-context'
+import { IdeEventEmitter } from '@/features/ide-react/create-ide-event-emitter'
+import { ReactScopeEventEmitter } from '@/features/ide-react/scope-event-emitter/react-scope-event-emitter'
+import { ConnectionContext } from '@/features/ide-react/context/connection-context'
+import { Socket } from '@/features/ide-react/connection/types/socket'
+import { ConnectionState } from '@/features/ide-react/connection/types/connection-state'
+import { ReactContextRoot } from '@/features/ide-react/context/react-context-root'
 
 const scopeWatchers: [string, (value: any) => void][] = []
 
 const initialize = () => {
   const user: User = {
-    id: 'story-user',
+    id: 'story-user' as UserId,
     email: 'story-user@example.com',
     allowedFreeTrial: true,
     features: { dropbox: true, symbolPalette: true },
   }
 
   const project: Project = {
-    _id: 'a-project',
+    _id: '63e21c07946dd8c76505f85a',
     name: 'A Project',
-    features: { mendeley: true, zotero: true },
+    features: { mendeley: true, zotero: true, referencesSearch: true },
     tokens: {},
     owner: {
       _id: 'a-user',
@@ -31,7 +43,7 @@ const initialize = () => {
     },
     members: [],
     invites: [],
-    rootDocId: '5e74f1a7ce17ae0041dfd056',
+    rootDoc_id: '5e74f1a7ce17ae0041dfd056',
     rootFolder: [
       {
         _id: 'root-folder-id',
@@ -40,7 +52,7 @@ const initialize = () => {
           { _id: 'test-file-id', name: 'testfile.tex' },
           { _id: 'test-bib-file-id', name: 'testsources.bib' },
         ],
-        fileRefs: [{ _id: 'test-image-id', name: 'frog.jpg' }],
+        fileRefs: [{ _id: 'test-image-id', name: 'frog.jpg', hash: '42' }],
         folders: [],
       },
     ],
@@ -64,11 +76,6 @@ const initialize = () => {
       //
     },
     $broadcast: () => {},
-    $root: {
-      _references: {
-        keys: ['bibkeyExample'],
-      },
-    },
     ui: {
       chatOpen: true,
       pdfLayout: 'flat',
@@ -77,14 +84,13 @@ const initialize = () => {
       pdfViewer: 'js',
       syntaxValidation: true,
     },
-    toggleHistory: () => {},
     editor: {
       richText: false,
-      newSourceEditor: false,
       sharejs_doc: {
         doc_id: 'test-doc',
         getSnapshot: () => 'some doc content',
       },
+      open_doc_name: 'testfile.tex',
     },
     hasLintingError: false,
     permissionsLevel: 'owner',
@@ -92,121 +98,34 @@ const initialize = () => {
 
   const ide = {
     $scope: scope,
-    socket: {
-      on: () => {},
-      removeListener: () => {},
-    },
-    fileTreeManager: {
-      findEntityById: () => null,
-      findEntityByPath: () => null,
-      getEntityPath: () => null,
-      getRootDocDirname: () => undefined,
-      getPreviewByPath: (path: string) =>
-        path === 'frog.jpg'
-          ? {
-              extension: 'png',
-              url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsCAYAAAB5fY51AAABhWlDQ1BJQ0MgcHJvZmlsZQAAKJF9kT1Iw0AcxV9TpaJVETuIOGSogmBBVMRRq1CECqFWaNXB5NIvaNKQpLg4Cq4FBz8Wqw4uzro6uAqC4AeIq4uToouU+L+k0CLWg+N+vLv3uHsHCNUi06y2cUDTbTMRi4qp9KoYeIWAPnShB6Mys4w5SYqj5fi6h4+vdxGe1frcn6NbzVgM8InEs8wwbeIN4ulN2+C8TxxieVklPiceM+mCxI9cVzx+45xzWeCZITOZmCcOEYu5JlaamOVNjXiKOKxqOuULKY9VzluctWKZ1e/JXxjM6CvLXKc5hBgWsQQJIhSUUUARNiK06qRYSNB+tIV/0PVL5FLIVQAjxwJK0CC7fvA/+N2tlZ2c8JKCUaD9xXE+hoHALlCrOM73sePUTgD/M3ClN/ylKjDzSXqloYWPgN5t4OK6oSl7wOUOMPBkyKbsSn6aQjYLvJ/RN6WB/lugc83rrb6P0wcgSV3Fb4CDQ2AkR9nrLd7d0dzbv2fq/f0ARfNylZJUgMQAAAAGYktHRABuAP8AAGHZRr4AAAAJcEhZcwAALiMAAC4jAXilP3YAAAAHdElNRQfnAhELEhgyPeVkAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd2l0aCBHSU1QV4EOFwAAAyVJREFUeNrt1rEJgDAURVGVNCmS2hS6PziCteIYWjuEbiEfOWeEV1xe35bt6QhjnlYjBJLzbYRABhMAggUgWIBgAQgWgGABggUgWACCBQgWgGABCBYgWACCBSBYgGABCBaAYAGCBSBYAIIFCBaAYAEIFiBYAIIFIFiAYAEIFiBYAIIFIFiAYAEIFoBgAYIFIFgAggUIFoBgAQgWIFgAggUgWIBgAQgWgGABggUgWACCBQgWgGABCBYgWACCBSBYgGABCBYgWACCBSBYgGABCBaAYAGCBSBYAIIFCBaAYAEIFiBYAIIFIFiAYAEIFoBgAYIFIFgAggUIFoBgAQgWIFgAggUgWIBgAQgWIFgAggUgWIBgAQgWgGABggUgWACCBQgWgGABCBbwX6m13QqB5HwbIZBSLyN4WACCBQgWgGABCBYgWACCBSBYgGABCBaAYAGCBSBYAIIFCBaAYAEIFiBYAIIFCBaAYAEIFiBYAIIFIFiAYAEIFoBgAYIFIFgAggUIFoBgAQgWIFgAggUgWIBgAQgWgGABggUgWACCBQgWgGABCBYgWACCBQgWgGABCBYgWACCBSBYgGABCBaAYAGCBSBYAIIFCBaAYAEIFiBYAIIFIFiAYAEIFoBgAYIFIFgAggUIFoBgAQgWIFgAggUIFoBgAQgWIFgAggUgWIBgAQgWgGABggUgWACCBQgWgGABCBYgWACCBSBYgGABCBaAYAGCBfCFVMtphUBKvYwQSBsPI3hYAIIFCBaAYAEIFiBYAIIFIFiAYAEIFoBgAYIFIFgAggUIFoBgAQgWIFgAggUIFoBgAQgWIFgAggUgWIBgAQgWgGABggUgWACCBQgWgGABCBYgWACCBSBYgGABCBaAYAGCBSBYAIIFCBaAYAEIFiBYAIIFCBaAYAEIFiBYAIIFIFiAYAEIFoBgAYIFIFgAggUIFoBgAQgWIFgAggUgWIBgAQgWgGABggUgWACCBQgWgGABCBYgWACCBQgWgGABCBYgWACCBSBYgGABCBaAYAGCBSBYAIIFCBaAYAEIFiBYAIIFIFiAYAEIFoBgAYIF8IUXjtUMuBMh1xAAAAAASUVORK5CYII=',
-            }
-          : null,
-    },
-    editorManager: {
-      getCurrentDocId: () => 'foo',
-      openDoc: (id: string, options: unknown) => {
-        console.log('open doc', id, options)
-      },
-    },
-    metadataManager: {
-      metadata: {
-        state: {
-          documents: {
-            'test-file-id': { labels: ['sec:section-label'], packages: [] },
-          },
-        },
-      },
-    },
+    socket: new SocketIOShim.SocketShimNoop(
+      new SocketIOMock()
+    ) as unknown as Socket,
   }
 
-  window.user = user
-
-  window.ExposedSettings = {
-    adminEmail: 'placeholder@example.com',
-    appName: 'Overleaf',
-    cookieDomain: '.overleaf.stories',
-    dropboxAppName: 'Overleaf-Stories',
-    emailConfirmationDisabled: false,
-    enableSubscriptions: true,
-    hasAffiliationsFeature: false,
-    hasLinkUrlFeature: false,
-    hasLinkedProjectFileFeature: true,
-    hasLinkedProjectOutputFileFeature: true,
-    hasSamlFeature: true,
-    isOverleaf: true,
-    labsEnabled: true,
-    maxEntitiesPerProject: 10,
-    maxUploadSize: 5 * 1024 * 1024,
-    recaptchaDisabled: {
-      invite: true,
-      login: true,
-      passwordReset: true,
-      register: true,
-    },
-    sentryAllowedOriginRegex: '',
-    siteUrl: 'http://localhost',
-    templateLinks: [],
-    textExtensions: [
-      'tex',
-      'latex',
-      'sty',
-      'cls',
-      'bst',
-      'bib',
-      'bibtex',
-      'txt',
-      'tikz',
-      'mtx',
-      'rtex',
-      'md',
-      'asy',
-      'latexmkrc',
-      'lbx',
-      'bbx',
-      'cbx',
-      'm',
-      'lco',
-      'dtx',
-      'ins',
-      'ist',
-      'def',
-      'clo',
-      'ldf',
-      'rmd',
-      'lua',
-      'gv',
-      'mf',
-    ],
-    validRootDocExtensions: ['tex', 'Rtex', 'ltx'],
-  }
-
-  window.project_id = project._id
-
-  window.metaAttributesCache = new Map()
+  // window.metaAttributesCache is reset in preview.tsx
   window.metaAttributesCache.set('ol-user', user)
-
-  window.gitBridgePublicBaseUrl = 'https://git.stories.com'
+  window.metaAttributesCache.set('ol-project_id', project._id)
+  window.metaAttributesCache.set(
+    'ol-gitBridgePublicBaseUrl',
+    'https://git.stories.com'
+  )
 
   window._ide = ide
-
-  return ide
 }
 
 type ScopeDecoratorOptions = {
   mockCompileOnLoad: boolean
+  providers?: Record<string, any>
 }
 
 export const ScopeDecorator = (
   Story: any,
-  opts: ScopeDecoratorOptions = { mockCompileOnLoad: true }
+  opts: ScopeDecoratorOptions = { mockCompileOnLoad: true },
+  meta: Record<string, any> = {}
 ) => {
+  initialize()
+
   // mock compile on load
   useFetchMock(fetchMock => {
     if (opts.mockCompileOnLoad) {
@@ -223,13 +142,105 @@ export const ScopeDecorator = (
     }
   }, [])
 
-  const ide = useMemo(() => {
-    return initialize()
-  }, [])
+  // set values on window.metaAttributesCache (created in initialize, above)
+  useMeta(meta)
 
   return (
-    <ContextRoot ide={ide} settings={{}}>
+    <ReactContextRoot
+      providers={{
+        ConnectionProvider,
+        IdeReactProvider,
+        ...opts.providers,
+      }}
+    >
       <Story />
-    </ContextRoot>
+    </ReactContextRoot>
+  )
+}
+
+const ConnectionProvider: FC = ({ children }) => {
+  const [value] = useState(() => {
+    const connectionState: ConnectionState = {
+      readyState: WebSocket.OPEN,
+      forceDisconnected: false,
+      inactiveDisconnect: false,
+      reconnectAt: null,
+      forcedDisconnectDelay: 0,
+      lastConnectionAttempt: 0,
+      error: '',
+    }
+    return {
+      socket: window._ide.socket as Socket,
+      connectionState,
+      isConnected: true,
+      isStillReconnecting: false,
+      secondsUntilReconnect: () => 0,
+      tryReconnectNow: () => {},
+      registerUserActivity: () => {},
+      closeConnection: () => {},
+      getSocketDebuggingInfo: () => ({
+        client_id: 'fakeClientId',
+        transport: 'fakeTransport',
+        publicId: 'fakePublicId',
+        lastUserActivity: 0,
+        connectionState,
+        externalHeartbeat: {
+          currentStart: 0,
+          lastSuccess: 0,
+          lastLatency: 0,
+        },
+      }),
+    }
+  })
+
+  return (
+    <ConnectionContext.Provider value={value}>
+      {children}
+    </ConnectionContext.Provider>
+  )
+}
+
+const IdeReactProvider: FC = ({ children }) => {
+  const projectId = 'project-123'
+  const [startedFreeTrial, setStartedFreeTrial] = useState(false)
+
+  const [ideReactContextValue] = useState(() => ({
+    projectId,
+    eventEmitter: new IdeEventEmitter(),
+    startedFreeTrial,
+    setStartedFreeTrial,
+    reportError: () => {},
+    projectJoined: true,
+  }))
+
+  const [ideContextValue] = useState(() => {
+    const ide = window._ide
+    const scopeStore = createReactScopeValueStore(projectId)
+    for (const [key, value] of Object.entries(ide.$scope)) {
+      scopeStore.set(key, value)
+    }
+    const scopeEventEmitter = new ReactScopeEventEmitter(new IdeEventEmitter())
+
+    window.overleaf = {
+      ...window.overleaf,
+      unstable: {
+        ...window.overleaf?.unstable,
+        store: scopeStore,
+      },
+    }
+
+    return {
+      ...ide,
+      scopeStore,
+      scopeEventEmitter,
+    }
+  })
+
+  return (
+    <IdeReactContext.Provider value={ideReactContextValue}>
+      <IdeContext.Provider value={ideContextValue}>
+        {children}
+      </IdeContext.Provider>
+    </IdeReactContext.Provider>
   )
 }

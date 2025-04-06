@@ -1,60 +1,54 @@
 import CodeMirrorEditor from '../../../../../frontend/js/features/source-editor/components/codemirror-editor'
 import { EditorProviders } from '../../../helpers/editor-providers'
-import { FC } from 'react'
 import { mockScope } from '../helpers/mock-scope'
 import { metaKey } from '../helpers/meta-key'
 import { docId } from '../helpers/mock-doc'
 import { activeEditorLine } from '../helpers/active-editor-line'
-
-const Container: FC = ({ children }) => (
-  <div style={{ width: 785, height: 785 }}>{children}</div>
-)
+import { TestContainer } from '../helpers/test-container'
+import customLocalStorage from '@/infrastructure/local-storage'
+import { OnlineUsersContext } from '@/features/ide-react/context/online-users-context'
+import { FC } from 'react'
 
 describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
   beforeEach(function () {
     window.metaAttributesCache.set('ol-preventCompileOnLoad', true)
     cy.interceptEvents()
-    cy.interceptSpelling()
-  })
-
-  afterEach(function () {
-    window.metaAttributesCache = new Map()
   })
 
   it('deletes selected text on Backspace', function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
-    cy.get('@line')
-      .type('this is some text')
-      .should('have.text', 'this is some text')
-      .type('{shift}{leftArrow}{leftArrow}{leftArrow}{leftArrow}')
-      .type('{backspace}')
-      .should('have.text', 'this is some ')
+    cy.get('@line').type('this is some text')
+    cy.get('@line').should('have.text', 'this is some text')
+    cy.get('@line').type('{shift}{leftArrow}{leftArrow}{leftArrow}{leftArrow}')
+    cy.get('@line').type('{backspace}')
+    cy.get('@line').should('have.text', 'this is some ')
   })
 
   it('renders client-side lint annotations in the gutter', function () {
     const scope = mockScope()
-    scope.settings.syntaxValidation = true
+    const userSettings = { syntaxValidation: true }
 
     cy.clock()
 
     cy.mount(
-      <Container>
-        <EditorProviders scope={scope}>
+      <TestContainer>
+        <EditorProviders scope={scope} userSettings={userSettings}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     cy.tick(1000)
@@ -93,14 +87,16 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
       ],
     }
 
+    const userSettings = { syntaxValidation: false }
+
     cy.clock()
 
     cy.mount(
-      <Container>
-        <EditorProviders scope={scope}>
+      <TestContainer>
+        <EditorProviders scope={scope} userSettings={userSettings}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     cy.tick(1000)
@@ -115,11 +111,11 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     cy.contains('Your introduction goes here!')
@@ -129,15 +125,17 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().type('foo{enter}')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
+    cy.get('@line').type('foo{enter}')
 
     activeEditorLine().should('have.text', '')
   })
@@ -146,15 +144,16 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     cy.get('@line').type('\\begin{{}itemiz')
     cy.findAllByRole('listbox').contains('\\begin{itemize}').click()
@@ -166,18 +165,20 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     // Single indentation
-    cy.get('@line').trigger('keydown', { key: 'Tab' }).type('{enter}')
+    cy.get('@line').trigger('keydown', { key: 'Tab' })
+    cy.get('@line').type('{enter}')
 
     activeEditorLine().should('have.text', '    ')
 
@@ -190,32 +191,45 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
   it('renders cursor highlights', function () {
     const scope = mockScope()
 
-    scope.onlineUserCursorHighlights = {
-      [docId]: [
-        {
-          label: 'Test User',
-          cursor: { row: 10, column: 5 },
-          hue: 150,
-        },
-        {
-          label: 'Another User',
-          cursor: { row: 7, column: 2 },
-          hue: 50,
-        },
-        {
-          label: 'Starter User',
-          cursor: { row: 0, column: 0 },
-          hue: 0,
-        },
-      ],
+    const value = {
+      onlineUsers: {},
+      onlineUserCursorHighlights: {
+        [docId]: [
+          {
+            label: 'Test User',
+            cursor: { row: 10, column: 5 },
+            hue: 150,
+          },
+          {
+            label: 'Another User',
+            cursor: { row: 7, column: 2 },
+            hue: 50,
+          },
+          {
+            label: 'Starter User',
+            cursor: { row: 0, column: 0 },
+            hue: 0,
+          },
+        ],
+      },
+      onlineUsersArray: [],
+      onlineUsersCount: 3,
+    }
+
+    const OnlineUsersProvider: FC = ({ children }) => {
+      return (
+        <OnlineUsersContext.Provider value={value}>
+          {children}
+        </OnlineUsersContext.Provider>
+      )
     }
 
     cy.mount(
-      <Container>
-        <EditorProviders scope={scope}>
+      <TestContainer>
+        <EditorProviders scope={scope} providers={{ OnlineUsersProvider }}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     cy.get('.ol-cm-cursorHighlight').should('have.length', 3)
@@ -224,13 +238,14 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
   it('does not allow typing to the document in read-only mode', function () {
     const scope = mockScope()
     scope.permissionsLevel = 'readOnly'
+    scope.permissions.write = false
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // Handling the thrown error on failing to type text
@@ -242,7 +257,8 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
       throw error
     })
 
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     cy.get('@line').type('text')
     cy.get('@line').should('not.contain.text', 'text')
@@ -252,11 +268,11 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // put the cursor on a blank line to type in
@@ -266,7 +282,7 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
 
     pairs.forEach(pair => {
       activeEditorLine().type(pair).as('line')
-      cy.get('@line').find('.cm-matchingBracket').should('exist')
+      cy.get('@line').find('.cm-matchingBracket')
       cy.get('@line').type('{enter}')
     })
   })
@@ -275,15 +291,16 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // select foldable line
-    cy.get('.cm-line').eq(9).click().as('line')
+    cy.get('.cm-line').eq(9).as('line')
+    cy.get('@line').click()
 
     const testUnfoldedState = () => {
       cy.get('.cm-gutterElement').eq(11).should('have.text', '11')
@@ -315,14 +332,14 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
     cy.interceptCompile()
 
     const scope = mockScope()
-    scope.settings.mode = 'vim'
+    const userSettings = { mode: 'vim' }
 
     cy.mount(
-      <Container>
-        <EditorProviders scope={scope}>
+      <TestContainer>
+        <EditorProviders scope={scope} userSettings={userSettings}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // Compile on initial load
@@ -330,7 +347,8 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
     cy.interceptCompile()
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     cy.get('.cm-vim-panel').should('have.length', 0)
 
@@ -338,7 +356,8 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
 
     cy.get('.cm-vim-panel').should('have.length', 1)
 
-    cy.get('.cm-vim-panel input').type('w').type('{enter}')
+    cy.get('.cm-vim-panel input').type('w')
+    cy.get('.cm-vim-panel input').type('{enter}')
 
     // Compile after save
     cy.waitForCompile()
@@ -348,22 +367,23 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
-    cy.get('.cm-line')
-      .eq(16)
-      .click()
-      .type(
-        '{enter}text_to_find{enter}abcde 1{enter}abcde 2{enter}abcde 3{enter}ABCDE 4{enter}'
-      )
+    cy.get('.cm-line').eq(16).as('line')
+
+    cy.get('@line').click()
+    cy.get('@line').type(
+      '{enter}text_to_find{enter}abcde 1{enter}abcde 2{enter}abcde 3{enter}ABCDE 4{enter}'
+    )
 
     // select text `text_to_find`
-    cy.get('.cm-line').eq(17).dblclick().as('lineToFind')
+    cy.get('.cm-line').eq(17).as('lineToFind')
+    cy.get('@lineToFind').dblclick()
 
     // search panel is not displayed
     cy.findByRole('search').should('have.length', 0)
@@ -382,7 +402,8 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
       // search input's value should be set to the selected text
       .should('have.value', 'text_to_find')
 
-    cy.get('@search-input').clear().type('abcde')
+    cy.get('@search-input').clear()
+    cy.get('@search-input').type('abcde')
 
     cy.findByRole('button', { name: 'next' }).as('next-btn')
     cy.findByRole('button', { name: 'previous' }).as('previous-btn')
@@ -411,7 +432,8 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
 
     // matches case
     cy.contains('Aa').click()
-    cy.get('@search-input').clear().type('ABCDE')
+    cy.get('@search-input').clear()
+    cy.get('@search-input').type('ABCDE')
     cy.get('.cm-searchMatch-selected').should('contain.text', 'ABCDE')
     cy.get('@search-input').clear()
     cy.contains('Aa').click()
@@ -427,19 +449,42 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
     // replace
     cy.get('@search-input').type('abcde 1')
     cy.get('@replace-input').type('test 1')
-    cy.findByRole('button', { name: 'Replace', exact: true }).click()
+    cy.findByRole('button', { name: 'Replace' }).click()
     cy.get('.cm-line')
       .eq(18)
       .should('contain.text', 'test 1')
       .should('not.contain.text', 'abcde')
 
     // replace all
-    cy.get('@search-input').clear().type('abcde')
-    cy.get('@replace-input').clear().type('test')
+    cy.get('@search-input').clear()
+    cy.get('@search-input').type('abcde')
+    cy.get('@replace-input').clear()
+    cy.get('@replace-input').type('test')
     cy.findByRole('button', { name: /replace all/i }).click()
     cy.get('@search-input').clear()
     cy.get('@replace-input').clear()
     cy.should('not.contain.text', 'abcde')
+
+    // replace all within selection
+    cy.get('@search-input').clear()
+    cy.get('@search-input').type('contentLine')
+    cy.get('.ol-cm-search-form-position').should('have.text', '1 of 100')
+
+    cy.get('.cm-line').eq(27).as('contentLine')
+    cy.get('@contentLine').should('contain.text', 'contentLine 0')
+    cy.get('@contentLine').click()
+    cy.get('@contentLine').type('{shift}{downArrow}{downArrow}{downArrow}')
+
+    cy.findByLabelText('Within selection').click()
+    cy.get('.ol-cm-search-form-position').should('have.text', '1 of 3')
+    cy.get('@replace-input').clear()
+    cy.get('@replace-input').type('contentedLine')
+    cy.findByRole('button', { name: /replace all/i }).click()
+    cy.get('.cm-line:contains("contentedLine")').should('have.length', 3)
+    cy.findByLabelText('Within selection').click()
+    cy.get('.ol-cm-search-form-position').should('have.text', '2 of 97')
+    cy.get('@search-input').clear()
+    cy.get('@replace-input').clear()
 
     // close the search form, to clear the stored query
     cy.findByRole('button', { name: 'Close' }).click()
@@ -449,15 +494,17 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // Open the search panel
-    cy.get('.cm-line').eq(16).click().type(`{${metaKey}+f}`)
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
+    cy.get('@line').type(`{${metaKey}+f}`)
 
     cy.findByRole('search').within(() => {
       cy.findByLabelText('Find').as('find-input')
@@ -465,13 +512,15 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
       cy.get('[type="checkbox"][name="caseSensitive"]').as('case-sensitive')
       cy.get('[type="checkbox"][name="regexp"]').as('regexp')
       cy.get('[type="checkbox"][name="wholeWord"]').as('whole-word')
+      cy.get('[type="checkbox"][name="withinSelection"]').as('within-selection')
       cy.get('label').contains('Aa').as('case-sensitive-label')
       cy.get('label').contains('[.*]').as('regexp-label')
       cy.get('label').contains('W').as('whole-word-label')
+      cy.findByLabelText('Within selection').as('within-selection-label')
       cy.findByRole('button', { name: 'Replace' }).as('replace')
       cy.findByRole('button', { name: 'Replace All' }).as('replace-all')
-      cy.findByRole('button', { name: 'next' }).as('find-next')
       cy.findByRole('button', { name: 'previous' }).as('find-previous')
+      cy.findByRole('button', { name: 'next' }).as('find-next')
       cy.findByRole('button', { name: 'Close' }).as('close')
 
       // Tab forwards...
@@ -480,8 +529,9 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
       cy.get('@case-sensitive').should('be.focused').tab()
       cy.get('@regexp').should('be.focused').tab()
       cy.get('@whole-word').should('be.focused').tab()
-      cy.get('@find-next').should('be.focused').tab()
+      cy.get('@within-selection').should('be.focused').tab()
       cy.get('@find-previous').should('be.focused').tab()
+      cy.get('@find-next').should('be.focused').tab()
       cy.get('@replace').should('be.focused').tab()
       cy.get('@replace-all').should('be.focused').tab()
 
@@ -489,8 +539,9 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
       cy.get('@close').should('be.focused').tab({ shift: true })
       cy.get('@replace-all').should('be.focused').tab({ shift: true })
       cy.get('@replace').should('be.focused').tab({ shift: true })
-      cy.get('@find-previous').should('be.focused').tab({ shift: true })
       cy.get('@find-next').should('be.focused').tab({ shift: true })
+      cy.get('@find-previous').should('be.focused').tab({ shift: true })
+      cy.get('@within-selection').should('be.focused').tab({ shift: true })
       cy.get('@whole-word').should('be.focused').tab({ shift: true })
       cy.get('@regexp').should('be.focused').tab({ shift: true })
       cy.get('@case-sensitive').should('be.focused').tab({ shift: true })
@@ -501,13 +552,16 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
         '@case-sensitive-label',
         '@regexp-label',
         '@whole-word-label',
+        '@within-selection-label',
       ]) {
         // Toggle when clicked, then focus the search input
-        cy.get(option).click().should('have.class', 'checked')
+        cy.get(option).click()
+        cy.get(option).should('have.class', 'checked')
         cy.get('@find-input').should('be.focused')
 
         // Toggle when clicked again, then focus the search input
-        cy.get(option).click().should('not.have.class', 'checked')
+        cy.get(option).click()
+        cy.get(option).should('not.have.class', 'checked')
         cy.get('@find-input').should('be.focused')
       }
     })
@@ -516,20 +570,17 @@ describe('<CodeMirrorEditor/>', { scrollBehavior: false }, function () {
   it('restores stored cursor and scroll position', function () {
     const scope = mockScope()
 
-    window.localStorage.setItem(
-      `doc.position.${docId}`,
-      JSON.stringify({
-        cursorPosition: { row: 50, column: 5 },
-        firstVisibleLine: 45,
-      })
-    )
+    customLocalStorage.setItem(`doc.position.${docId}`, {
+      cursorPosition: { row: 50, column: 5 },
+      firstVisibleLine: 45,
+    })
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     activeEditorLine()

@@ -5,9 +5,9 @@ import bodyParser from 'body-parser'
 import * as HttpController from './HttpController.js'
 import * as Errors from './Errors.js'
 
-Metrics.initialize('contacts')
 logger.initialize('contacts')
 Metrics.event_loop?.monitor(logger)
+Metrics.open_sockets.monitor()
 
 export const app = express()
 app.use(Metrics.http.monitor(logger))

@@ -12,16 +12,68 @@ import { useUserContext } from '../../../shared/context/user-context'
 import { useProjectContext } from '../../../shared/context/project-context'
 import { HistoryContextValue } from './types/history-context-value'
 import { diffFiles, fetchLabels, fetchUpdates } from '../services/api'
-import { renamePathnameKey, isFileRenamed } from '../utils/file-tree'
+import { renamePathnameKey } from '../utils/file-tree'
+import { isFileRenamed } from '../utils/file-diff'
 import { loadLabels } from '../utils/label'
 import { autoSelectFile } from '../utils/auto-select-file'
-import ColorManager from '../../../ide/colors/ColorManager'
+import usePersistedState from '../../../shared/hooks/use-persisted-state'
 import moment from 'moment'
-import * as eventTracking from '../../../infrastructure/event-tracking'
 import { cloneDeep } from 'lodash'
-import { LoadedUpdate, Update, UpdateSelection } from '../services/types/update'
-import { FileSelection } from '../services/types/file'
-import { Nullable } from '../../../../../types/utils'
+import {
+  FetchUpdatesResponse,
+  LoadedUpdate,
+  Update,
+} from '../services/types/update'
+import { Selection } from '../services/types/selection'
+import { useErrorHandler } from 'react-error-boundary'
+import { getUpdateForVersion } from '../utils/history-details'
+import { getHueForUserId } from '@/shared/utils/colors'
+
+// Allow testing of infinite scrolling by providing query string parameters to
+// limit the number of updates returned in a batch and apply a delay
+function limitUpdates(
+  promise: Promise<FetchUpdatesResponse>
+): Promise<FetchUpdatesResponse> {
+  const queryParams = new URLSearchParams(window.location.search)
+  const maxBatchSizeParam = queryParams.get('history-max-updates')
+  const delayParam = queryParams.get('history-updates-delay')
+  if (delayParam === null && maxBatchSizeParam === null) {
+    return promise
+  }
+  return promise.then(response => {
+    let { updates, nextBeforeTimestamp } = response
+    const maxBatchSize = maxBatchSizeParam ? parseInt(maxBatchSizeParam, 10) : 0
+    const delay = delayParam ? parseInt(delayParam, 10) : 0
+    if (maxBatchSize > 0 && updates.length > maxBatchSize) {
+      updates = updates.slice(0, maxBatchSize)
+      nextBeforeTimestamp = updates[updates.length - 1].fromV
+    }
+    const limitedResponse = { updates, nextBeforeTimestamp }
+    if (delay > 0) {
+      return new Promise(resolve => {
+        window.setTimeout(() => resolve(limitedResponse), delay)
+      })
+    } else {
+      return limitedResponse
+    }
+  })
+}
+
+const selectionInitialState: Selection = {
+  updateRange: null,
+  comparing: false,
+  files: [],
+  previouslySelectedPathname: null,
+}
+
+const updatesInfoInitialState: HistoryContextValue['updatesInfo'] = {
+  updates: [],
+  visibleUpdateCount: null,
+  atEnd: false,
+  freeHistoryLimitHit: false,
+  nextBeforeTimestamp: undefined,
+  loadingState: 'loadingInitial',
+}
 
 function useHistory() {
   const { view } = useLayoutContext()
@@ -30,38 +82,45 @@ function useHistory() {
   const userId = user.id
   const projectId = project._id
   const projectOwnerId = project.owner?._id
-  const [updateSelection, setUpdateSelection] =
-    useState<UpdateSelection | null>(null)
-  const [fileSelection, setFileSelection] = useState<FileSelection | null>(null)
-  const [updates, setUpdates] = useState<LoadedUpdate[]>([])
-  const [loadingFileTree, setLoadingFileTree] =
-    useState<HistoryContextValue['loadingFileTree']>(true)
-  // eslint-disable-next-line no-unused-vars
-  const [nextBeforeTimestamp, setNextBeforeTimestamp] =
-    useState<HistoryContextValue['nextBeforeTimestamp']>()
-  const [atEnd, setAtEnd] = useState<HistoryContextValue['atEnd']>(false)
-  const [freeHistoryLimitHit, setFreeHistoryLimitHit] =
-    useState<HistoryContextValue['freeHistoryLimitHit']>(false)
+  const userHasFullFeature = Boolean(
+    project.features?.versioning || user.isAdmin
+  )
+  const currentUserIsOwner = projectOwnerId === userId
+
+  const [selection, setSelection] = useState<Selection>(selectionInitialState)
+
+  const [updatesInfo, setUpdatesInfo] = useState<
+    HistoryContextValue['updatesInfo']
+  >(updatesInfoInitialState)
   const [labels, setLabels] = useState<HistoryContextValue['labels']>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState(null)
-  // eslint-disable-next-line no-unused-vars
-  const [userHasFullFeature, setUserHasFullFeature] =
-    useState<HistoryContextValue['userHasFullFeature']>(undefined)
-  /* eslint-enable no-unused-vars */
+  const [labelsOnly, setLabelsOnly] = usePersistedState(
+    `history.userPrefs.showOnlyLabels.${projectId}`,
+    false
+  )
+
+  const updatesAbortControllerRef = useRef<AbortController | null>(null)
+  const handleError = useErrorHandler()
 
   const fetchNextBatchOfUpdates = useCallback(() => {
+    // If there is an in-flight request for updates, just let it complete, by
+    // bailing out
+    if (updatesAbortControllerRef.current) {
+      return
+    }
+
+    const updatesLoadingState = updatesInfo.loadingState
+
     const loadUpdates = (updatesData: Update[]) => {
       const dateTimeNow = new Date()
       const timestamp24hoursAgo = dateTimeNow.setDate(dateTimeNow.getDate() - 1)
+      let { updates, freeHistoryLimitHit, visibleUpdateCount } = updatesInfo
       let previousUpdate = updates[updates.length - 1]
-      let cutOffIndex: Nullable<number> = null
 
-      let loadedUpdates: LoadedUpdate[] = cloneDeep(updatesData)
+      const loadedUpdates: LoadedUpdate[] = cloneDeep(updatesData)
       for (const [index, update] of loadedUpdates.entries()) {
         for (const user of update.meta.users) {
           if (user) {
-            user.hue = ColorManager.getHueForUserId(user.id)
+            user.hue = getHueForUserId(user.id)
           }
         }
         if (
@@ -73,150 +132,220 @@ function useHistory() {
 
         previousUpdate = update
 
-        if (userHasFullFeature && update.meta.end_ts < timestamp24hoursAgo) {
-          cutOffIndex = index || 1 // Make sure that we show at least one entry (to allow labelling).
-          setFreeHistoryLimitHit(true)
-          if (projectOwnerId === userId) {
-            eventTracking.send(
-              'subscription-funnel',
-              'editor-click-feature',
-              'history'
-            )
-            eventTracking.sendMB('paywall-prompt', {
-              'paywall-type': 'history',
-            })
-          }
-          break
+        // the free tier cutoff is 24 hours, so show one extra update
+        //  after which will become the fade teaser above the paywall
+        if (
+          !userHasFullFeature &&
+          visibleUpdateCount === null &&
+          update.meta.end_ts < timestamp24hoursAgo
+        ) {
+          // Make sure that we show at least one entry fully (to allow labelling), and one extra for fading
+          //  Since the index for the first free tier cutoff will be at 0 if all versions were updated the day before (all version in the past),
+          //  we need to +2 instead of +1. this gives us one which is selected and one which is faded
+          visibleUpdateCount = index > 0 ? index + 1 : 2
+          freeHistoryLimitHit = true
         }
       }
 
-      if (!userHasFullFeature && cutOffIndex != null) {
-        loadedUpdates = loadedUpdates.slice(0, cutOffIndex)
+      return {
+        updates: updates.concat(loadedUpdates),
+        visibleUpdateCount,
+        freeHistoryLimitHit,
       }
-
-      setUpdates(updates.concat(loadedUpdates))
-
-      // TODO first load
     }
 
-    if (atEnd) return
+    if (
+      updatesInfo.atEnd ||
+      !(
+        updatesLoadingState === 'loadingInitial' ||
+        updatesLoadingState === 'ready'
+      )
+    ) {
+      return
+    }
 
-    const updatesPromise = fetchUpdates(projectId, nextBeforeTimestamp)
-    const labelsPromise = labels == null ? fetchLabels(projectId) : null
+    updatesAbortControllerRef.current = new AbortController()
+    const signal = updatesAbortControllerRef.current.signal
 
-    setIsLoading(true)
+    const updatesPromise = limitUpdates(
+      fetchUpdates(projectId, updatesInfo.nextBeforeTimestamp, signal)
+    )
+    const labelsPromise = labels == null ? fetchLabels(projectId, signal) : null
+
+    setUpdatesInfo({
+      ...updatesInfo,
+      loadingState:
+        updatesLoadingState === 'ready' ? 'loadingUpdates' : 'loadingInitial',
+    })
+
     Promise.all([updatesPromise, labelsPromise])
       .then(([{ updates: updatesData, nextBeforeTimestamp }, labels]) => {
-        const lastUpdateToV = updatesData.length ? updatesData[0].toV : null
-
         if (labels) {
-          setLabels(loadLabels(labels, lastUpdateToV))
+          setLabels(loadLabels(labels, updatesData))
         }
 
-        loadUpdates(updatesData)
-        setNextBeforeTimestamp(nextBeforeTimestamp)
-        if (
-          nextBeforeTimestamp == null ||
-          freeHistoryLimitHit ||
-          !updates.length
-        ) {
-          setAtEnd(true)
-        }
-        if (!updates.length) {
-          setLoadingFileTree(false)
-        }
+        const { updates, visibleUpdateCount, freeHistoryLimitHit } =
+          loadUpdates(updatesData)
+
+        const atEnd =
+          nextBeforeTimestamp == null || freeHistoryLimitHit || !updates.length
+
+        setUpdatesInfo({
+          updates,
+          visibleUpdateCount,
+          freeHistoryLimitHit,
+          atEnd,
+          nextBeforeTimestamp,
+          loadingState: 'ready',
+        })
       })
-      .catch(error => {
-        setError(error)
-        setAtEnd(true)
-        setLoadingFileTree(false)
-      })
+      .catch(handleError)
       .finally(() => {
-        setIsLoading(false)
+        updatesAbortControllerRef.current = null
       })
-  }, [
-    atEnd,
-    freeHistoryLimitHit,
-    labels,
-    nextBeforeTimestamp,
-    projectId,
-    projectOwnerId,
-    userId,
-    userHasFullFeature,
-    updates,
-  ])
+  }, [updatesInfo, projectId, labels, handleError, userHasFullFeature])
 
-  // Initial load when the History tab is active
+  // Abort in-flight updates request on unmount
+  useEffect(() => {
+    return () => {
+      if (updatesAbortControllerRef.current) {
+        updatesAbortControllerRef.current.abort()
+      }
+    }
+  }, [])
+
+  // Initial load on first render
   const initialFetch = useRef(false)
   useEffect(() => {
     if (view === 'history' && !initialFetch.current) {
-      fetchNextBatchOfUpdates()
       initialFetch.current = true
+      return fetchNextBatchOfUpdates()
     }
   }, [view, fetchNextBatchOfUpdates])
 
-  // Load files when the update selection changes
   useEffect(() => {
-    if (!updateSelection) {
+    // Reset some parts of the state
+    if (view !== 'history') {
+      initialFetch.current = false
+      setSelection(prevSelection => ({
+        ...selectionInitialState,
+        // retain the previously selected pathname
+        previouslySelectedPathname: prevSelection.previouslySelectedPathname,
+      }))
+      setUpdatesInfo(updatesInfoInitialState)
+      setLabels(null)
+    }
+  }, [view])
+
+  const resetSelection = useCallback(() => {
+    setSelection(selectionInitialState)
+  }, [])
+
+  const { updateRange } = selection
+  const { fromV, toV } = updateRange || {}
+  const { updates } = updatesInfo
+
+  const updateForToV =
+    toV === undefined ? undefined : getUpdateForVersion(toV, updates)
+
+  // Load files when the update selection changes
+  const [loadingFileDiffs, setLoadingFileDiffs] = useState(false)
+
+  useEffect(() => {
+    if (fromV === undefined || toV === undefined) {
       return
     }
-    const { fromV, toV } = updateSelection.update
 
-    diffFiles(projectId, fromV, toV).then(({ diff: files }) => {
-      const pathname = autoSelectFile(files, updateSelection, updates)
-      const newFiles = files.map(file => {
-        if (isFileRenamed(file) && file.newPathname) {
-          return renamePathnameKey(file)
-        }
+    let abortController: AbortController | null = new AbortController()
+    setLoadingFileDiffs(true)
 
-        return file
+    diffFiles(projectId, fromV, toV, abortController.signal)
+      .then(({ diff: files }) => {
+        setSelection(previousSelection => {
+          const selectedFile = autoSelectFile(
+            files,
+            toV,
+            previousSelection.comparing,
+            updateForToV,
+            previousSelection.previouslySelectedPathname
+          )
+          const newFiles = files.map(file => {
+            if (isFileRenamed(file) && file.newPathname) {
+              return renamePathnameKey(file)
+            }
+
+            return file
+          })
+          return {
+            ...previousSelection,
+            files: newFiles,
+            selectedFile,
+            previouslySelectedPathname: selectedFile.pathname,
+          }
+        })
       })
-      setFileSelection({ files: newFiles, pathname })
-    })
-  }, [updateSelection, projectId, updates])
+      .catch(handleError)
+      .finally(() => {
+        setLoadingFileDiffs(false)
+        abortController = null
+      })
+
+    return () => {
+      if (abortController) {
+        abortController.abort()
+      }
+    }
+  }, [projectId, fromV, toV, updateForToV, handleError])
 
   useEffect(() => {
-    // Set update selection if there isn't one
-    if (updates.length && !updateSelection) {
-      setUpdateSelection({
-        update: updates[0],
+    // Set update range if there isn't one and updates have loaded
+    if (updates.length && !updateRange) {
+      setSelection(prevSelection => ({
+        ...prevSelection,
+        updateRange: {
+          fromV: updates[0].fromV,
+          toV: updates[0].toV,
+          fromVTimestamp: updates[0].meta.end_ts,
+          toVTimestamp: updates[0].meta.end_ts,
+        },
         comparing: false,
-      })
+        files: [],
+      }))
     }
-  }, [setUpdateSelection, updateSelection, updates])
+  }, [updateRange, updates])
 
   const value = useMemo<HistoryContextValue>(
     () => ({
-      atEnd,
-      error,
-      isLoading,
-      freeHistoryLimitHit,
+      loadingFileDiffs,
+      updatesInfo,
+      setUpdatesInfo,
       labels,
-      loadingFileTree,
-      nextBeforeTimestamp,
-      updates,
+      setLabels,
+      labelsOnly,
+      setLabelsOnly,
       userHasFullFeature,
+      currentUserIsOwner,
       projectId,
-      fileSelection,
-      setFileSelection,
-      updateSelection,
-      setUpdateSelection,
+      selection,
+      setSelection,
+      fetchNextBatchOfUpdates,
+      resetSelection,
     }),
     [
-      atEnd,
-      error,
-      isLoading,
-      freeHistoryLimitHit,
+      loadingFileDiffs,
+      updatesInfo,
+      setUpdatesInfo,
       labels,
-      loadingFileTree,
-      nextBeforeTimestamp,
-      updates,
+      setLabels,
+      labelsOnly,
+      setLabelsOnly,
       userHasFullFeature,
+      currentUserIsOwner,
       projectId,
-      fileSelection,
-      setFileSelection,
-      updateSelection,
-      setUpdateSelection,
+      selection,
+      setSelection,
+      fetchNextBatchOfUpdates,
+      resetSelection,
     ]
   )
 

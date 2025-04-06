@@ -1,6 +1,6 @@
 const metrics = require('@overleaf/metrics')
 const Settings = require('@overleaf/settings')
-const { callbackify } = require('util')
+const { callbackify } = require('node:util')
 
 const safeExec = require('./SafeExec').promises
 const { ConversionError } = require('./Errors')
@@ -22,7 +22,7 @@ module.exports = {
 
 async function convert(sourcePath, requestedFormat) {
   const width = '600x'
-  return _convert(sourcePath, requestedFormat, [
+  return await _convert(sourcePath, requestedFormat, [
     'convert',
     '-define',
     `pdf:fit-page=${width}`,
@@ -35,7 +35,7 @@ async function convert(sourcePath, requestedFormat) {
 
 async function thumbnail(sourcePath) {
   const width = '260x'
-  return convert(sourcePath, 'png', [
+  return await convert(sourcePath, 'png', [
     'convert',
     '-flatten',
     '-background',
@@ -52,7 +52,7 @@ async function thumbnail(sourcePath) {
 
 async function preview(sourcePath) {
   const width = '548x'
-  return convert(sourcePath, 'png', [
+  return await convert(sourcePath, 'png', [
     'convert',
     '-flatten',
     '-background',

@@ -54,7 +54,10 @@ describe('<PersonalSubscription />', function () {
       reloadStub = sinon.stub()
       this.locationStub = sinon.stub(useLocationModule, 'useLocation').returns({
         assign: sinon.stub(),
+        replace: sinon.stub(),
         reload: reloadStub,
+        setHash: sinon.stub(),
+        toString: sinon.stub(),
       })
     })
 
@@ -69,7 +72,7 @@ describe('<PersonalSubscription />', function () {
         ],
       })
 
-      screen.getByText('You are currently subscribed to the', { exact: false })
+      screen.getByRole('heading', { name: /billing/i })
     })
 
     it('renders the canceled dash', function () {
@@ -86,12 +89,7 @@ describe('<PersonalSubscription />', function () {
 
       screen.getByText('No further payments will be taken.', { exact: false })
 
-      screen.getByText(
-        'Get the most out of your Overleaf subscription by checking out the list of',
-        { exact: false }
-      )
-
-      screen.getByRole('link', { name: 'View Your Invoices' })
+      screen.getByRole('button', { name: 'View your invoices' })
       screen.getByRole('button', { name: 'Reactivate your subscription' })
     })
 

@@ -19,10 +19,10 @@ const DocstoreApp = require('./helpers/DocstoreApp')
 const DocstoreClient = require('./helpers/DocstoreClient')
 const { Storage } = require('@google-cloud/storage')
 const Persistor = require('../../../app/js/PersistorManager')
-const Streamifier = require('streamifier')
+const { ReadableString } = require('@overleaf/stream-utils')
 
 function uploadContent(path, json, callback) {
-  const stream = Streamifier.createReadStream(JSON.stringify(json))
+  const stream = new ReadableString(JSON.stringify(json))
   Persistor.sendStream(Settings.docstore.bucket, path, stream)
     .then(() => callback())
     .catch(callback)
@@ -39,18 +39,27 @@ describe('Archiving', function () {
     await storage.createBucket(`${Settings.docstore.bucket}-deleted`)
   })
 
+  after(async function () {
+    // Tear down the buckets created above
+    const storage = new Storage(Settings.docstore.gcs.endpoint)
+    await storage.bucket(Settings.docstore.bucket).deleteFiles()
+    await storage.bucket(Settings.docstore.bucket).delete()
+    await storage.bucket(`${Settings.docstore.bucket}-deleted`).deleteFiles()
+    await storage.bucket(`${Settings.docstore.bucket}-deleted`).delete()
+  })
+
   describe('multiple docs in a project', function () {
     before(function (done) {
-      this.project_id = ObjectId()
+      this.project_id = new ObjectId()
       this.docs = [
         {
-          _id: ObjectId(),
+          _id: new ObjectId(),
           lines: ['one', 'two', 'three'],
           ranges: {},
           version: 2,
         },
         {
-          _id: ObjectId(),
+          _id: new ObjectId(),
           lines: ['aaa', 'bbb', 'ccc'],
           ranges: {},
           version: 4,
@@ -168,9 +177,9 @@ describe('Archiving', function () {
 
   describe('a deleted doc', function () {
     beforeEach(function (done) {
-      this.project_id = ObjectId()
+      this.project_id = new ObjectId()
       this.doc = {
-        _id: ObjectId(),
+        _id: new ObjectId(),
         lines: ['one', 'two', 'three'],
         ranges: {},
         version: 2,
@@ -323,10 +332,10 @@ describe('Archiving', function () {
 
   describe('archiving a single doc', function () {
     before(function (done) {
-      this.project_id = ObjectId()
+      this.project_id = new ObjectId()
       this.timeout(1000 * 30)
       this.doc = {
-        _id: ObjectId(),
+        _id: new ObjectId(),
         lines: ['foo', 'bar'],
         ranges: {},
         version: 2,
@@ -387,14 +396,14 @@ describe('Archiving', function () {
 
   describe('a doc with large lines', function () {
     before(function (done) {
-      this.project_id = ObjectId()
+      this.project_id = new ObjectId()
       this.timeout(1000 * 30)
       const quarterMegInBytes = 250000
-      const bigLine = require('crypto')
+      const bigLine = require('node:crypto')
         .randomBytes(quarterMegInBytes)
         .toString('hex')
       this.doc = {
-        _id: ObjectId(),
+        _id: new ObjectId(),
         lines: [bigLine, bigLine, bigLine, bigLine],
         ranges: {},
         version: 2,
@@ -482,9 +491,9 @@ describe('Archiving', function () {
 
   describe('a doc with naughty strings', function () {
     before(function (done) {
-      this.project_id = ObjectId()
+      this.project_id = new ObjectId()
       this.doc = {
-        _id: ObjectId(),
+        _id: new ObjectId(),
         lines: [
           '',
           'undefined',
@@ -956,35 +965,35 @@ describe('Archiving', function () {
 
   describe('a doc with ranges', function () {
     before(function (done) {
-      this.project_id = ObjectId()
+      this.project_id = new ObjectId()
       this.doc = {
-        _id: ObjectId(),
+        _id: new ObjectId(),
         lines: ['one', 'two', 'three'],
         ranges: {
           changes: [
             {
-              id: ObjectId(),
+              id: new ObjectId(),
               op: { i: 'foo', p: 24 },
               metadata: {
-                user_id: ObjectId(),
+                user_id: new ObjectId(),
                 ts: new Date('2017-01-27T16:10:44.194Z'),
               },
             },
             {
-              id: ObjectId(),
+              id: new ObjectId(),
               op: { d: 'bar', p: 50 },
               metadata: {
-                user_id: ObjectId(),
+                user_id: new ObjectId(),
                 ts: new Date('2017-01-27T18:10:44.194Z'),
               },
             },
           ],
           comments: [
             {
-              id: ObjectId(),
-              op: { c: 'comment', p: 284, t: ObjectId() },
+              id: new ObjectId(),
+              op: { c: 'comment', p: 284, t: new ObjectId() },
               metadata: {
-                user_id: ObjectId(),
+                user_id: new ObjectId(),
                 ts: new Date('2017-01-26T14:22:04.869Z'),
               },
             },
@@ -1076,9 +1085,9 @@ describe('Archiving', function () {
 
   describe('a doc that is archived twice', function () {
     before(function (done) {
-      this.project_id = ObjectId()
+      this.project_id = new ObjectId()
       this.doc = {
-        _id: ObjectId(),
+        _id: new ObjectId(),
         lines: ['abc', 'def', 'ghi'],
         ranges: {},
         version: 2,
@@ -1172,9 +1181,9 @@ describe('Archiving', function () {
 
   return describe('a doc with the old schema (just an array of lines)', function () {
     before(function (done) {
-      this.project_id = ObjectId()
+      this.project_id = new ObjectId()
       this.doc = {
-        _id: ObjectId(),
+        _id: new ObjectId(),
         lines: ['abc', 'def', 'ghi'],
         ranges: {},
         version: 2,
@@ -1184,7 +1193,7 @@ describe('Archiving', function () {
         this.doc.lines,
         error => {
           expect(error).not.to.exist
-          db.docs.insert(
+          db.docs.insertOne(
             {
               project_id: this.project_id,
               _id: this.doc._id,

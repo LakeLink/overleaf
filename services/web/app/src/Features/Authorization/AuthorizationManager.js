@@ -1,5 +1,5 @@
 const { callbackify } = require('util')
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 const CollaboratorsGetter = require('../Collaborators/CollaboratorsGetter')
 const CollaboratorsHandler = require('../Collaborators/CollaboratorsHandler')
 const ProjectGetter = require('../Project/ProjectGetter')
@@ -10,6 +10,7 @@ const PublicAccessLevels = require('./PublicAccessLevels')
 const Errors = require('../Errors/Errors')
 const { hasAdminAccess } = require('../Helpers/AdminAuthorizationHelper')
 const Settings = require('@overleaf/settings')
+const DocumentUpdaterHandler = require('../DocumentUpdater/DocumentUpdaterHandler')
 
 function isRestrictedUser(
   userId,
@@ -70,6 +71,7 @@ async function getPublicAccessLevel(projectId) {
  *
  * @param userId - The id of the user that wants to access the project.
  * @param projectId - The id of the project to be accessed.
+ * @param {string} token
  * @param {Object} opts
  * @param {boolean} opts.ignoreSiteAdmin - Do not consider whether the user is
  *     a site admin.
@@ -98,6 +100,12 @@ async function getPrivilegeLevelForProjectWithUser(
   projectId,
   opts = {}
 ) {
+  if (!opts.ignoreSiteAdmin) {
+    if (await isUserSiteAdmin(userId)) {
+      return PrivilegeLevels.OWNER
+    }
+  }
+
   const privilegeLevel =
     await CollaboratorsGetter.promises.getMemberIdPrivilegeLevel(
       userId,
@@ -106,12 +114,6 @@ async function getPrivilegeLevelForProjectWithUser(
   if (privilegeLevel && privilegeLevel !== PrivilegeLevels.NONE) {
     // The user has direct access
     return privilegeLevel
-  }
-
-  if (!opts.ignoreSiteAdmin) {
-    if (await isUserSiteAdmin(userId)) {
-      return PrivilegeLevels.OWNER
-    }
   }
 
   if (!opts.ignorePublicAccess) {
@@ -185,6 +187,7 @@ async function canUserReadProject(userId, projectId, token) {
     PrivilegeLevels.OWNER,
     PrivilegeLevels.READ_AND_WRITE,
     PrivilegeLevels.READ_ONLY,
+    PrivilegeLevels.REVIEW,
   ].includes(privilegeLevel)
 }
 
@@ -196,6 +199,19 @@ async function canUserWriteProjectContent(userId, projectId, token) {
   )
   return [PrivilegeLevels.OWNER, PrivilegeLevels.READ_AND_WRITE].includes(
     privilegeLevel
+  )
+}
+
+async function canUserWriteOrReviewProjectContent(userId, projectId, token) {
+  const privilegeLevel = await getPrivilegeLevelForProject(
+    userId,
+    projectId,
+    token
+  )
+  return (
+    privilegeLevel === PrivilegeLevels.OWNER ||
+    privilegeLevel === PrivilegeLevels.READ_AND_WRITE ||
+    privilegeLevel === PrivilegeLevels.REVIEW
   )
 }
 
@@ -238,9 +254,45 @@ async function isUserSiteAdmin(userId) {
   return hasAdminAccess(user)
 }
 
+async function canUserDeleteOrResolveThread(
+  userId,
+  projectId,
+  docId,
+  threadId,
+  token
+) {
+  const privilegeLevel = await getPrivilegeLevelForProject(
+    userId,
+    projectId,
+    token,
+    { ignorePublicAccess: true }
+  )
+  if (
+    privilegeLevel === PrivilegeLevels.OWNER ||
+    privilegeLevel === PrivilegeLevels.READ_AND_WRITE
+  ) {
+    return true
+  }
+
+  if (privilegeLevel !== PrivilegeLevels.REVIEW) {
+    return false
+  }
+
+  const comment = await DocumentUpdaterHandler.promises.getComment(
+    projectId,
+    docId,
+    threadId
+  )
+  return comment.metadata.user_id === userId
+}
+
 module.exports = {
   canUserReadProject: callbackify(canUserReadProject),
   canUserWriteProjectContent: callbackify(canUserWriteProjectContent),
+  canUserWriteOrReviewProjectContent: callbackify(
+    canUserWriteOrReviewProjectContent
+  ),
+  canUserDeleteOrResolveThread: callbackify(canUserDeleteOrResolveThread),
   canUserWriteProjectSettings: callbackify(canUserWriteProjectSettings),
   canUserRenameProject: callbackify(canUserRenameProject),
   canUserAdminProject: callbackify(canUserAdminProject),
@@ -251,6 +303,8 @@ module.exports = {
   promises: {
     canUserReadProject,
     canUserWriteProjectContent,
+    canUserWriteOrReviewProjectContent,
+    canUserDeleteOrResolveThread,
     canUserWriteProjectSettings,
     canUserRenameProject,
     canUserAdminProject,

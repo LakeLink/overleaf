@@ -4,7 +4,7 @@ import { themeOptionsChange } from './theme'
 import { sourceOnly } from './visual/visual'
 import { round } from 'lodash'
 import { hasLanguageLoadedEffect } from './language'
-import { hasFontLoadedEffect } from './font-load'
+import { fontLoad, hasFontLoadedEffect } from './font-load'
 
 const themeConf = new Compartment()
 const changeHalfLeadingAnnotation = Annotation.define<boolean>()
@@ -36,13 +36,15 @@ function measureHalfLeading(view: EditorView) {
 }
 
 function createTheme(halfLeading: number) {
-  return EditorView.theme({
-    '.cm-content': {
-      '--half-leading': halfLeading + 'px',
-    },
+  return EditorView.contentAttributes.of({
+    style: `--half-leading: ${halfLeading}px`,
   })
 }
 
+/**
+ * A custom extension which measures the height of the first non-space position and provides a CSS variable via an editor theme,
+ * used for extending elements over the whole line height using padding.
+ */
 const plugin = ViewPlugin.define(
   view => {
     let halfLeading = 0
@@ -92,5 +94,5 @@ const plugin = ViewPlugin.define(
 )
 
 export const inlineBackground = (visual: boolean) => {
-  return sourceOnly(visual, plugin)
+  return sourceOnly(visual, [fontLoad, plugin])
 }

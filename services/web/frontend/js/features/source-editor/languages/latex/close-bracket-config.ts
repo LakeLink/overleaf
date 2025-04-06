@@ -1,12 +1,14 @@
-import { CloseBracketConfig } from '../../extensions/close-brackets'
 import {
-  codePointAt,
-  codePointSize,
+  CharCategory,
   EditorState,
   SelectionRange,
   Text,
 } from '@codemirror/state'
-import { completionStatus } from '@codemirror/autocomplete'
+import {
+  CloseBracketConfig,
+  nextChar,
+  prevChar,
+} from '@codemirror/autocomplete'
 
 export const closeBracketConfig: CloseBracketConfig = {
   brackets: ['$', '$$', '[', '{', '('],
@@ -29,6 +31,21 @@ export const closeBracketConfig: CloseBracketConfig = {
           // don't auto-close \$
           return open
         }
+
+        const next = nextChar(state.doc, range.head)
+        if (next === '\\') {
+          // avoid auto-closing $ before a TeX command
+          const pos = range.head + prev.length
+          const postnext = nextChar(state.doc, pos)
+
+          if (state.charCategorizer(pos)(postnext) !== CharCategory.Word) {
+            return open + '$'
+          }
+
+          // don't auto-close $\command
+          return open
+        }
+
         // avoid creating an odd number of dollar signs
         const count = countSurroundingCharacters(state.doc, range.from, open)
         if (count % 2 !== 0) {
@@ -77,10 +94,6 @@ export const closeBracketConfig: CloseBracketConfig = {
           // don't auto-close \{
           return open
         }
-        // avoid auto-closing curly brackets when autocomplete is open
-        if (completionStatus(state)) {
-          return open
-        }
         return open + close
       }
 
@@ -88,13 +101,6 @@ export const closeBracketConfig: CloseBracketConfig = {
         return open + close
     }
   },
-}
-
-function prevChar(doc: Text, pos: number) {
-  const prev = doc.sliceString(pos - 2, pos)
-  return codePointSize(codePointAt(prev, 0)) === prev.length
-    ? prev
-    : prev.slice(1)
 }
 
 function countSurroundingCharacters(doc: Text, pos: number, insert: string) {

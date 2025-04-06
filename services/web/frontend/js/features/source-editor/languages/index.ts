@@ -5,7 +5,6 @@ export const languages = [
     name: 'latex',
     extensions: [
       'tex',
-      'bib',
       'sty',
       'cls',
       'clo',
@@ -28,6 +27,7 @@ export const languages = [
       'ldf',
       'xmpdata',
       'Rnw',
+      'rnw',
       'lyx',
       'inc',
       'dtx',
@@ -45,15 +45,22 @@ export const languages = [
       'pygstyle',
       'pygtex',
       'ps_tex',
+      'ltx',
     ],
     load: () => {
       return import('./latex').then(m => m.latex())
     },
   }),
   LanguageDescription.of({
+    name: 'bibtex',
+    extensions: ['bib'],
+    load: () => {
+      return import('./bibtex').then(m => m.bibtex())
+    },
+  }),
+  LanguageDescription.of({
     name: 'markdown',
     extensions: ['md', 'markdown'],
-    // @ts-ignore TODO: find out how to add support extensions
     load: () => {
       return import('./markdown').then(m => m.markdown())
     },

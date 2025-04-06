@@ -1,4 +1,5 @@
-import _ from 'lodash'
+import { useMemo } from 'react'
+import { orderBy, reduce } from 'lodash'
 import { useHistoryContext } from '../context/history-context'
 import {
   fileTreeDiffToFileTreeData,
@@ -7,23 +8,28 @@ import {
 import HistoryFileTreeFolderList from './file-tree/history-file-tree-folder-list'
 
 export default function HistoryFileTree() {
-  const { fileSelection } = useHistoryContext()
+  const { selection } = useHistoryContext()
 
-  if (!fileSelection) {
-    return null
-  }
+  const fileTree = useMemo(
+    () => reduce(selection.files, reducePathsToTree, []),
+    [selection.files]
+  )
 
-  const fileTree = _.reduce(fileSelection.files, reducePathsToTree, [])
+  const sortedFileTree = useMemo(
+    () => orderBy(fileTree, ['-type', 'operation', 'name']),
+    [fileTree]
+  )
 
-  const mappedFileTree = fileTreeDiffToFileTreeData(fileTree)
+  const mappedFileTree = useMemo(
+    () => fileTreeDiffToFileTreeData(sortedFileTree),
+    [sortedFileTree]
+  )
 
   return (
     <HistoryFileTreeFolderList
       folders={mappedFileTree.folders}
       docs={mappedFileTree.docs ?? []}
-      rootClassName="file-tree-list"
-    >
-      <li className="bottom-buffer" />
-    </HistoryFileTreeFolderList>
+      rootClassName="history-file-tree-list"
+    />
   )
 }

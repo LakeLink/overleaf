@@ -15,9 +15,9 @@ describe('Editing a message', async function () {
     const newContent = 'updated thread message'
     let messageId
     beforeEach(async function () {
-      projectId = ObjectId().toString()
-      userId = ObjectId().toString()
-      threadId = ObjectId().toString()
+      projectId = new ObjectId().toString()
+      userId = new ObjectId().toString()
+      threadId = new ObjectId().toString()
 
       const { response, body: message } = await ChatClient.sendMessage(
         projectId,
@@ -43,9 +43,8 @@ describe('Editing a message', async function () {
       })
 
       it('should then list the updated message in the threads', async function () {
-        const { response, body: threads } = await ChatClient.getThreads(
-          projectId
-        )
+        const { response, body: threads } =
+          await ChatClient.getThreads(projectId)
         expect(response.statusCode).to.equal(200)
         expect(threads[threadId].messages.length).to.equal(1)
         expect(threads[threadId].messages[0].content).to.equal(newContent)
@@ -65,9 +64,8 @@ describe('Editing a message', async function () {
       })
 
       it('should then list the updated message in the threads', async function () {
-        const { response, body: threads } = await ChatClient.getThreads(
-          projectId
-        )
+        const { response, body: threads } =
+          await ChatClient.getThreads(projectId)
         expect(response.statusCode).to.equal(200)
         expect(threads[threadId].messages.length).to.equal(1)
         expect(threads[threadId].messages[0].content).to.equal(newContent)
@@ -80,16 +78,15 @@ describe('Editing a message', async function () {
           projectId,
           threadId,
           messageId,
-          ObjectId(),
+          new ObjectId(),
           newContent
         )
         expect(response.statusCode).to.equal(404)
       })
 
       it('should then list the old message in the threads', async function () {
-        const { response, body: threads } = await ChatClient.getThreads(
-          projectId
-        )
+        const { response, body: threads } =
+          await ChatClient.getThreads(projectId)
         expect(response.statusCode).to.equal(200)
         expect(threads[threadId].messages.length).to.equal(1)
         expect(threads[threadId].messages[0].content).to.equal(content)

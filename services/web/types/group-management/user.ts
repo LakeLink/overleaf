@@ -1,3 +1,15 @@
+export type SSOEnrollment = {
+  groupId: string
+  linkedAt: Date
+  primary: boolean
+}
+
+export type UserEnrollment = {
+  managedBy?: string
+  enrolledAt?: Date
+  sso?: SSOEnrollment[]
+}
+
 export type User = {
   _id: string
   email: string
@@ -5,4 +17,6 @@ export type User = {
   last_name: string
   invite: boolean
   last_active_at: Date
+  enrollment?: UserEnrollment
+  isEntityAdmin?: boolean
 }

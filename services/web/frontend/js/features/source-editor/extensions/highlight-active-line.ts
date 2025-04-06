@@ -11,18 +11,24 @@ import {
 import { sourceOnly } from './visual/visual'
 import { fullHeightCoordsAtPos } from '../utils/layer'
 
+/**
+ * An alternative version of the built-in highlightActiveLine extension,
+ * using a custom approach for highlighting the full height of the active “visual line” of a wrapped line.
+ */
 export const highlightActiveLine = (visual: boolean) => {
   // this extension should only be active in the source editor
   return sourceOnly(visual, [
     activeLineLayer,
     singleLineHighlighter,
-    EditorView.baseTheme({
-      '.ol-cm-activeLineLayer': {
-        pointerEvents: 'none',
-      },
-    }),
+    highlightActiveLineTheme,
   ])
 }
+
+const highlightActiveLineTheme = EditorView.baseTheme({
+  '.ol-cm-activeLineLayer': {
+    pointerEvents: 'none',
+  },
+})
 
 /**
  * Line decoration approach used for non-wrapped lines, adapted from built-in
@@ -40,7 +46,7 @@ const singleLineHighlighter = ViewPlugin.fromClass(
     }
 
     update(update: ViewUpdate) {
-      if (update.docChanged || update.selectionSet) {
+      if (update.geometryChanged || update.selectionSet) {
         this.decorations = this.getDeco(update.view)
       }
     }

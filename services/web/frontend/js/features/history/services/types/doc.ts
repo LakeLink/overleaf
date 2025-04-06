@@ -18,9 +18,19 @@ interface Range {
   to: number
 }
 
+export type HighlightType = 'addition' | 'deletion'
+
 export interface Highlight {
   label: string
   hue: number
   range: Range
-  type: 'addition' | 'deletion'
+  type: HighlightType
+}
+
+export type Diff = {
+  binary: boolean
+  docDiff?: {
+    doc: string
+    highlights: Highlight[]
+  }
 }

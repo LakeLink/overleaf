@@ -4,7 +4,7 @@ const sinon = require('sinon')
 const MockRequest = require('../helpers/MockRequest')
 const MockResponse = require('../helpers/MockResponse')
 const { assert } = require('chai')
-const { ObjectID } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 
 const MODULE_PATH = path.join(
   __dirname,
@@ -34,6 +34,10 @@ describe('AnalyticsManager', function () {
       add: sinon.stub().resolves(),
       process: sinon.stub().resolves(),
     }
+    this.analyticsAccountMappingQueue = {
+      add: sinon.stub().resolves(),
+      process: sinon.stub().resolves(),
+    }
     const self = this
     this.Queues = {
       getQueue: queueName => {
@@ -46,6 +50,8 @@ describe('AnalyticsManager', function () {
             return self.onboardingEmailsQueue
           case 'analytics-user-properties':
             return self.analyticsUserPropertiesQueue
+          case 'analytics-account-mapping':
+            return self.analyticsAccountMappingQueue
           default:
             throw new Error('Unexpected queue name')
         }
@@ -85,7 +91,7 @@ describe('AnalyticsManager', function () {
 
     it('analyticsId is missing', function () {
       this.AnalyticsManager.identifyUser(
-        new ObjectID(this.fakeUserId),
+        new ObjectId(this.fakeUserId),
         undefined
       )
       sinon.assert.notCalled(this.Queues.createScheduledJob)
@@ -93,7 +99,7 @@ describe('AnalyticsManager', function () {
 
     it('analyticsId is not a valid UUID', function () {
       this.AnalyticsManager.identifyUser(
-        new ObjectID(this.fakeUserId),
+        new ObjectId(this.fakeUserId),
         this.fakeUserId
       )
       sinon.assert.notCalled(this.Queues.createScheduledJob)
@@ -101,8 +107,8 @@ describe('AnalyticsManager', function () {
 
     it('userId and analyticsId are the same Mongo ID', function () {
       this.AnalyticsManager.identifyUser(
-        new ObjectID(this.fakeUserId),
-        new ObjectID(this.fakeUserId)
+        new ObjectId(this.fakeUserId),
+        new ObjectId(this.fakeUserId)
       )
       sinon.assert.notCalled(this.Queues.createScheduledJob)
     })
@@ -112,7 +118,7 @@ describe('AnalyticsManager', function () {
         this.fakeUserId,
         '789ghi',
         'fr',
-        { key: '<alert>' }
+        { '<alert>': 'foo' }
       )
       sinon.assert.called(this.logger.info)
       sinon.assert.notCalled(this.analyticsEditingSessionQueue.add)
@@ -131,7 +137,7 @@ describe('AnalyticsManager', function () {
       await this.AnalyticsManager.recordEventForUser(
         this.fakeUserId,
         'an_event',
-        { not_a: 'Valid Segmentation!' }
+        { 'not_a!': 'Valid Segmentation' }
       )
       sinon.assert.called(this.logger.info)
       sinon.assert.notCalled(this.analyticsEventsQueue.add)
@@ -278,6 +284,24 @@ describe('AnalyticsManager', function () {
         isLoggedIn: true,
       })
     })
+
+    it('account mapping', async function () {
+      const message = {
+        source: 'salesforce',
+        sourceEntity: 'account',
+        sourceEntityId: 'abc123abc123abc123',
+        target: 'v1',
+        targetEntity: 'university',
+        targetEntityId: 1,
+        createdAt: '2021-01-01T00:00:00Z',
+      }
+      await this.AnalyticsManager.registerAccountMapping(message)
+      sinon.assert.calledWithMatch(
+        this.analyticsAccountMappingQueue.add,
+        'account-mapping',
+        message
+      )
+    })
   })
 
   describe('AnalyticsIdMiddleware', function () {
@@ -299,12 +323,17 @@ describe('AnalyticsManager', function () {
                   return self.onboardingEmailsQueue
                 case 'analytics-user-properties':
                   return self.analyticsUserPropertiesQueue
+                case 'analytics-account-mapping':
+                  return self.analyticsAccountMappingQueue
                 default:
                   throw new Error('Unexpected queue name')
               }
             },
           },
-          './UserAnalyticsIdCache': {},
+
+          './UserAnalyticsIdCache': (this.UserAnalyticsIdCache = {
+            get: sinon.stub().resolves(this.analyticsId),
+          }),
           crypto: {
             randomUUID: () => this.analyticsId,
           },
@@ -343,12 +372,14 @@ describe('AnalyticsManager', function () {
       await this.AnalyticsManager.analyticsIdMiddleware(
         this.req,
         this.res,
-        this.next
+        () => {
+          assert.equal(this.analyticsId, this.req.session.analyticsId)
+        }
       )
-      assert.equal(this.analyticsId, this.req.session.analyticsId)
     })
 
     it('sets session.analyticsId with a legacy user session without an analyticsId', async function () {
+      this.UserAnalyticsIdCache.get.resolves(this.userId)
       this.req.session.user = {
         _id: this.userId,
         analyticsId: undefined,
@@ -356,26 +387,26 @@ describe('AnalyticsManager', function () {
       await this.AnalyticsManager.analyticsIdMiddleware(
         this.req,
         this.res,
-        this.next
+        () => {
+          assert.equal(this.userId, this.req.session.analyticsId)
+        }
       )
-      assert.equal(this.userId, this.req.session.analyticsId)
     })
 
     it('updates session.analyticsId with a legacy user session without an analyticsId if different', async function () {
+      this.UserAnalyticsIdCache.get.resolves(this.userId)
       this.req.session.user = {
         _id: this.userId,
         analyticsId: undefined,
       }
       this.req.analyticsId = 'foo'
-      await this.AnalyticsManager.analyticsIdMiddleware(
-        this.req,
-        this.res,
-        this.next
-      )
-      assert.equal(this.userId, this.req.session.analyticsId)
+      this.AnalyticsManager.analyticsIdMiddleware(this.req, this.res, () => {
+        assert.equal(this.userId, this.req.session.analyticsId)
+      })
     })
 
     it('does not update session.analyticsId with a legacy user session without an analyticsId if same', async function () {
+      this.UserAnalyticsIdCache.get.resolves(this.userId)
       this.req.session.user = {
         _id: this.userId,
         analyticsId: undefined,
@@ -384,16 +415,10 @@ describe('AnalyticsManager', function () {
       await this.AnalyticsManager.analyticsIdMiddleware(
         this.req,
         this.res,
-        this.next
+        () => {
+          assert.equal(this.userId, this.req.session.analyticsId)
+        }
       )
-      assert.equal(this.userId, this.req.session.analyticsId)
-
-      await this.AnalyticsManager.analyticsIdMiddleware(
-        this.req,
-        this.res,
-        this.next
-      )
-      assert.equal(this.userId, this.req.session.analyticsId)
     })
   })
 })

@@ -2,8 +2,8 @@
   &::before {
     content: '\00a0';
     position: absolute;
-    width: 100%;
-    right: 100%;
+    width: 9999px;
+    left: -9999px;
     background-color: @bg-color;
   }
 }
@@ -14,21 +14,20 @@
   background-color: @file-tree-bg;
 }
 
-.resizable-side-bar {
-  flex-grow: 1;
-}
-
 .file-tree {
   display: flex !important; // To work around jQuery layout's inline styles
   flex-direction: column;
-  flex-grow: 1;
-  max-height: 100%;
+  height: 100%;
 
   .toolbar.toolbar-filetree {
     .toolbar-small-mixin;
     .toolbar-alt-mixin;
     padding: 0 5px;
     flex-shrink: 0;
+
+    .btn:hover {
+      background-color: @file-tree-toolbar-btn-hover-color;
+    }
   }
 
   > file-tree-root,
@@ -71,22 +70,6 @@
     }
   }
 
-  li.dnd-droppable-hover .entity-name,
-  li .entity-name.droppable-hover {
-    font-weight: bold;
-    background-color: @file-tree-item-hover-bg;
-    .fake-full-width-bg(@file-tree-item-hover-bg);
-  }
-
-  ul.droppable-hover li div.entity-name:hover {
-    background-color: transparent;
-    .fake-full-width-bg(transparent);
-    &.droppable-hover {
-      background-color: @file-tree-item-hover-bg;
-      .fake-full-width-bg(@file-tree-item-hover-bg);
-    }
-  }
-
   ul.file-tree-list {
     margin: 0;
     overflow-x: hidden;
@@ -100,7 +83,9 @@
       margin-left: 22px;
     }
 
-    li.bottom-buffer {
+    &::after {
+      content: '';
+      display: block;
       min-height: @line-height-computed;
     }
 
@@ -131,6 +116,7 @@
           text-overflow: ellipsis;
           text-align: left;
           padding-right: 32px;
+          white-space: pre;
         }
       }
 
@@ -146,10 +132,11 @@
         &:focus {
           outline: none;
         }
+        background-color: transparent;
+        .fake-full-width-bg(transparent);
         &:hover {
           background-color: @file-tree-item-hover-bg;
-        }
-        &:hover {
+
           // When the entity is a subfolder, the DOM element is "indented" via margin-left. This makes the
           // element not fill the entire file-tree width (as it's spaced from the left-hand side via margin)
           // and, in consequence, the background gets clipped. The ::before pseudo-selector is used to fill
@@ -162,13 +149,6 @@
         .entity-menu-toggle > i {
           color: white;
           font-size: 18px;
-        }
-      }
-
-      .entity.dnd-draggable-dragging {
-        .entity-name:hover {
-          background-color: transparent;
-          .fake-full-width-bg(transparent);
         }
       }
 
@@ -311,15 +291,18 @@
       > .entity {
         > .entity-name {
           color: @file-tree-item-selected-color;
+
           > div > i.fa,
           > button > i.fa,
           > i.fa,
           .entity-menu-toggle i.fa {
             color: @file-tree-item-selected-color;
           }
+
           > i.linked-file-highlight {
             color: @blue;
           }
+
           background-color: @file-tree-item-selected-bg;
           font-weight: bold;
           padding-right: 32px;
@@ -334,13 +317,43 @@
         }
       }
     }
-    ul.file-tree-list li.selected.dnd-droppable-hover {
-      > .entity {
-        > .entity-name {
-          background-color: @file-tree-item-hover-bg;
-          .fake-full-width-bg(@file-tree-item-hover-bg);
-        }
-      }
+  }
+
+  // while dragging, the previously selected item gets no highlight
+  ul.file-tree-list.file-tree-dragging li.selected .entity .entity-name {
+    font-weight: normal;
+
+    background-color: transparent;
+    .fake-full-width-bg(transparent);
+    color: @file-tree-item-color;
+    i.fa {
+      color: @file-tree-item-icon-color !important;
+    }
+  }
+
+  // the items being dragged get the full "hover" colour
+  ul.file-tree-list.file-tree-dragging
+    li
+    .entity.file-tree-entity-dragging
+    .entity-name {
+    background-color: fade(@file-tree-item-hover-bg, 90%);
+    .fake-full-width-bg(fade(@file-tree-item-hover-bg, 90%));
+    color: @file-tree-item-color;
+    i.fa {
+      color: @file-tree-item-icon-color !important;
+    }
+  }
+
+  // the drop target gets the "selected" colour
+  ul.file-tree-list.file-tree-dragging
+    li.dnd-droppable-hover
+    .entity
+    .entity-name {
+    background-color: @file-tree-item-selected-bg;
+    .fake-full-width-bg(@file-tree-item-selected-bg);
+    color: @file-tree-item-selected-color;
+    i.fa {
+      color: @file-tree-item-selected-color !important;
     }
   }
 
@@ -357,8 +370,7 @@
     }
   }
 
-  .dnd-draggable-preview-item,
-  .ui-draggable-dragging {
+  .dnd-draggable-preview-item {
     background-color: fade(@file-tree-item-selected-bg, 60%);
     color: @file-tree-item-selected-color;
     width: 75%;
@@ -389,6 +401,7 @@
   padding: 0;
   table {
     width: 100%;
+    table-layout: fixed;
     td {
       vertical-align: top;
     }
@@ -413,7 +426,7 @@
     }
   }
 }
-.modal-new-file--list {
+.modal-new-file-list {
   background-color: @modal-footer-background-color;
   width: 220px;
   ul {
@@ -464,24 +477,24 @@
 }
 
 .file-tree-modal-alert {
-  margin-top: 10px;
-  margin-bottom: 0px;
+  margin-top: 12.5px;
 }
 
 .btn.modal-new-file-mode {
   text-align: left;
+  width: 100%;
 }
 
-.modal-new-file--body {
+.modal-new-file-body {
   padding: 20px;
   padding-top: (@line-height-computed / 4);
 }
 
-.modal-new-file--body-upload {
+.modal-new-file-body-upload {
   padding-top: 20px;
 }
 
-.modal-new-file--body-conflict {
+.modal-new-file-body-conflict {
   background-color: @red-10;
   border: 1px dashed @red-50;
   min-height: 400px;
@@ -503,11 +516,11 @@
   }
 }
 
-.modal-new-file--body-upload .uppy-Root {
+.modal-new-file-body-upload .uppy-Root {
   font-family: inherit;
 }
 
-.modal-new-file--body-upload .uppy-Dashboard {
+.modal-new-file-body-upload .uppy-Dashboard {
   .uppy-Dashboard-inner {
     border: none;
   }
@@ -526,5 +539,18 @@
     .uppy-Dashboard-AddFiles-title {
       font-size: inherit;
     }
+  }
+
+  .uppy-Dashboard-AddFiles-title {
+    width: 26em; // sized to create a wrap between the sentences
+    max-width: 100%;
+  }
+
+  .uppy-Informer p {
+    background-color: @blue-10;
+    border: 1px solid @blue-20;
+    border-radius: @border-radius-base-new;
+    color: @content-primary;
+    font-size: @font-size-03;
   }
 }

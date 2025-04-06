@@ -1,7 +1,7 @@
-import { Row, Alert } from 'react-bootstrap'
-import Icon from '../../../../../shared/components/icon'
 import { UseAsyncReturnType } from '../../../../../shared/hooks/use-async'
 import { getUserFacingMessage } from '../../../../../infrastructure/fetch-json'
+import OLRow from '@/features/ui/components/ol/ol-row'
+import OLNotification from '@/features/ui/components/ol/ol-notification'
 
 type LayoutProps = {
   children: React.ReactNode
@@ -11,12 +11,13 @@ type LayoutProps = {
 
 function Layout({ isError, error, children }: LayoutProps) {
   return (
-    <div className="affiliations-table-row--highlighted">
-      <Row>{children}</Row>
+    <div className="affiliations-table-row-highlighted">
+      <OLRow>{children}</OLRow>
       {isError && (
-        <Alert bsStyle="danger" className="text-center">
-          <Icon type="exclamation-triangle" fw /> {getUserFacingMessage(error)}
-        </Alert>
+        <OLNotification
+          type="error"
+          content={getUserFacingMessage(error) ?? ''}
+        />
       )}
     </div>
   )

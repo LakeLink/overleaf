@@ -19,11 +19,15 @@ export async function getMessages(roomId, limit, before) {
     query.timestamp = { $lt: before }
   }
   query = _ensureIdsAreObjectIds(query)
-  return db.messages.find(query).sort({ timestamp: -1 }).limit(limit).toArray()
+  return await db.messages
+    .find(query)
+    .sort({ timestamp: -1 })
+    .limit(limit)
+    .toArray()
 }
 
 export async function findAllMessagesInRooms(roomIds) {
-  return db.messages
+  return await db.messages
     .find({
       room_id: { $in: roomIds },
     })
@@ -54,7 +58,7 @@ export async function updateMessage(
     room_id: roomId,
   })
   if (userId) {
-    query.user_id = ObjectId(userId)
+    query.user_id = new ObjectId(userId)
   }
   const res = await db.messages.updateOne(query, {
     $set: {
@@ -73,15 +77,36 @@ export async function deleteMessage(roomId, messageId) {
   await db.messages.deleteOne(query)
 }
 
+export async function deleteUserMessage(userId, roomId, messageId) {
+  await db.messages.deleteOne({
+    _id: new ObjectId(messageId),
+    user_id: new ObjectId(userId),
+    room_id: new ObjectId(roomId),
+  })
+}
+
 function _ensureIdsAreObjectIds(query) {
   if (query.user_id && !(query.user_id instanceof ObjectId)) {
-    query.user_id = ObjectId(query.user_id)
+    query.user_id = new ObjectId(query.user_id)
   }
   if (query.room_id && !(query.room_id instanceof ObjectId)) {
-    query.room_id = ObjectId(query.room_id)
+    query.room_id = new ObjectId(query.room_id)
   }
   if (query._id && !(query._id instanceof ObjectId)) {
-    query._id = ObjectId(query._id)
+    query._id = new ObjectId(query._id)
   }
   return query
+}
+
+export async function duplicateRoomToOtherRoom(sourceRoomId, targetRoomId) {
+  const sourceMessages = await findAllMessagesInRooms([sourceRoomId])
+  const targetMessages = sourceMessages.map(comment => {
+    return _ensureIdsAreObjectIds({
+      room_id: targetRoomId,
+      content: comment.content,
+      timestamp: comment.timestamp,
+      user_id: comment.user_id,
+    })
+  })
+  await db.messages.insertMany(targetMessages)
 }

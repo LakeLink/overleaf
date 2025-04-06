@@ -2,10 +2,10 @@
  * ContentCacheManager - maintains a cache of stream hashes from a PDF file
  */
 
-const { callbackify } = require('util')
-const fs = require('fs')
-const crypto = require('crypto')
-const Path = require('path')
+const { callbackify } = require('node:util')
+const fs = require('node:fs')
+const crypto = require('node:crypto')
+const Path = require('node:path')
 const Settings = require('@overleaf/settings')
 const OError = require('@overleaf/o-error')
 const pLimit = require('p-limit')
@@ -18,6 +18,9 @@ const {
 const workerpool = require('workerpool')
 const Metrics = require('@overleaf/metrics')
 
+/**
+ * @type {import('workerpool').WorkerPool}
+ */
 let WORKER_POOL
 // NOTE: Check for main thread to avoid recursive start of pool.
 if (Settings.pdfCachingEnableWorkerPool && workerpool.isMainThread) {

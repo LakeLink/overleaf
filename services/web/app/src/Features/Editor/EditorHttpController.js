@@ -5,15 +5,15 @@ const AuthorizationManager = require('../Authorization/AuthorizationManager')
 const ProjectEditorHandler = require('../Project/ProjectEditorHandler')
 const Metrics = require('@overleaf/metrics')
 const CollaboratorsGetter = require('../Collaborators/CollaboratorsGetter')
-const CollaboratorsInviteHandler = require('../Collaborators/CollaboratorsInviteHandler')
+const CollaboratorsInviteGetter = require('../Collaborators/CollaboratorsInviteGetter')
 const CollaboratorsHandler = require('../Collaborators/CollaboratorsHandler')
 const PrivilegeLevels = require('../Authorization/PrivilegeLevels')
-const TokenAccessHandler = require('../TokenAccess/TokenAccessHandler')
 const SessionManager = require('../Authentication/SessionManager')
 const Errors = require('../Errors/Errors')
 const DocstoreManager = require('../Docstore/DocstoreManager')
 const logger = require('@overleaf/logger')
-const { expressify } = require('../../util/promises')
+const { expressify } = require('@overleaf/promise-utils')
+const Settings = require('@overleaf/settings')
 
 module.exports = {
   joinProject: expressify(joinProject),
@@ -28,78 +28,59 @@ module.exports = {
   _nameIsAcceptableLength,
 }
 
-const unsupportedSpellcheckLanguages = [
-  'am',
-  'hy',
-  'bn',
-  'gu',
-  'he',
-  'hi',
-  'hu',
-  'is',
-  'kn',
-  'ml',
-  'mr',
-  'or',
-  'ss',
-  'ta',
-  'te',
-  'uk',
-  'uz',
-  'zu',
-  'fi',
-]
-
 async function joinProject(req, res, next) {
   const projectId = req.params.Project_id
-  let userId = req.query.user_id
+  let userId = req.body.userId // keep schema in sync with router
   if (userId === 'anonymous-user') {
     userId = null
   }
   Metrics.inc('editor.join-project')
-  const { project, privilegeLevel, isRestrictedUser } =
-    await _buildJoinProjectView(req, projectId, userId)
+  const {
+    project,
+    privilegeLevel,
+    isRestrictedUser,
+    isTokenMember,
+    isInvitedMember,
+  } = await _buildJoinProjectView(req, projectId, userId)
   if (!project) {
     return res.sendStatus(403)
   }
-  // Hide access tokens if this is not the project owner
-  TokenAccessHandler.protectTokens(project, privilegeLevel)
   // Hide sensitive data if the user is restricted
   if (isRestrictedUser) {
     project.owner = { _id: project.owner._id }
     project.members = []
+    project.invites = []
   }
   // Only show the 'renamed or deleted' message once
   if (project.deletedByExternalDataSource) {
     await ProjectDeleter.promises.unmarkAsDeletedByExternalSource(projectId)
   }
-  // disable spellchecking for currently unsupported spell check languages
-  // preserve the value in the db so they can use it again once we add back
-  // support.
-  if (
-    unsupportedSpellcheckLanguages.indexOf(project.spellCheckLanguage) !== -1
-  ) {
-    project.spellCheckLanguage = ''
+
+  if (project.spellCheckLanguage) {
+    project.spellCheckLanguage = await chooseSpellCheckLanguage(
+      project.spellCheckLanguage
+    )
   }
+
   res.json({
     project,
     privilegeLevel,
     isRestrictedUser,
+    isTokenMember,
+    isInvitedMember,
   })
 }
 
 async function _buildJoinProjectView(req, projectId, userId) {
-  const project = await ProjectGetter.promises.getProjectWithoutDocLines(
-    projectId
-  )
+  const project =
+    await ProjectGetter.promises.getProjectWithoutDocLines(projectId)
   if (project == null) {
     throw new Errors.NotFoundError('project not found')
   }
   let deletedDocsFromDocstore = []
   try {
-    deletedDocsFromDocstore = await DocstoreManager.promises.getAllDeletedDocs(
-      projectId
-    )
+    deletedDocsFromDocstore =
+      await DocstoreManager.promises.getAllDeletedDocs(projectId)
   } catch (err) {
     // The query in docstore is not optimized at this time and fails for
     // projects with many very large, deleted documents.
@@ -114,7 +95,7 @@ async function _buildJoinProjectView(req, projectId, userId) {
     await CollaboratorsGetter.promises.getInvitedMembersWithPrivilegeLevels(
       projectId
     )
-  const token = TokenAccessHandler.getRequestToken(req, projectId)
+  const token = req.body.anonymousAccessToken
   const privilegeLevel =
     await AuthorizationManager.promises.getPrivilegeLevelForProject(
       userId,
@@ -124,9 +105,8 @@ async function _buildJoinProjectView(req, projectId, userId) {
   if (privilegeLevel == null || privilegeLevel === PrivilegeLevels.NONE) {
     return { project: null, privilegeLevel: null, isRestrictedUser: false }
   }
-  const invites = await CollaboratorsInviteHandler.promises.getAllInvites(
-    projectId
-  )
+  const invites =
+    await CollaboratorsInviteGetter.promises.getAllInvites(projectId)
   const isTokenMember = await CollaboratorsHandler.promises.userIsTokenMember(
     userId,
     projectId
@@ -150,6 +130,8 @@ async function _buildJoinProjectView(req, projectId, userId) {
       deletedDocsFromDocstore
     ),
     privilegeLevel,
+    isTokenMember,
+    isInvitedMember,
     isRestrictedUser,
   }
 }
@@ -280,4 +262,33 @@ async function deleteEntity(req, res, next) {
     userId
   )
   res.sendStatus(204)
+}
+
+const supportedSpellCheckLanguages = new Set(
+  Settings.languages
+    // only include spell-check languages that are available in the client
+    .filter(language => language.dic !== undefined)
+    .map(language => language.code)
+)
+
+async function chooseSpellCheckLanguage(spellCheckLanguage) {
+  if (supportedSpellCheckLanguages.has(spellCheckLanguage)) {
+    return spellCheckLanguage
+  }
+
+  // Preserve the value in the database so they can use it again once we add back support.
+  // Map some server-only languages to a specific variant, or disable spell checking for currently unsupported spell check languages.
+  switch (spellCheckLanguage) {
+    case 'en':
+      // map "English" to "English (American)"
+      return 'en_US'
+
+    case 'no':
+      // map "Norwegian" to "Norwegian (Bokmål)"
+      return 'nb_NO'
+
+    default:
+      // map anything else to "off"
+      return ''
+  }
 }

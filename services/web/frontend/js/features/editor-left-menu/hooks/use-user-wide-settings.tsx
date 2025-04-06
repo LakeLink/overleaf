@@ -1,17 +1,26 @@
 import { useCallback } from 'react'
-import useScopeValue from '../../../shared/hooks/use-scope-value'
+import { useUserSettingsContext } from '@/shared/context/user-settings-context'
 import useSetOverallTheme from './use-set-overall-theme'
 import useSaveUserSettings from './use-save-user-settings'
-import type { UserSettings } from '../utils/api'
+import { UserSettings } from '../../../../../types/user-settings'
 
 export default function useUserWideSettings() {
   const saveUserSettings = useSaveUserSettings()
 
-  // this may be undefined on test environments
-  const [userSettings] = useScopeValue<UserSettings | undefined>(
-    'settings',
-    true
-  )
+  const { userSettings } = useUserSettingsContext()
+  const {
+    overallTheme,
+    autoComplete,
+    autoPairDelimiters,
+    syntaxValidation,
+    editorTheme,
+    mode,
+    fontSize,
+    fontFamily,
+    lineHeight,
+    pdfViewer,
+    mathPreview,
+  } = userSettings
 
   const setOverallTheme = useSetOverallTheme()
   const setAutoComplete = useCallback(
@@ -77,26 +86,35 @@ export default function useUserWideSettings() {
     [saveUserSettings]
   )
 
+  const setMathPreview = useCallback(
+    (mathPreview: UserSettings['mathPreview']) => {
+      saveUserSettings('mathPreview', mathPreview)
+    },
+    [saveUserSettings]
+  )
+
   return {
-    autoComplete: userSettings?.autoComplete,
+    autoComplete,
     setAutoComplete,
-    autoPairDelimiters: userSettings?.autoPairDelimiters,
+    autoPairDelimiters,
     setAutoPairDelimiters,
-    syntaxValidation: userSettings?.syntaxValidation,
+    syntaxValidation,
     setSyntaxValidation,
-    editorTheme: userSettings?.editorTheme,
+    editorTheme,
     setEditorTheme,
-    overallTheme: userSettings?.overallTheme,
+    overallTheme,
     setOverallTheme,
-    mode: userSettings?.mode,
+    mode,
     setMode,
-    fontSize: userSettings?.fontSize,
+    fontSize,
     setFontSize,
-    fontFamily: userSettings?.fontFamily,
+    fontFamily,
     setFontFamily,
-    lineHeight: userSettings?.lineHeight,
+    lineHeight,
     setLineHeight,
-    pdfViewer: userSettings?.pdfViewer,
+    pdfViewer,
     setPdfViewer,
+    mathPreview,
+    setMathPreview,
   }
 }

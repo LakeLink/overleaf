@@ -1,12 +1,14 @@
 const { callbackify } = require('util')
 const Path = require('path')
+const logger = require('@overleaf/logger')
 const OError = require('@overleaf/o-error')
-const { promiseMapWithLimit } = require('../../util/promises')
+const { promiseMapWithLimit } = require('@overleaf/promise-utils')
 const { Doc } = require('../../models/Doc')
 const { File } = require('../../models/File')
 const DocstoreManager = require('../Docstore/DocstoreManager')
 const DocumentUpdaterHandler = require('../DocumentUpdater/DocumentUpdaterHandler')
 const FileStoreHandler = require('../FileStore/FileStoreHandler')
+const HistoryManager = require('../History/HistoryManager')
 const ProjectCreationHandler = require('./ProjectCreationHandler')
 const ProjectDeleter = require('./ProjectDeleter')
 const ProjectEntityMongoUpdateHandler = require('./ProjectEntityMongoUpdateHandler')
@@ -17,6 +19,8 @@ const ProjectOptionsHandler = require('./ProjectOptionsHandler')
 const SafePath = require('./SafePath')
 const TpdsProjectFlusher = require('../ThirdPartyDataStore/TpdsProjectFlusher')
 const _ = require('lodash')
+const TagsHandler = require('../Tags/TagsHandler')
+const Features = require('../../infrastructure/Features')
 
 module.exports = {
   duplicate: callbackify(duplicate),
@@ -25,7 +29,7 @@ module.exports = {
   },
 }
 
-async function duplicate(owner, originalProjectId, newProjectName) {
+async function duplicate(owner, originalProjectId, newProjectName, tags = []) {
   await DocumentUpdaterHandler.promises.flushProjectToMongo(originalProjectId)
   const originalProject = await ProjectGetter.promises.getProject(
     originalProjectId,
@@ -35,6 +39,7 @@ async function duplicate(owner, originalProjectId, newProjectName) {
       rootDoc_id: true,
       fromV1TemplateId: true,
       fromV1TemplateVersionId: true,
+      overleaf: true,
     }
   )
   const { path: rootDocPath } = await ProjectLocator.promises.findRootDoc({
@@ -49,6 +54,17 @@ async function duplicate(owner, originalProjectId, newProjectName) {
     'fromV1TemplateVersionId',
   ])
   segmentation.duplicatedFromProject = originalProjectId
+
+  // count the number of tags before and after, for analytics
+  segmentation['original-tags'] =
+    await TagsHandler.promises.countTagsForProject(
+      owner._id,
+      originalProject._id
+    )
+  segmentation['updated-tags'] = tags.length
+
+  // remove any leading or trailing spaces
+  newProjectName = newProjectName.trim()
 
   // Now create the new project, cleaning it up on failure if necessary
   const newProject = await ProjectCreationHandler.promises.createBlankProject(
@@ -85,6 +101,14 @@ async function duplicate(owner, originalProjectId, newProjectName) {
       newProject: { version: projectVersion },
     })
     await TpdsProjectFlusher.promises.flushProjectToTpds(newProject._id)
+
+    if (tags?.length > 0) {
+      await TagsHandler.promises.addProjectToTags(
+        owner._id,
+        tags.map(tag => tag.id),
+        newProject._id
+      )
+    }
   } catch (err) {
     // Clean up broken clone on error.
     // Make sure we delete the new failed project, not the original one!
@@ -95,6 +119,7 @@ async function duplicate(owner, originalProjectId, newProjectName) {
       newProjectId: newProject._id,
     })
   }
+
   return newProject
 }
 
@@ -164,6 +189,15 @@ async function _getDocLinesForProject(projectId) {
 }
 
 async function _copyFiles(sourceEntries, sourceProject, targetProject) {
+  const sourceHistoryId = sourceProject.overleaf?.history?.id
+  const targetHistoryId = targetProject.overleaf?.history?.id
+  if (!sourceHistoryId) {
+    throw new OError('missing history id', { sourceProject })
+  }
+  if (!targetHistoryId) {
+    throw new OError('missing history id', { targetProject })
+  }
+
   const targetEntries = await promiseMapWithLimit(
     5,
     sourceEntries,
@@ -173,9 +207,54 @@ async function _copyFiles(sourceEntries, sourceProject, targetProject) {
       const file = new File({ name: SafePath.clean(sourceFile.name) })
       if (sourceFile.linkedFileData != null) {
         file.linkedFileData = sourceFile.linkedFileData
+        file.created = sourceFile.created
       }
       if (sourceFile.hash != null) {
         file.hash = sourceFile.hash
+      }
+      let createdBlob = false
+      const usingFilestore = Features.hasFeature('filestore')
+      if (file.hash != null && Features.hasFeature('project-history-blobs')) {
+        try {
+          await HistoryManager.promises.copyBlob(
+            sourceHistoryId,
+            targetHistoryId,
+            file.hash
+          )
+          createdBlob = true
+          if (!usingFilestore) {
+            return { createdBlob, file, path, url: null }
+          }
+        } catch (err) {
+          if (!usingFilestore) {
+            throw OError.tag(err, 'unexpected error copying blob', {
+              sourceProjectId: sourceProject._id,
+              targetProjectId: targetProject._id,
+              sourceFile,
+              sourceHistoryId,
+            })
+          } else {
+            logger.error(
+              {
+                err,
+                sourceProjectId: sourceProject._id,
+                targetProjectId: targetProject._id,
+                sourceFile,
+                sourceHistoryId,
+              },
+              'unexpected error copying blob'
+            )
+          }
+        }
+      }
+      if (createdBlob && Features.hasFeature('project-history-blobs')) {
+        return { createdBlob, file, path, url: null }
+      }
+      if (!usingFilestore) {
+        // Note: This is also checked in app.mjs
+        throw new OError(
+          'bad config: need to enable either filestore or project-history-blobs'
+        )
       }
       const url = await FileStoreHandler.promises.copyFile(
         sourceProject._id,
@@ -183,7 +262,8 @@ async function _copyFiles(sourceEntries, sourceProject, targetProject) {
         targetProject._id,
         file._id
       )
-      return { file, path, url }
+
+      return { createdBlob, file, path, url }
     }
   )
   return targetEntries

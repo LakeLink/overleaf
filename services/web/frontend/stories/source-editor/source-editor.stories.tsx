@@ -2,12 +2,38 @@ import SourceEditor from '../../js/features/source-editor/components/source-edit
 import { ScopeDecorator } from '../decorators/scope'
 import { useScope } from '../hooks/use-scope'
 import { useMeta } from '../hooks/use-meta'
+import { FC } from 'react'
+import { FileTreePathContext } from '@/features/file-tree/contexts/file-tree-path'
+import RangesTracker from '@overleaf/ranges-tracker'
+
+const FileTreePathProvider: FC = ({ children }) => (
+  <FileTreePathContext.Provider
+    value={{
+      dirname: () => null,
+      findEntityByPath: () => null,
+      pathInFolder: () => null,
+      previewByPath: (path: string) =>
+        path === 'frog.jpg'
+          ? {
+              extension: 'png',
+              url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsCAYAAAB5fY51AAABhWlDQ1BJQ0MgcHJvZmlsZQAAKJF9kT1Iw0AcxV9TpaJVETuIOGSogmBBVMRRq1CECqFWaNXB5NIvaNKQpLg4Cq4FBz8Wqw4uzro6uAqC4AeIq4uToouU+L+k0CLWg+N+vLv3uHsHCNUi06y2cUDTbTMRi4qp9KoYeIWAPnShB6Mys4w5SYqj5fi6h4+vdxGe1frcn6NbzVgM8InEs8wwbeIN4ulN2+C8TxxieVklPiceM+mCxI9cVzx+45xzWeCZITOZmCcOEYu5JlaamOVNjXiKOKxqOuULKY9VzluctWKZ1e/JXxjM6CvLXKc5hBgWsQQJIhSUUUARNiK06qRYSNB+tIV/0PVL5FLIVQAjxwJK0CC7fvA/+N2tlZ2c8JKCUaD9xXE+hoHALlCrOM73sePUTgD/M3ClN/ylKjDzSXqloYWPgN5t4OK6oSl7wOUOMPBkyKbsSn6aQjYLvJ/RN6WB/lugc83rrb6P0wcgSV3Fb4CDQ2AkR9nrLd7d0dzbv2fq/f0ARfNylZJUgMQAAAAGYktHRABuAP8AAGHZRr4AAAAJcEhZcwAALiMAAC4jAXilP3YAAAAHdElNRQfnAhELEhgyPeVkAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd2l0aCBHSU1QV4EOFwAAAyVJREFUeNrt1rEJgDAURVGVNCmS2hS6PziCteIYWjuEbiEfOWeEV1xe35bt6QhjnlYjBJLzbYRABhMAggUgWIBgAQgWgGABggUgWACCBQgWgGABCBYgWACCBSBYgGABCBaAYAGCBSBYAIIFCBaAYAEIFiBYAIIFIFiAYAEIFiBYAIIFIFiAYAEIFoBgAYIFIFgAggUIFoBgAQgWIFgAggUgWIBgAQgWgGABggUgWACCBQgWgGABCBYgWACCBSBYgGABCBYgWACCBSBYgGABCBaAYAGCBSBYAIIFCBaAYAEIFiBYAIIFIFiAYAEIFoBgAYIFIFgAggUIFoBgAQgWIFgAggUgWIBgAQgWIFgAggUgWIBgAQgWgGABggUgWACCBQgWgGABCBbwX6m13QqB5HwbIZBSLyN4WACCBQgWgGABCBYgWACCBSBYgGABCBaAYAGCBSBYAIIFCBaAYAEIFiBYAIIFCBaAYAEIFiBYAIIFIFiAYAEIFoBgAYIFIFgAggUIFoBgAQgWIFgAggUgWIBgAQgWgGABggUgWACCBQgWgGABCBYgWACCBQgWgGABCBYgWACCBSBYgGABCBaAYAGCBSBYAIIFCBaAYAEIFiBYAIIFIFiAYAEIFoBgAYIFIFgAggUIFoBgAQgWIFgAggUIFoBgAQgWIFgAggUgWIBgAQgWgGABggUgWACCBQgWgGABCBYgWACCBSBYgGABCBaAYAGCBfCFVMtphUBKvYwQSBsPI3hYAIIFCBaAYAEIFiBYAIIFIFiAYAEIFoBgAYIFIFgAggUIFoBgAQgWIFgAggUIFoBgAQgWIFgAggUgWIBgAQgWgGABggUgWACCBQgWgGABCBYgWACCBSBYgGABCBaAYAGCBSBYAIIFCBaAYAEIFiBYAIIFCBaAYAEIFiBYAIIFIFiAYAEIFoBgAYIFIFgAggUIFoBgAQgWIFgAggUgWIBgAQgWgGABggUgWACCBQgWgGABCBYgWACCBQgWgGABCBYgWACCBSBYgGABCBaAYAGCBSBYAIIFCBaAYAEIFiBYAIIFIFiAYAEIFoBgAYIF8IUXjtUMuBMh1xAAAAAASUVORK5CYII=',
+            }
+          : null,
+    }}
+  >
+    {children}
+  </FileTreePathContext.Provider>
+)
 
 export default {
   title: 'Editor / Source Editor',
   component: SourceEditor,
   decorators: [
-    ScopeDecorator,
+    (Story: any) =>
+      ScopeDecorator(Story, {
+        mockCompileOnLoad: true,
+        providers: { FileTreePathProvider },
+      }),
     (Story: any) => (
       <div style={{ height: '90vh' }}>
         <Story />
@@ -29,16 +55,49 @@ const settings = {
   syntaxValidation: false,
 }
 
+const permissions = {
+  write: true,
+}
+
 export const Latex = (args: any, { globals: { theme } }: any) => {
+  // FIXME: useScope has no effect
   useScope({
     editor: {
-      sharejs_doc: mockDoc(content.tex),
+      sharejs_doc: mockDoc(content.tex, changes.tex),
       open_doc_name: 'example.tex',
+    },
+    rootFolder: {
+      name: 'rootFolder',
+      id: 'root-folder-id',
+      type: 'folder',
+      children: [
+        {
+          name: 'example.tex.tex',
+          id: 'example-doc-id',
+          type: 'doc',
+          selected: false,
+          $$hashKey: 'object:89',
+        },
+        {
+          name: 'frog.jpg',
+          id: 'frog-image-id',
+          type: 'file',
+          linkedFileData: null,
+          created: '2023-05-04T16:11:04.352Z',
+          $$hashKey: 'object:108',
+        },
+      ],
+      selected: false,
     },
     settings: {
       ...settings,
       overallTheme: theme === 'default-' ? '' : theme,
     },
+    permissions,
+  })
+
+  useMeta({
+    'ol-showSymbolPalette': true,
   })
 
   return <SourceEditor />
@@ -47,13 +106,14 @@ export const Latex = (args: any, { globals: { theme } }: any) => {
 export const Markdown = (args: any, { globals: { theme } }: any) => {
   useScope({
     editor: {
-      sharejs_doc: mockDoc(content.md),
+      sharejs_doc: mockDoc(content.md, changes.md),
       open_doc_name: 'example.md',
     },
     settings: {
       ...settings,
       overallTheme: theme === 'default-' ? '' : theme,
     },
+    permissions,
   })
 
   return <SourceEditor />
@@ -62,7 +122,7 @@ export const Markdown = (args: any, { globals: { theme } }: any) => {
 export const Visual = (args: any, { globals: { theme } }: any) => {
   useScope({
     editor: {
-      sharejs_doc: mockDoc(content.tex),
+      sharejs_doc: mockDoc(content.tex, changes.tex),
       open_doc_name: 'example.tex',
       showVisual: true,
     },
@@ -70,19 +130,36 @@ export const Visual = (args: any, { globals: { theme } }: any) => {
       ...settings,
       overallTheme: theme === 'default-' ? '' : theme,
     },
+    permissions,
   })
-
   useMeta({
     'ol-showSymbolPalette': true,
-    'ol-mathJax3Path': 'https://unpkg.com/mathjax@3.2.2/es5/tex-svg-full.js',
+    'ol-mathJaxPath': 'https://unpkg.com/mathjax@3.2.2/es5/tex-svg-full.js',
+    'ol-project_id': '63e21c07946dd8c76505f85a',
   })
 
   return <SourceEditor />
 }
 
-const MAX_DOC_LENGTH = 2 * 1024 * 1024 // window.maxDocLength
+export const Bibtex = (args: any, { globals: { theme } }: any) => {
+  useScope({
+    editor: {
+      sharejs_doc: mockDoc(content.bib, changes.bib),
+      open_doc_name: 'example.bib',
+    },
+    settings: {
+      ...settings,
+      overallTheme: theme === 'default-' ? '' : theme,
+    },
+    permissions,
+  })
 
-const mockDoc = (content: string) => {
+  return <SourceEditor />
+}
+
+const MAX_DOC_LENGTH = 2 * 1024 * 1024 // ol-maxDocLength
+
+const mockDoc = (content: string, changes: Array<Record<string, any>> = []) => {
   const mockShareJSDoc = {
     getText() {
       return content
@@ -118,23 +195,41 @@ const mockDoc = (content: string) => {
     off: () => {
       // Do nothing
     },
-    ranges: {
-      changes: [
-        {
-          id: '1',
-          op: {
-            i: 'Your introduction goes here! Simply start writing your document and use the Recompile button to view the updated PDF preview. Examples of commonly used commands and features are listed below, to help you get started.',
-            p: 583,
-          },
-          meta: {
-            user_id: '1',
-            ts: new Date().toString(),
-          },
-        },
-      ],
-      comments: [],
+    setTrackChangesIdSeeds: () => {
+      // Do nothing
     },
+    setTrackingChanges: () => {
+      // Do nothing
+    },
+    getTrackingChanges: () => {
+      return true
+    },
+    getInflightOp: () => {
+      return null
+    },
+    getPendingOp: () => {
+      return null
+    },
+    ranges: new RangesTracker(changes, []),
   }
+}
+
+const changes: Record<string, Array<Record<string, any>>> = {
+  tex: [
+    {
+      id: '1',
+      op: {
+        i: 'Your introduction goes here! Simply start writing your document and use the Recompile button to view the updated PDF preview. Examples of commonly used commands and features are listed below, to help you get started.',
+        p: 583,
+      },
+      meta: {
+        user_id: '1',
+        ts: new Date().toString(),
+      },
+    },
+  ],
+  md: [],
+  bib: [],
 }
 
 const content = {
@@ -183,8 +278,8 @@ Note that your figure will automatically be placed in the most appropriate place
 
 \\begin{figure}
 \\centering
-\\includegraphics[width=0.3\\textwidth]{frog.jpg}
-\\caption{\\label{fig:frog}This frog was uploaded via the file-tree menu.}
+\\includegraphics[width=0.25\\linewidth]{frog.jpg}
+\\caption{This frog was uploaded via the file-tree menu.}\\label{fig:frog}
 \\end{figure}
 
 \\subsection{How to add Tables}
@@ -262,4 +357,52 @@ We hope you find Overleaf useful, and do take a look at our \\href{https://www.o
 This is **bold**
 
 This is _italic_`,
+  bib: `@book{texbook,
+  author = {Donald E. Knuth},
+  year = {1986},
+  title = {The {\\TeX} Book},
+  publisher = {Addison-Wesley Professional}
+}
+
+@book{latex:companion,
+  author = {Frank Mittelbach and Michel Gossens
+            and Johannes Braams and David Carlisle
+            and Chris Rowley},
+  year = {2004},
+  title = {The {\\LaTeX} Companion},
+  publisher = {Addison-Wesley Professional},
+  edition = {2}
+}
+
+@book{latex2e,
+  author = {Leslie Lamport},
+  year = {1994},
+  title = {{\\LaTeX}: a Document Preparation System},
+  publisher = {Addison Wesley},
+  address = {Massachusetts},
+  edition = {2}
+}
+
+@article{knuth:1984,
+  title={Literate Programming},
+  author={Donald E. Knuth},
+  journal={The Computer Journal},
+  volume={27},
+  number={2},
+  pages={97--111},
+  year={1984},
+  publisher={Oxford University Press}
+}
+
+@inproceedings{lesk:1977,
+  title={Computer Typesetting of Technical Journals on {UNIX}},
+  author={Michael Lesk and Brian Kernighan},
+  booktitle={Proceedings of American Federation of
+              Information Processing Societies: 1977
+              National Computer Conference},
+  pages={879--888},
+  year={1977},
+  address={Dallas, Texas}
+}
+`,
 }

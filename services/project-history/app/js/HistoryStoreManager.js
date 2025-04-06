@@ -1,18 +1,25 @@
-import fs from 'fs'
+import { promisify } from 'node:util'
+import fs from 'node:fs'
 import request from 'request'
-import stream from 'stream'
+import stream from 'node:stream'
 import logger from '@overleaf/logger'
 import _ from 'lodash'
-import BPromise from 'bluebird'
-import { URL } from 'url'
+import { URL } from 'node:url'
 import OError from '@overleaf/o-error'
 import Settings from '@overleaf/settings'
+import {
+  fetchStream,
+  fetchNothing,
+  RequestFailedError,
+} from '@overleaf/fetch-utils'
 import * as Versions from './Versions.js'
 import * as Errors from './Errors.js'
 import * as LocalFileWriter from './LocalFileWriter.js'
 import * as HashManager from './HashManager.js'
+import * as HistoryBlobTranslator from './HistoryBlobTranslator.js'
+import { promisifyMultiResult } from '@overleaf/promise-utils'
 
-const HTTP_REQUEST_TIMEOUT = 300 * 1000 // 5 minutes
+const HTTP_REQUEST_TIMEOUT = Settings.overleaf.history.requestTimeout
 
 /**
  * Container for functions that need to be mocked in tests
@@ -31,10 +38,16 @@ _mocks.getMostRecentChunk = (projectId, historyId, callback) => {
   _requestChunk({ path, json: true }, callback)
 }
 
-export function getMostRecentChunk(...args) {
-  _mocks.getMostRecentChunk(...args)
+/**
+ * @param {Callback} callback
+ */
+export function getMostRecentChunk(projectId, historyId, callback) {
+  _mocks.getMostRecentChunk(projectId, historyId, callback)
 }
 
+/**
+ * @param {Callback} callback
+ */
 export function getChunkAtVersion(projectId, historyId, version, callback) {
   const path = `projects/${historyId}/versions/${version}/history`
   logger.debug(
@@ -66,10 +79,36 @@ export function getMostRecentVersion(projectId, historyId, callback) {
           err1 || err2,
           mostRecentVersion,
           projectStructureAndDocVersions,
-          lastChange
+          lastChange,
+          chunk
         )
       })
     )
+  })
+}
+
+/**
+ * @param {string} projectId
+ * @param {string} historyId
+ * @param {Object} opts
+ * @param {boolean} [opts.readOnly]
+ * @param {(error: Error, rawChunk?: { startVersion: number, endVersion: number, endTimestamp: Date}) => void} callback
+ */
+export function getMostRecentVersionRaw(projectId, historyId, opts, callback) {
+  const path = `projects/${historyId}/latest/history/raw`
+  logger.debug(
+    { projectId, historyId },
+    'getting raw chunk from history service'
+  )
+  const qs = opts.readOnly ? { readOnly: true } : {}
+  _requestHistoryService({ path, json: true, qs }, (err, body) => {
+    if (err) return callback(OError.tag(err))
+    const { startVersion, endVersion, endTimestamp } = body
+    callback(null, {
+      startVersion,
+      endVersion,
+      endTimestamp: new Date(endTimestamp),
+    })
   })
 }
 
@@ -83,7 +122,8 @@ function _requestChunk(options, callback) {
       chunk.chunk == null ||
       chunk.chunk.startVersion == null
     ) {
-      return callback(new OError('unexpected response'))
+      const { path } = options
+      return callback(new OError('unexpected response', { path }))
     }
     callback(null, chunk)
   })
@@ -91,28 +131,36 @@ function _requestChunk(options, callback) {
 
 function _getLatestProjectVersion(projectId, chunk, callback) {
   // find the initial project version
-  let projectVersion =
-    chunk.chunk.history.snapshot && chunk.chunk.history.snapshot.projectVersion
-  // keep track of any errors
+  const projectVersionInSnapshot = chunk.chunk.history.snapshot?.projectVersion
+  let projectVersion = projectVersionInSnapshot
+  const chunkStartVersion = chunk.chunk.startVersion
+  // keep track of any first error
   let error = null
   // iterate over the changes in chunk to find the most recent project version
-  for (const change of chunk.chunk.history.changes || []) {
-    if (change.projectVersion != null) {
+  for (const [changeIdx, change] of (
+    chunk.chunk.history.changes || []
+  ).entries()) {
+    const projectVersionInChange = change.projectVersion
+    if (projectVersionInChange != null) {
       if (
         projectVersion != null &&
-        Versions.lt(change.projectVersion, projectVersion)
+        Versions.lt(projectVersionInChange, projectVersion)
       ) {
-        logger.warn(
-          { projectId, chunk, projectVersion, change },
-          'project structure version out of order in chunk'
-        )
         if (!error) {
           error = new Errors.OpsOutOfOrderError(
-            'project structure version out of order'
+            'project structure version out of order',
+            {
+              projectId,
+              chunkStartVersion,
+              projectVersionInSnapshot,
+              changeIdx,
+              projectVersion,
+              projectVersionInChange,
+            }
           )
         }
       } else {
-        projectVersion = change.projectVersion
+        projectVersion = projectVersionInChange
       }
     }
   }
@@ -138,16 +186,16 @@ function _getLatestV2DocVersions(projectId, chunk, callback) {
           v2DocVersions[docId].v != null &&
           Versions.lt(v, v2DocVersions[docId].v)
         ) {
-          logger.warn(
-            {
-              projectId,
-              docId,
-              changeVersion: docInfo,
-              previousVersion: v2DocVersions[docId],
-            },
-            'doc version out of order in chunk'
-          )
           if (!error) {
+            logger.warn(
+              {
+                projectId,
+                docId,
+                changeVersion: docInfo,
+                previousVersion: v2DocVersions[docId],
+              },
+              'doc version out of order in chunk'
+            )
             error = new Errors.OpsOutOfOrderError('doc version out of order')
           }
         } else {
@@ -167,15 +215,20 @@ export function getProjectBlob(historyId, blobHash, callback) {
   )
 }
 
+/**
+ * @param {Callback} callback
+ */
 export function getProjectBlobStream(historyId, blobHash, callback) {
+  const url = `${Settings.overleaf.history.host}/projects/${historyId}/blobs/${blobHash}`
   logger.debug(
     { historyId, blobHash },
     'getting blob stream from history service'
   )
-  _requestHistoryServiceStream(
-    { path: `projects/${historyId}/blobs/${blobHash}` },
-    callback
-  )
+  fetchStream(url, getHistoryFetchOptions())
+    .then(stream => {
+      callback(null, stream)
+    })
+    .catch(err => callback(OError.tag(err)))
 }
 
 export function sendChanges(
@@ -206,7 +259,6 @@ export function sendChanges(
           statusCode: error.statusCode,
           body: error.body,
         })
-        logger.warn(error)
         return callback(error)
       }
       callback()
@@ -214,80 +266,198 @@ export function sendChanges(
   )
 }
 
+function createBlobFromString(historyId, data, fileId, callback) {
+  const stringStream = new StringStream()
+  stringStream.push(data)
+  stringStream.push(null)
+  LocalFileWriter.bufferOnDisk(
+    stringStream,
+    '',
+    fileId,
+    (fsPath, cb) => {
+      _createBlob(historyId, fsPath, cb)
+    },
+    callback
+  )
+}
+
+function _checkBlobExists(historyId, hash, callback) {
+  if (!hash) return callback(null, false)
+  const url = `${Settings.overleaf.history.host}/projects/${historyId}/blobs/${hash}`
+  fetchNothing(url, {
+    method: 'HEAD',
+    ...getHistoryFetchOptions(),
+  })
+    .then(res => {
+      callback(null, true)
+    })
+    .catch(err => {
+      if (err instanceof RequestFailedError && err.response.status === 404) {
+        return callback(null, false)
+      }
+      callback(OError.tag(err), false)
+    })
+}
+
+function _rewriteFilestoreUrl(url, projectId, callback) {
+  if (!url) {
+    return { fileId: null, filestoreURL: null }
+  }
+  // Rewrite the filestore url to point to the location in the local
+  // settings for this service (this avoids problems with cross-
+  // datacentre requests when running filestore in multiple locations).
+  const { pathname: fileStorePath } = new URL(url)
+  const urlMatch = /^\/project\/([0-9a-f]{24})\/file\/([0-9a-f]{24})$/.exec(
+    fileStorePath
+  )
+  if (urlMatch == null) {
+    return callback(new OError('invalid file for blob creation'))
+  }
+  if (urlMatch[1] !== projectId) {
+    return callback(new OError('invalid project for blob creation'))
+  }
+
+  const fileId = urlMatch[2]
+  const filestoreURL = `${Settings.apis.filestore.url}/project/${projectId}/file/${fileId}`
+  return { filestoreURL, fileId }
+}
+
 export function createBlobForUpdate(projectId, historyId, update, callback) {
   callback = _.once(callback)
 
   if (update.doc != null && update.docLines != null) {
-    const stringStream = new StringStream()
-    stringStream.push(update.docLines)
-    stringStream.push(null)
-
-    LocalFileWriter.bufferOnDisk(
-      stringStream,
+    let ranges
+    try {
+      ranges = HistoryBlobTranslator.createRangeBlobDataFromUpdate(update)
+    } catch (error) {
+      return callback(error)
+    }
+    createBlobFromString(
+      historyId,
+      update.docLines,
       `project-${projectId}-doc-${update.doc}`,
-      (fsPath, cb) => {
-        _createBlob(historyId, fsPath, cb)
-      },
+      (err, fileHash) => {
+        if (err) {
+          return callback(err)
+        }
+        if (ranges) {
+          createBlobFromString(
+            historyId,
+            JSON.stringify(ranges),
+            `project-${projectId}-doc-${update.doc}-ranges`,
+            (err, rangesHash) => {
+              if (err) {
+                return callback(err)
+              }
+              logger.debug(
+                { fileHash, rangesHash },
+                'created blobs for both ranges and content'
+              )
+              return callback(null, { file: fileHash, ranges: rangesHash })
+            }
+          )
+        } else {
+          logger.debug({ fileHash }, 'created blob for content')
+          return callback(null, { file: fileHash })
+        }
+      }
+    )
+  } else if (
+    update.file != null &&
+    (update.url != null || update.createdBlob)
+  ) {
+    const { fileId, filestoreURL } = _rewriteFilestoreUrl(
+      update.url,
+      projectId,
       callback
     )
-  } else if (update.file != null && update.url != null) {
-    // Rewrite the filestore url to point to the location in the local
-    // settings for this service (this avoids problems with cross-
-    // datacentre requests when running filestore in multiple locations).
-    const { pathname: fileStorePath } = new URL(update.url)
-    const urlMatch = /^\/project\/([0-9a-f]{24})\/file\/([0-9a-f]{24})$/.exec(
-      fileStorePath
-    )
-    if (urlMatch == null) {
-      return callback(new OError('invalid file for blob creation'))
-    }
-    if (urlMatch[1] !== projectId) {
-      return callback(new OError('invalid project for blob creation'))
-    }
-    const fileId = urlMatch[2]
-    const fileStoreStream = request.get({
-      url: `${Settings.apis.filestore.url}/project/${projectId}/file/${fileId}`,
-      timeout: HTTP_REQUEST_TIMEOUT,
-    })
-    fileStoreStream.pause()
-    fileStoreStream.on('error', err => {
-      callback(OError.tag(err, 'error from filestore', { url: update.url }))
-    })
-    fileStoreStream.on('response', response => {
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        LocalFileWriter.bufferOnDisk(
-          fileStoreStream,
-          `project-${projectId}-file-${fileId}`,
-          (fsPath, cb) => {
-            _createBlob(historyId, fsPath, cb)
-          },
-          callback
+    _checkBlobExists(historyId, update.hash, (err, blobExists) => {
+      if (err) {
+        return callback(
+          new OError(
+            'error checking whether blob exists',
+            { projectId, historyId, update },
+            err
+          )
         )
-        fileStoreStream.resume() // start data flowing when ready
-      } else if (response.statusCode === 404) {
+      } else if (blobExists) {
+        logger.debug(
+          { projectId, fileId, update },
+          'Skipping blob creation as it has already been created'
+        )
+        return callback(null, { file: update.hash })
+      } else if (update.createdBlob) {
         logger.warn(
-          { projectId, historyId, fileStoreUrl: update.url },
-          'File contents not found in filestore. Storing in history as an empty file'
+          { projectId, fileId, update },
+          'created blob does not exist, reading from filestore'
         )
-        const emptyStream = new StringStream()
-        LocalFileWriter.bufferOnDisk(
-          emptyStream,
-          `project-${projectId}-file-${fileId}`,
-          (fsPath, cb) => {
-            _createBlob(historyId, fsPath, cb)
-          },
-          callback
-        )
-        fileStoreStream.resume() // Drain the filestore stream
-        emptyStream.push(null) // send an EOF signal
-      } else {
-        const error = new OError(
-          `bad response from filestore: ${response.statusCode}`,
-          { url: update.url, statusCode: response.statusCode }
-        )
-        fileStoreStream.resume() // See https://github.com/overleaf/write_latex/wiki/Streams-and-pipes-in-Node.js#discard-data-if-necessary-in-the-response-handler
-        callback(error)
       }
+
+      if (!filestoreURL) {
+        return callback(
+          new OError('no filestore URL provided and blob was not created')
+        )
+      }
+      if (!Settings.apis.filestore.enabled) {
+        return callback(new OError('blocking filestore read', { update }))
+      }
+
+      fetchStream(filestoreURL, {
+        signal: AbortSignal.timeout(HTTP_REQUEST_TIMEOUT),
+      })
+        .then(stream => {
+          LocalFileWriter.bufferOnDisk(
+            stream,
+            filestoreURL,
+            `project-${projectId}-file-${fileId}`,
+            (fsPath, cb) => {
+              _createBlob(historyId, fsPath, cb)
+            },
+            (err, fileHash) => {
+              if (err) {
+                return callback(err)
+              }
+              if (update.hash && update.hash !== fileHash) {
+                logger.warn(
+                  { projectId, fileId, webHash: update.hash, fileHash },
+                  'hash mismatch between web and project-history'
+                )
+              }
+              logger.debug({ fileHash }, 'created blob for file')
+              callback(null, { file: fileHash })
+            }
+          )
+        })
+        .catch(err => {
+          if (
+            err instanceof RequestFailedError &&
+            err.response.status === 404
+          ) {
+            logger.warn(
+              { projectId, historyId, filestoreURL },
+              'File contents not found in filestore. Storing in history as an empty file'
+            )
+            const emptyStream = new StringStream()
+            LocalFileWriter.bufferOnDisk(
+              emptyStream,
+              filestoreURL,
+              `project-${projectId}-file-${fileId}`,
+              (fsPath, cb) => {
+                _createBlob(historyId, fsPath, cb)
+              },
+              (err, fileHash) => {
+                if (err) {
+                  return callback(err)
+                }
+                logger.debug({ fileHash }, 'created empty blob for file')
+                callback(null, { file: fileHash })
+              }
+            )
+            emptyStream.push(null) // send an EOF signal
+          } else {
+            callback(OError.tag(err, 'error from filestore', { filestoreURL }))
+          }
+        })
     })
   } else {
     const error = new OError('invalid update for blob creation')
@@ -304,33 +474,23 @@ function _createBlob(historyId, fsPath, _callback) {
     }
     const outStream = fs.createReadStream(fsPath)
 
-    outStream.on('error', err => {
-      callback(
-        OError.tag(err, 'error streaming file from disk', {
-          fsPath,
-          hash,
-          byteLength,
-        })
-      )
-    })
-
     logger.debug(
-      { fsPath, hash, byteLength },
+      { fsPath, historyId, hash, byteLength },
       'sending blob to history service'
     )
-    _requestHistoryService(
-      {
-        method: 'PUT',
-        path: `projects/${historyId}/blobs/${hash}`,
-        body: outStream,
-      },
-      error => {
-        if (error) {
-          return callback(OError.tag(error))
-        }
+    const url = `${Settings.overleaf.history.host}/projects/${historyId}/blobs/${hash}`
+    fetchNothing(url, {
+      method: 'PUT',
+      body: outStream,
+      headers: { 'Content-Length': byteLength }, // add the content length to work around problems with chunked encoding in node 18
+      ...getHistoryFetchOptions(),
+    })
+      .then(res => {
         callback(null, hash)
-      }
-    )
+      })
+      .catch(err => {
+        callback(OError.tag(err))
+      })
   })
 }
 
@@ -364,15 +524,20 @@ export function deleteProject(projectId, callback) {
   )
 }
 
-const getProjectBlobAsync = BPromise.promisify(getProjectBlob)
+const getProjectBlobAsync = promisify(getProjectBlob)
 
 class BlobStore {
   constructor(projectId) {
     this.projectId = projectId
   }
 
-  getString(hash) {
-    return getProjectBlobAsync(this.projectId, hash)
+  async getString(hash) {
+    return await getProjectBlobAsync(this.projectId, hash)
+  }
+
+  async getObject(hash) {
+    const string = await this.getString(hash)
+    return JSON.parse(string)
   }
 }
 
@@ -407,6 +572,19 @@ function _requestOptions(options) {
   return requestOptions
 }
 
+/**
+ * @return {RequestInit}
+ */
+function getHistoryFetchOptions() {
+  return {
+    signal: AbortSignal.timeout(HTTP_REQUEST_TIMEOUT),
+    basicAuth: {
+      user: Settings.overleaf.history.user,
+      password: Settings.overleaf.history.pass,
+    },
+  }
+}
+
 function _requestHistoryService(options, callback) {
   const requestOptions = _requestOptions(options)
   request(requestOptions, (error, res, body) => {
@@ -417,31 +595,31 @@ function _requestHistoryService(options, callback) {
     if (res.statusCode >= 200 && res.statusCode < 300) {
       callback(null, body)
     } else {
+      const { method, url, qs } = requestOptions
       error = new OError(
-        `history store a non-success status code: ${res.statusCode}`
+        `history store a non-success status code: ${res.statusCode}`,
+        { method, url, qs, statusCode: res.statusCode }
       )
-      error.statusCode = res.statusCode
-      error.body = body
-      logger.warn({ err: error }, error.message)
       callback(error)
     }
   })
 }
 
-function _requestHistoryServiceStream(options, callback) {
-  callback = _.once(callback)
-  const requestOptions = _requestOptions(options)
-  const stream = request(requestOptions)
-  stream.on('error', callback)
-  stream.on('response', res => {
-    if (res.statusCode >= 200 && res.statusCode < 300) {
-      callback(null, stream)
-    } else {
-      const error = new OError(
-        `history store a non-success status code: ${res.statusCode}`
-      )
-      logger.warn({ err: error, options }, error.message)
-      callback(error)
-    }
-  })
+export const promises = {
+  /** @type {(projectId: string, historyId: string) => Promise<{chunk: import('overleaf-editor-core/lib/types.js').RawChunk}>} */
+  getMostRecentChunk: promisify(getMostRecentChunk),
+  getChunkAtVersion: promisify(getChunkAtVersion),
+  getMostRecentVersion: promisifyMultiResult(getMostRecentVersion, [
+    'version',
+    'projectStructureAndDocVersions',
+    'lastChange',
+    'mostRecentChunk',
+  ]),
+  getMostRecentVersionRaw: promisify(getMostRecentVersionRaw),
+  getProjectBlob: promisify(getProjectBlob),
+  getProjectBlobStream: promisify(getProjectBlobStream),
+  sendChanges: promisify(sendChanges),
+  createBlobForUpdate: promisify(createBlobForUpdate),
+  initializeProject: promisify(initializeProject),
+  deleteProject: promisify(deleteProject),
 }

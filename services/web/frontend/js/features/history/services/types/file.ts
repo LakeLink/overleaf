@@ -1,27 +1,33 @@
-import { DiffOperation } from './diff-operation'
+import { FileOperation } from './file-operation'
 
-export interface FileUnchanged {
+interface File {
   pathname: string
 }
 
-export interface FileAdded extends FileUnchanged {
-  operation: Extract<DiffOperation, 'added'>
+export interface FileWithEditable extends File {
+  editable: boolean
 }
 
-export interface FileRemoved extends FileUnchanged {
-  operation: Extract<DiffOperation, 'removed'>
+export type FileUnchanged = FileWithEditable
+
+export interface FileAdded extends FileWithEditable {
+  operation: Extract<FileOperation, 'added'>
+}
+
+export interface FileRemoved extends FileWithEditable {
+  operation: Extract<FileOperation, 'removed'>
   newPathname?: string
   deletedAtV: number
 }
 
-export interface FileEdited extends FileUnchanged {
-  operation: Extract<DiffOperation, 'edited'>
+export interface FileEdited extends File {
+  operation: Extract<FileOperation, 'edited'>
 }
 
-export interface FileRenamed extends FileUnchanged {
+export interface FileRenamed extends FileWithEditable {
   newPathname?: string
   oldPathname?: string
-  operation: Extract<DiffOperation, 'renamed'>
+  operation: Extract<FileOperation, 'renamed'>
 }
 
 export type FileDiff =
@@ -30,8 +36,3 @@ export type FileDiff =
   | FileEdited
   | FileRenamed
   | FileUnchanged
-
-export interface FileSelection {
-  files: FileDiff[]
-  pathname: string | null
-}

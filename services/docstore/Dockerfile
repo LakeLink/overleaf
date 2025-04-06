@@ -2,7 +2,7 @@
 # Instead run bin/update_build_scripts from
 # https://github.com/overleaf/internal/
 
-FROM node:16.17.1 as base
+FROM node:20.18.2 AS base
 
 WORKDIR /overleaf/services/docstore
 
@@ -10,11 +10,12 @@ WORKDIR /overleaf/services/docstore
 # (see https://googleapis.dev/nodejs/storage/latest/File.html#createWriteStream)
 RUN mkdir /home/node/.config && chown node:node /home/node/.config
 
-FROM base as app
+FROM base AS app
 
 COPY package.json package-lock.json /overleaf/
 COPY services/docstore/package.json /overleaf/services/docstore/
 COPY libraries/ /overleaf/libraries/
+COPY patches/ /overleaf/patches/
 
 RUN cd /overleaf && npm ci --quiet
 

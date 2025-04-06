@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button, ControlLabel, Form, FormGroup, Modal } from 'react-bootstrap'
 import { useTranslation } from 'react-i18next'
 import { Tag } from '../../../../../../app/src/Features/Tags/types'
-import AccessibleModal from '../../../../shared/components/accessible-modal'
 import useAsync from '../../../../shared/hooks/use-async'
 import { useProjectListContext } from '../../context/project-list-context'
 import { useRefWithAutoFocus } from '../../../../shared/hooks/use-ref-with-auto-focus'
@@ -10,6 +8,19 @@ import useSelectColor from '../../hooks/use-select-color'
 import { createTag } from '../../util/api'
 import { MAX_TAG_LENGTH } from '../../util/tag'
 import { ColorPicker } from '../color-picker/color-picker'
+import { debugConsole } from '@/utils/debugging'
+import OLModal, {
+  OLModalBody,
+  OLModalFooter,
+  OLModalHeader,
+  OLModalTitle,
+} from '@/features/ui/components/ol/ol-modal'
+import OLFormGroup from '@/features/ui/components/ol/ol-form-group'
+import OLFormLabel from '@/features/ui/components/ol/ol-form-label'
+import OLButton from '@/features/ui/components/ol/ol-button'
+import OLFormControl from '@/features/ui/components/ol/ol-form-control'
+import OLForm from '@/features/ui/components/ol/ol-form'
+import Notification from '@/shared/components/notification'
 
 type CreateTagModalProps = {
   id: string
@@ -29,7 +40,7 @@ export default function CreateTagModal({
   const { tags } = useProjectListContext()
   const { selectedColor } = useSelectColor()
   const { t } = useTranslation()
-  const { isError, runAsync, status } = useAsync<Tag>()
+  const { isLoading, isError, runAsync, status } = useAsync<Tag>()
   const { autoFocusedRef } = useRefWithAutoFocus<HTMLInputElement>()
 
   const [tagName, setTagName] = useState<string>()
@@ -39,7 +50,7 @@ export default function CreateTagModal({
     if (tagName) {
       runAsync(createTag(tagName, selectedColor))
         .then(tag => onCreate(tag))
-        .catch(console.error)
+        .catch(debugConsole.error)
     }
   }, [runAsync, tagName, selectedColor, onCreate])
 
@@ -68,59 +79,60 @@ export default function CreateTagModal({
   }
 
   return (
-    <AccessibleModal show animation onHide={onClose} id={id} backdrop="static">
-      <Modal.Header closeButton>
-        <Modal.Title>{t('create_new_tag')}</Modal.Title>
-      </Modal.Header>
+    <OLModal show animation onHide={onClose} id={id} backdrop="static">
+      <OLModalHeader closeButton>
+        <OLModalTitle>{t('create_new_tag')}</OLModalTitle>
+      </OLModalHeader>
 
-      <Modal.Body>
-        <Form name="createTagForm" onSubmit={handleSubmit}>
-          <FormGroup>
-            <input
-              ref={autoFocusedRef}
-              className="form-control"
-              type="text"
-              placeholder={t('new_tag_name')}
+      <OLModalBody>
+        <OLForm id="create-tag-modal-form" onSubmit={handleSubmit}>
+          <OLFormGroup controlId="create-tag-modal-form">
+            <OLFormLabel>{t('new_tag_name')}</OLFormLabel>
+            <OLFormControl
               name="new-tag-form-name"
-              required
               onChange={e => setTagName(e.target.value)}
+              ref={autoFocusedRef}
+              required
+              type="text"
             />
-          </FormGroup>
-          <FormGroup aria-hidden="true">
-            <ControlLabel>{t('tag_color')}</ControlLabel>:{' '}
+          </OLFormGroup>
+          <OLFormGroup aria-hidden="true">
+            <OLFormLabel>{t('tag_color')}</OLFormLabel>:{' '}
             <div>
               <ColorPicker disableCustomColor={disableCustomColor} />
             </div>
-          </FormGroup>
-        </Form>
-      </Modal.Body>
-
-      <Modal.Footer>
+          </OLFormGroup>
+        </OLForm>
         {validationError && (
-          <div className="modal-footer-left">
-            <span className="text-danger error">{validationError}</span>
-          </div>
+          <Notification type="error" content={validationError} />
         )}
         {isError && (
-          <div className="modal-footer-left">
-            <span className="text-danger error">
-              {t('generic_something_went_wrong')}
-            </span>
-          </div>
+          <Notification
+            type="error"
+            content={t('generic_something_went_wrong')}
+          />
         )}
-        <Button onClick={onClose} disabled={status === 'pending'}>
+      </OLModalBody>
+
+      <OLModalFooter>
+        <OLButton
+          variant="secondary"
+          onClick={onClose}
+          disabled={status === 'pending'}
+        >
           {t('cancel')}
-        </Button>
-        <Button
+        </OLButton>
+        <OLButton
           onClick={() => runCreateTag()}
-          bsStyle="primary"
+          variant="primary"
           disabled={
             status === 'pending' || !tagName?.length || !!validationError
           }
+          isLoading={isLoading}
         >
-          {status === 'pending' ? <>{t('creating')} &hellip;</> : t('create')}
-        </Button>
-      </Modal.Footer>
-    </AccessibleModal>
+          {t('create')}
+        </OLButton>
+      </OLModalFooter>
+    </OLModal>
   )
 }

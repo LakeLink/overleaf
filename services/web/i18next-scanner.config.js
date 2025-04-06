@@ -5,14 +5,14 @@ const typescript = require('typescript')
 module.exports = {
   input: [
     'frontend/js/**/*.{js,jsx,ts,tsx}',
-    'modules/**/*.{js,jsx,ts,tsx}',
+    'modules/*/frontend/js/**/*.{js,jsx,ts,tsx}',
     '!frontend/js/vendor/**',
   ],
   output: './',
   options: {
     sort: true,
     func: {
-      list: ['t'],
+      list: ['t', 'phrase'],
       extensions: ['.js', '.jsx'],
     },
     trans: {

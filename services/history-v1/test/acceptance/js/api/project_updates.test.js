@@ -1,6 +1,6 @@
 const BPromise = require('bluebird')
 const { expect } = require('chai')
-const fs = BPromise.promisifyAll(require('fs'))
+const fs = BPromise.promisifyAll(require('node:fs'))
 const HTTPStatus = require('http-status')
 const fetch = require('node-fetch')
 
@@ -11,6 +11,7 @@ const expectResponse = require('./support/expect_response')
 const testServer = require('./support/test_server')
 
 const core = require('overleaf-editor-core')
+const testProjects = require('./support/test_projects')
 const Change = core.Change
 const ChunkResponse = core.ChunkResponse
 const File = core.File
@@ -49,8 +50,10 @@ describe('history import', function () {
     const testProjectId = '1'
     const testFilePathname = 'main.tex'
     const testAuthors = [123, null]
-    const testTextOperation0 = TextOperation.fromJSON(['a'])
-    const testTextOperation1 = TextOperation.fromJSON([1, 'b'])
+    const testTextOperation0 = TextOperation.fromJSON({ textOperation: ['a'] })
+    const testTextOperation1 = TextOperation.fromJSON({
+      textOperation: [1, 'b'],
+    })
 
     let testSnapshot
 
@@ -188,7 +191,9 @@ describe('history import', function () {
   it('rejects invalid changes in history', function () {
     const testProjectId = '1'
     const testFilePathname = 'main.tex'
-    const testTextOperation = TextOperation.fromJSON(['a', 10])
+    const testTextOperation = TextOperation.fromJSON({
+      textOperation: ['a', 10],
+    })
 
     let testSnapshot
 
@@ -286,7 +291,7 @@ describe('history import', function () {
     const testProjectId = '1'
     const mainFilePathname = 'main.tex'
     const testFilePathname = 'test.tex'
-    const testTextOperation = TextOperation.fromJSON(['a'])
+    const testTextOperation = TextOperation.fromJSON({ textOperation: ['a'] })
     const inexistentAuthors = [1234, 5678]
     const projectVersion = '12345.0'
     const v2DocVersions = new V2DocVersions({
@@ -447,7 +452,7 @@ describe('history import', function () {
   it('rejects text operations on binary files', function () {
     const testProjectId = '1'
     const testFilePathname = 'main.tex'
-    const testTextOperation = TextOperation.fromJSON(['bb'])
+    const testTextOperation = TextOperation.fromJSON({ textOperation: ['bb'] })
 
     let testSnapshot
 
@@ -517,7 +522,9 @@ describe('history import', function () {
   it('accepts text operation on files with null characters if stringLength is present', function () {
     const testProjectId = '1'
     const mainFilePathname = 'main.tex'
-    const testTextOperation = TextOperation.fromJSON([3, 'a'])
+    const testTextOperation = TextOperation.fromJSON({
+      textOperation: [3, 'a'],
+    })
 
     let testSnapshot
 
@@ -626,15 +633,15 @@ describe('history import', function () {
 
   it('creates and returns changes with v2 author ids', function () {
     const testFilePathname = 'test.tex'
-    const testTextOperation = TextOperation.fromJSON(['a'])
+    const testTextOperation = TextOperation.fromJSON({ textOperation: ['a'] })
     const v2Authors = ['5a296963ad5e82432674c839', null]
 
     let testProjectId
 
-    return BPromise.resolve(basicAuthClient.apis.Project.initializeProject())
-      .then(response => {
-        expect(response.status).to.equal(HTTPStatus.OK)
-        testProjectId = response.obj.projectId
+    return testProjects
+      .createEmptyProject()
+      .then(projectId => {
+        testProjectId = projectId
         expect(testProjectId).to.be.a('string')
       })
       .then(() => {
@@ -699,10 +706,10 @@ describe('history import', function () {
 
     let testProjectId
 
-    return basicAuthClient.apis.Project.initializeProject()
-      .then(response => {
-        expect(response.status).to.equal(HTTPStatus.OK)
-        testProjectId = response.obj.projectId
+    return testProjects
+      .createEmptyProject()
+      .then(projectId => {
+        testProjectId = projectId
         expect(testProjectId).to.be.a('string')
       })
       .then(() => {
@@ -750,10 +757,10 @@ describe('history import', function () {
 
     let testProjectId
 
-    return basicAuthClient.apis.Project.initializeProject()
-      .then(response => {
-        expect(response.status).to.equal(HTTPStatus.OK)
-        testProjectId = response.obj.projectId
+    return testProjects
+      .createEmptyProject()
+      .then(projectId => {
+        testProjectId = projectId
         expect(testProjectId).to.be.a('string')
       })
       .then(() => {
@@ -796,10 +803,9 @@ describe('history import', function () {
   })
 
   it("returns unprocessable if end_version isn't provided", function () {
-    return basicAuthClient.apis.Project.initializeProject()
-      .then(response => {
-        expect(response.status).to.equal(HTTPStatus.OK)
-        const projectId = response.obj.projectId
+    return testProjects
+      .createEmptyProject()
+      .then(projectId => {
         expect(projectId).to.be.a('string')
         return projectId
       })
@@ -822,11 +828,8 @@ describe('history import', function () {
   })
 
   it('returns unprocessable if return_snapshot is invalid', function () {
-    return basicAuthClient.apis.Project.initializeProject()
-      .then(response => {
-        expect(response.status).to.equal(HTTPStatus.OK)
-        return response.obj.projectId
-      })
+    return testProjects
+      .createEmptyProject()
       .then(projectId => {
         // Import changes
         return basicAuthClient.apis.ProjectImport.importChanges1({

@@ -1,9 +1,8 @@
 const { callbackify } = require('util')
-const { callbackifyMultiResult } = require('../../util/promises')
-const _ = require('underscore')
+const { callbackifyMultiResult } = require('@overleaf/promise-utils')
 const logger = require('@overleaf/logger')
 const path = require('path')
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 const Settings = require('@overleaf/settings')
 const OError = require('@overleaf/o-error')
 const CooldownManager = require('../Cooldown/CooldownManager')
@@ -264,12 +263,10 @@ async function replaceFileWithDoc(projectId, fileId, newDoc) {
 async function mkdirp(projectId, path, options = {}) {
   // defaults to case insensitive paths, use options {exactCaseMatch:true}
   // to make matching case-sensitive
-  let folders = path.split('/')
-  folders = _.select(folders, folder => folder.length !== 0)
+  const folders = path.split('/').filter(folder => folder.length !== 0)
 
-  const project = await ProjectGetter.promises.getProjectWithOnlyFolders(
-    projectId
-  )
+  const project =
+    await ProjectGetter.promises.getProjectWithOnlyFolders(projectId)
   if (path === '/') {
     return { newFolders: [], folder: project.rootFolder[0] }
   }
@@ -378,11 +375,20 @@ async function moveEntity(projectId, entityId, destFolderId, entityType) {
   return { project, startPath, endPath, rev: entity.rev, changes }
 }
 
-async function deleteEntity(projectId, entityId, entityType, callback) {
+async function deleteEntity(projectId, entityId, entityType) {
   const project = await ProjectGetter.promises.getProjectWithoutLock(
     projectId,
     { name: true, rootFolder: true, overleaf: true, rootDoc_id: true }
   )
+  if (
+    entityType === 'folder' &&
+    project.rootFolder.some(
+      rootFolder => rootFolder._id.toString() === entityId.toString()
+    )
+  ) {
+    throw new Errors.NonDeletableEntityError('cannot delete root folder')
+  }
+
   const deleteRootDoc =
     project.rootDoc_id &&
     entityId &&
@@ -568,7 +574,7 @@ async function _putElement(project, folderId, element, type) {
     throw new Errors.InvalidNameError('blocked element name')
   }
   _checkValidElementName(folder, element.name)
-  element._id = ObjectId(element._id.toString())
+  element._id = new ObjectId(element._id.toString())
   const mongoPath = `${path.mongo}.${pathSegment}`
   const newProject = await Project.findOneAndUpdate(
     { _id: project._id, [path.mongo]: { $exists: true } },
@@ -621,7 +627,7 @@ function _checkValidElementName(folder, name) {
     .concat(folder.folders || [])
   for (const element of elements) {
     if (element.name === name) {
-      throw new Errors.InvalidNameError('file already exists')
+      throw new Errors.DuplicateNameError('file already exists')
     }
   }
 }
@@ -631,6 +637,26 @@ function _confirmFolder(project, folderId) {
     return project.rootFolder[0]._id
   } else {
     return folderId
+  }
+}
+
+function _checkValidFolderPath(folderPath, destinationFolderPath) {
+  if (!folderPath.endsWith('/')) {
+    folderPath += '/'
+  }
+
+  if (!destinationFolderPath.endsWith('/')) {
+    destinationFolderPath += '/'
+  }
+
+  if (destinationFolderPath === folderPath) {
+    throw new Errors.InvalidNameError('destination folder is the same as me')
+  }
+
+  if (destinationFolderPath.startsWith(folderPath)) {
+    throw new Errors.InvalidNameError(
+      'destination folder is a child folder of me'
+    )
   }
 }
 
@@ -647,18 +673,14 @@ async function _checkValidMove(
       element_id: destFolderId,
       type: 'folder',
     })
+
   // check if there is already a doc/file/folder with the same name
   // in the destination folder
   _checkValidElementName(destEntity, entity.name)
+
+  // check if the folder being moved is a parent of the destination folder
   if (/folder/.test(entityType)) {
-    const isNestedFolder =
-      destFolderPath.fileSystem.slice(0, entityPath.fileSystem.length) ===
-      entityPath.fileSystem
-    if (isNestedFolder) {
-      throw new Errors.InvalidNameError(
-        'destination folder is a child folder of me'
-      )
-    }
+    _checkValidFolderPath(entityPath.fileSystem, destFolderPath.fileSystem)
   }
 }
 

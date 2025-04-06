@@ -3,6 +3,7 @@ import {
   Decoration,
   DecorationSet,
   EditorView,
+  ViewPlugin,
   WidgetType,
 } from '@codemirror/view'
 import { SyntaxNode, Tree } from '@lezer/common'
@@ -24,9 +25,10 @@ import { EndWidget } from './visual-widgets/end'
 import {
   getEnvironmentArguments,
   getEnvironmentName,
+  getUnstarredEnvironmentName,
+  parseFigureData,
 } from '../../utils/tree-operations/environments'
 import { MathWidget } from './visual-widgets/math'
-import { GraphicsWidget } from './visual-widgets/graphics'
 import { IconBraceWidget } from './visual-widgets/icon-brace'
 import { TeXWidget } from './visual-widgets/tex'
 import {
@@ -36,18 +38,57 @@ import {
 import { centeringNodeForEnvironment } from '../../utils/tree-operations/figure'
 import { Frame, FrameWidget } from './visual-widgets/frame'
 import { DividerWidget } from './visual-widgets/divider'
-import { PreambleWidget } from './visual-widgets/preamble'
+import { Preamble, PreambleWidget } from './visual-widgets/preamble'
 import { EndDocumentWidget } from './visual-widgets/end-document'
 import { EnvironmentLineWidget } from './visual-widgets/environment-line'
-import { ListEnvironmentName } from '../../utils/tree-operations/ancestors'
+import {
+  ListEnvironmentName,
+  ancestorOfNodeWithType,
+  isDirectChildOfEnvironment,
+} from '../../utils/tree-operations/ancestors'
+import { EditableGraphicsWidget } from './visual-widgets/editable-graphics'
+import { EditableInlineGraphicsWidget } from './visual-widgets/editable-inline-graphics'
+import {
+  CloseBrace,
+  OpenBrace,
+  CloseBracket,
+  OpenBracket,
+  OptionalArgument,
+  ShortTextArgument,
+  TextArgument,
+} from '../../lezer-latex/latex.terms.mjs'
+import { FootnoteWidget } from './visual-widgets/footnote'
+import { getListItems } from '../toolbar/lists'
+import { TildeWidget } from './visual-widgets/tilde'
+import { BeginTheoremWidget } from './visual-widgets/begin-theorem'
+import { parseTheoremArguments } from '../../utils/tree-operations/theorems'
+import { IndicatorWidget } from './visual-widgets/indicator'
+import { TabularWidget } from './visual-widgets/tabular'
+import { nextSnippetField, pickedCompletion } from '@codemirror/autocomplete'
+import { skipPreambleWithCursor } from './skip-preamble-cursor'
+import { TableRenderingErrorWidget } from './visual-widgets/table-rendering-error'
+import { GraphicsWidget } from './visual-widgets/graphics'
 import { InlineGraphicsWidget } from './visual-widgets/inline-graphics'
+import { PreviewPath } from '../../../../../../types/preview-path'
+import { selectDecoratedArgument } from './select-decorated-argument'
+import {
+  generateTable,
+  ParsedTableData,
+  validateParsedTable,
+} from '../../components/table-generator/utils'
+import { debugConsole } from '@/utils/debugging'
+import { DescriptionItemWidget } from './visual-widgets/description-item'
+import {
+  createSpaceCommand,
+  hasSpaceSubstitution,
+} from '@/features/source-editor/extensions/visual/visual-widgets/space'
+import {
+  mathAncestorNode,
+  parseMathContainer,
+} from '../../utils/tree-operations/math'
 
 type Options = {
-  fileTreeManager: {
-    getPreviewByPath: (
-      path: string
-    ) => { url: string; extension: string } | null
-  }
+  previewByPath: (path: string) => PreviewPath | null
 }
 
 function shouldDecorate(
@@ -72,13 +113,17 @@ function decorateArgumentBraces(
   argumentNode: SyntaxNode | null | undefined,
   start: number,
   decorateEmptyArguments = false,
-  endWidget?: WidgetType
+  endWidget?: WidgetType,
+  braceTypes = {
+    open: OpenBrace,
+    close: CloseBrace,
+  }
 ): Range<Decoration>[] {
   if (!argumentNode) {
     return []
   }
-  const openBrace = argumentNode.getChild('OpenBrace')
-  const closeBrace = argumentNode.getChild('CloseBrace')
+  const openBrace = argumentNode.getChild(braceTypes.open)
+  const closeBrace = argumentNode.getChild(braceTypes.close)
 
   if (openBrace && closeBrace) {
     if (
@@ -91,10 +136,9 @@ function decorateArgumentBraces(
           widget: startWidget,
         }).range(start, openBrace.to),
 
-        Decoration.replace({ widget: endWidget }).range(
-          closeBrace.from,
-          closeBrace.to
-        ),
+        Decoration.replace({
+          widget: endWidget,
+        }).range(closeBrace.from, closeBrace.to),
       ]
     }
   }
@@ -105,14 +149,16 @@ const hasClosingBrace = (node: SyntaxNode) =>
   node.getChild('EnvNameGroup')?.getChild('CloseBrace')
 
 /**
+ * A state field that decorates ranges of text (including multiple lines) with Widget or Line decorations.
  * Atomic decorations replace a range of content with an uneditable widget.
  * Decorations that span multiple lines must be contained in a StateField, not a ViewPlugin.
  */
 export const atomicDecorations = (options: Options) => {
-  const getPreviewByPath = (path: string) =>
-    options.fileTreeManager.getPreviewByPath(path)
-
-  const createDecorations = (state: EditorState, tree: Tree): DecorationSet => {
+  const { previewByPath } = options
+  const createDecorations = (
+    state: EditorState,
+    tree: Tree
+  ): { decorations: DecorationSet; preamble: Preamble } => {
     const decorations: Range<Decoration>[] = []
 
     const listEnvironmentStack: ListEnvironmentName[] = []
@@ -123,79 +169,16 @@ export const atomicDecorations = (options: Options) => {
 
     let listDepth = 0
 
-    const preamble: {
-      from: number
-      to: number
-      title?: {
-        node: SyntaxNode
-        content: string
-      }
-      author?: {
-        node: SyntaxNode
-        content: string
-      }
-    } = { from: 0, to: 0 }
+    const theoremEnvironments = new Map<string, string>([
+      ['theorem', 'Theorem'],
+      ['corollary', 'Corollary'],
+      ['lemma', 'lemma'],
+      ['proof', 'Proof'],
+    ])
 
-    // find the positions of the title and author in the preamble
-    tree.iterate({
-      enter(nodeRef) {
-        if (nodeRef.type.is('DocumentEnvironment')) {
-          // Attempt to include \begin{document} in the preamble
-          preamble.to = nodeRef.node.getChild('Content')?.from ?? nodeRef.from
-          return false
-        } else if (nodeRef.type.is('Title')) {
-          const node = nodeRef.node.getChild('TextArgument')
-          if (node) {
-            const content = state.sliceDoc(node.from, node.to)
-            preamble.title = { node, content }
-          }
-        } else if (nodeRef.type.is('Author')) {
-          const node = nodeRef.node.getChild('TextArgument')
-          if (node) {
-            const content = state.sliceDoc(node.from, node.to)
-            preamble.author = { node, content }
-          }
-        }
-      },
-    })
-    if (preamble.to > 0) {
-      // hide the preamble. We use selectionIntersects directly, so that it also
-      // expands in readOnly mode.
-      const endLine = state.doc.lineAt(preamble.to).number
-      for (let lineNumber = 1; lineNumber <= endLine; ++lineNumber) {
-        const line = state.doc.line(lineNumber)
-        const classes = ['ol-cm-preamble-line']
-        if (lineNumber === 1) {
-          classes.push('ol-cm-environment-first-line')
-        }
-        if (lineNumber === endLine) {
-          classes.push('ol-cm-environment-last-line')
-        }
-        decorations.push(
-          Decoration.line({
-            class: classes.join(' '),
-          }).range(line.from)
-        )
-      }
+    let commandDefinitions = ''
 
-      const isExpanded = selectionIntersects(state.selection, preamble)
-      if (!isExpanded) {
-        decorations.push(
-          Decoration.replace({
-            widget: new PreambleWidget(preamble.to, isExpanded),
-            block: true,
-          }).range(0, preamble.to)
-        )
-      } else {
-        decorations.push(
-          Decoration.widget({
-            widget: new PreambleWidget(preamble.to, isExpanded),
-            block: true,
-            side: -1,
-          }).range(0)
-        )
-      }
-    }
+    const preamble: Preamble = { from: 0, to: 0, authors: [] }
 
     const startListEnvironment = (envName: ListEnvironmentName) => {
       if (currentListEnvironment) {
@@ -211,106 +194,205 @@ export const atomicDecorations = (options: Options) => {
       currentOrdinal = ordinalStack.pop() ?? 0
     }
 
+    let seenDocumentEnvironment = false
+
     tree.iterate({
       enter(nodeRef) {
+        if (nodeRef.node.type.is('Maketitle')) {
+          // end the preamble at \maketitle, if it's directly inside the document environment
+          const parentEnvironment = ancestorOfNodeWithType(
+            nodeRef.node,
+            '$Environment'
+          )
+          if (parentEnvironment?.type.is('DocumentEnvironment')) {
+            preamble.to = nodeRef.node.from
+          }
+        } else if (nodeRef.node.type.is('DocumentEnvironment')) {
+          // only count the first instance of DocumentEnvironment
+          if (!seenDocumentEnvironment) {
+            preamble.to =
+              nodeRef.node.getChild('Content')?.from ?? nodeRef.node.from
+            seenDocumentEnvironment = true
+          }
+        } else if (nodeRef.node.type.is('Title')) {
+          const node = nodeRef.node.getChild('TextArgument')
+          if (node) {
+            const content = state.sliceDoc(node.from, node.to)
+            preamble.title = { node, content }
+            preamble.to = nodeRef.node.to
+          }
+        } else if (nodeRef.node.type.is('Author')) {
+          const node = nodeRef.node.getChild('TextArgument')
+          if (node) {
+            const content = state.sliceDoc(node.from, node.to)
+            preamble.authors.push({ node, content })
+            preamble.to = nodeRef.node.to
+          }
+        } else if (
+          nodeRef.node.type.is('Affil') ||
+          nodeRef.node.type.is('Affiliation')
+        ) {
+          const node = nodeRef.node.getChild('TextArgument')
+          if (node) {
+            preamble.to = nodeRef.node.to
+          }
+        }
+
         if (nodeRef.type.is('$Environment')) {
-          if (shouldDecorate(state, nodeRef)) {
-            const envName = getEnvironmentName(nodeRef.node, state)
-            const hideInEnvironmentTypes = ['figure', 'table']
-            if (envName && hideInEnvironmentTypes.includes(envName)) {
-              const beginNode = nodeRef.node.getChild('BeginEnv')
-              const endNode = nodeRef.node.getChild('EndEnv')
-              if (
-                beginNode &&
-                endNode &&
-                hasClosingBrace(beginNode) &&
-                hasClosingBrace(endNode)
-              ) {
-                const beginLine = state.doc.lineAt(beginNode.from)
-                const endLine = state.doc.lineAt(endNode.from)
+          const envName = getUnstarredEnvironmentName(nodeRef.node, state)
+          const hideInEnvironmentTypes = [
+            'figure',
+            'table',
+            'verbatim',
+            'lstlisting',
+            'quote',
+            'quotation',
+            'quoting',
+            'displayquote',
+          ]
+          if (envName && hideInEnvironmentTypes.includes(envName)) {
+            const beginNode = nodeRef.node.getChild('BeginEnv')
+            const endNode = nodeRef.node.getChild('EndEnv')
+            if (
+              beginNode &&
+              endNode &&
+              hasClosingBrace(beginNode) &&
+              hasClosingBrace(endNode)
+            ) {
+              const beginLine = state.doc.lineAt(beginNode.from)
+              const endLine = state.doc.lineAt(endNode.from)
 
-                const begin = {
-                  from: beginLine.from,
-                  to: extendForwardsOverEmptyLines(state.doc, beginLine),
-                }
-                const end = {
-                  from: extendBackwardsOverEmptyLines(state.doc, endLine),
-                  to: endLine.to,
-                }
+              const begin = {
+                from: beginLine.from,
+                to: extendForwardsOverEmptyLines(state.doc, beginLine),
+              }
+              const end = {
+                from: extendBackwardsOverEmptyLines(state.doc, endLine),
+                to: endLine.to,
+              }
 
-                if (shouldDecorate(state, { from: begin.from, to: end.to })) {
+              if (shouldDecorate(state, { from: begin.from, to: end.to })) {
+                decorations.push(
+                  Decoration.replace({
+                    widget: new EnvironmentLineWidget(envName, 'begin'),
+                    block: true,
+                  }).range(begin.from, begin.to),
+                  Decoration.replace({
+                    widget: new EnvironmentLineWidget(envName, 'end'),
+                    block: true,
+                  }).range(end.from, end.to)
+                )
+
+                const centeringNode = centeringNodeForEnvironment(nodeRef)
+
+                if (centeringNode) {
+                  const line = state.doc.lineAt(centeringNode.from)
+                  const from = extendBackwardsOverEmptyLines(state.doc, line)
+                  const to = extendForwardsOverEmptyLines(state.doc, line)
+
                   decorations.push(
                     Decoration.replace({
-                      widget: new EnvironmentLineWidget(envName, 'begin'),
                       block: true,
-                    }).range(begin.from, begin.to),
-                    Decoration.replace({
-                      widget: new EnvironmentLineWidget(envName, 'end'),
-                      block: true,
-                    }).range(end.from, end.to)
+                    }).range(from, to)
                   )
-
-                  const centeringNode = centeringNodeForEnvironment(nodeRef)
-
-                  if (centeringNode) {
-                    const line = state.doc.lineAt(centeringNode.from)
-                    const from = extendBackwardsOverEmptyLines(state.doc, line)
-                    const to = extendForwardsOverEmptyLines(state.doc, line)
-
-                    decorations.push(
-                      Decoration.replace({
-                        block: true,
-                      }).range(from, to)
-                    )
-                  }
                 }
               }
-            } else if (nodeRef.type.is('ListEnvironment')) {
-              const beginNode = nodeRef.node.getChild('BeginEnv')
-              const endNode = nodeRef.node.getChild('EndEnv')
+            }
+          } else if (nodeRef.type.is('ListEnvironment')) {
+            const beginNode = nodeRef.node.getChild('BeginEnv')
+            const endNode = nodeRef.node.getChild('EndEnv')
+
+            if (
+              beginNode &&
+              endNode &&
+              hasClosingBrace(beginNode) &&
+              hasClosingBrace(endNode)
+            ) {
+              const beginLine = state.doc.lineAt(beginNode.from)
+              const endLine = state.doc.lineAt(endNode.from)
+
+              const begin = {
+                from: beginLine.from,
+                to: extendForwardsOverEmptyLines(state.doc, beginLine),
+              }
+              const end = {
+                from: extendBackwardsOverEmptyLines(state.doc, endLine),
+                to: endLine.to,
+              }
 
               if (
-                beginNode &&
-                endNode &&
-                hasClosingBrace(beginNode) &&
-                hasClosingBrace(endNode)
+                !selectionIntersects(state.selection, begin) &&
+                !selectionIntersects(state.selection, end) &&
+                getListItems(nodeRef.node).length > 0 // not empty
               ) {
-                const beginLine = state.doc.lineAt(beginNode.from)
-                const endLine = state.doc.lineAt(endNode.from)
+                decorations.push(
+                  Decoration.replace({
+                    block: true,
+                  }).range(begin.from, begin.to),
+                  Decoration.replace({
+                    block: true,
+                  }).range(end.from, end.to)
+                )
+              }
+            }
+          } else if (nodeRef.type.is('TabularEnvironment')) {
+            if (shouldDecorate(state, nodeRef)) {
+              const tabularNode = nodeRef.node
+              const tableNode = ancestorOfNodeWithType(
+                tabularNode,
+                'TableEnvironment'
+              )
+              const directChild = isDirectChildOfEnvironment(
+                tabularNode.parent,
+                tableNode
+              )
 
-                const begin = {
-                  from: beginLine.from,
-                  to: extendForwardsOverEmptyLines(state.doc, beginLine),
-                }
-                const end = {
-                  from: extendBackwardsOverEmptyLines(state.doc, endLine),
-                  to: endLine.to,
-                }
+              let parsedTableData: ParsedTableData | null = null
+              let validTable = false
+              try {
+                parsedTableData = generateTable(tabularNode, state)
+                validTable = validateParsedTable(parsedTableData)
+              } catch (e) {
+                debugConsole.error(e)
+              }
 
-                if (
-                  !selectionIntersects(state.selection, begin) &&
-                  !selectionIntersects(state.selection, end)
-                ) {
-                  decorations.push(
-                    Decoration.replace({
-                      block: true,
-                    }).range(begin.from, begin.to),
-                    Decoration.replace({
-                      block: true,
-                    }).range(end.from, end.to)
-                  )
-                }
+              if (parsedTableData && validTable) {
+                decorations.push(
+                  Decoration.replace({
+                    widget: new TabularWidget(
+                      parsedTableData,
+                      tabularNode,
+                      state.doc.sliceString(
+                        (tableNode ?? tabularNode).from,
+                        (tableNode ?? tabularNode).to
+                      ),
+                      tableNode,
+                      directChild
+                    ),
+                    block: true,
+                  }).range(nodeRef.from, nodeRef.to)
+                )
+                return false
+              } else {
+                // Show error message
+                decorations.push(
+                  Decoration.widget({
+                    widget: new TableRenderingErrorWidget(tableNode),
+                    block: true,
+                  }).range(nodeRef.from, nodeRef.from)
+                )
               }
             }
           }
         } else if (nodeRef.type.is('BeginEnv')) {
           // the beginning of an environment, with an environment name argument
-          const envName = getEnvironmentName(nodeRef.node, state)
+          const envName = getUnstarredEnvironmentName(nodeRef.node, state)
 
           if (envName) {
             switch (envName) {
               case 'itemize':
               case 'enumerate':
+              case 'description':
                 startListEnvironment(envName)
                 listDepth++
                 break
@@ -381,7 +463,28 @@ export const atomicDecorations = (options: Options) => {
                 }
                 break
               default:
-                // do nothing
+                {
+                  const theoremName = theoremEnvironments.get(envName)
+
+                  if (theoremName && shouldDecorate(state, nodeRef)) {
+                    const argumentNode = nodeRef.node
+                      .getChild('OptionalArgument')
+                      ?.getChild('ShortOptionalArg')
+
+                    decorations.push(
+                      Decoration.replace({
+                        widget: new BeginTheoremWidget(
+                          envName,
+                          theoremName,
+                          argumentNode
+                        ),
+                        block: true,
+                      }).range(nodeRef.from, nodeRef.to)
+                    )
+                  }
+
+                  // do nothing
+                }
                 break
             }
           }
@@ -393,6 +496,7 @@ export const atomicDecorations = (options: Options) => {
             switch (envName) {
               case 'itemize':
               case 'enumerate':
+              case 'description':
                 if (currentListEnvironment === envName) {
                   endListEnvironment()
                 }
@@ -430,23 +534,37 @@ export const atomicDecorations = (options: Options) => {
                 }
                 break
               default:
+                if (theoremEnvironments.has(envName)) {
+                  if (shouldDecorate(state, nodeRef)) {
+                    decorations.push(
+                      Decoration.replace({
+                        widget: new EndWidget(),
+                        block: true,
+                      }).range(nodeRef.from, nodeRef.to)
+                    )
+                  }
+                }
                 // do nothing
                 break
             }
           }
-        } else if (nodeRef.type.is('$SectioningCommand')) {
+        } else if (nodeRef.type.is('$SectioningCtrlSeq')) {
           const ancestorNode = ancestorNodeOfType(
             state,
             nodeRef.to,
             'SectioningCommand'
           )
           if (ancestorNode) {
-            const shouldShowBraces = !shouldDecorate(state, ancestorNode)
             // a section (or subsection, etc) command
             const argumentNode = ancestorNode.getChild('SectioningArgument')
             if (argumentNode) {
-              const braces = argumentNode.getChildren('$Brace')
-              if (braces.length !== 2) {
+              const openBrace = argumentNode.getChild(OpenBrace)
+              const closeBrace = argumentNode.getChild(CloseBrace)
+              if (!openBrace || !closeBrace) {
+                return false
+              }
+              const sectionCtrlSeqNode = ancestorNode.getChild('$CtrlSeq')
+              if (!sectionCtrlSeqNode) {
                 return false
               }
               const titleNode = argumentNode.getChild('LongArg')
@@ -458,17 +576,23 @@ export const atomicDecorations = (options: Options) => {
                 return false
               }
 
+              const showBraces =
+                selectionIntersects(state.selection, sectionCtrlSeqNode) ||
+                selectionIntersects(state.selection, openBrace) ||
+                selectionIntersects(state.selection, closeBrace)
+
               decorations.push(
                 Decoration.replace({
-                  widget: new BraceWidget(shouldShowBraces ? '}' : ''),
-                }).range(braces[1].from, braces[1].to)
+                  widget: new BraceWidget(showBraces ? '{' : ''),
+                }).range(nodeRef.from, titleNode.from)
               )
 
               decorations.push(
                 Decoration.replace({
-                  widget: new BraceWidget(shouldShowBraces ? '{' : ''),
-                }).range(nodeRef.from, titleNode.from)
+                  widget: new BraceWidget(showBraces ? '}' : ''),
+                }).range(closeBrace.from, closeBrace.to)
               )
+
               return false
             }
           }
@@ -494,6 +618,54 @@ export const atomicDecorations = (options: Options) => {
           }
 
           return false // no markup in verbatim content
+        } else if (
+          nodeRef.type.is('NewCommand') ||
+          nodeRef.type.is('RenewCommand') ||
+          nodeRef.type.is('Def')
+        ) {
+          const nameNode =
+            nodeRef.node.getChild('LiteralArgContent') ??
+            nodeRef.node.getChild('Csname') ??
+            nodeRef.node.getChild('CtrlSym')
+          if (nameNode) {
+            const name = state.sliceDoc(nameNode.from, nameNode.to).trim()
+            if (/^\\\w+/.test(name)) {
+              const content = state.sliceDoc(nodeRef.from, nodeRef.to)
+              if (content) {
+                commandDefinitions += `${content}\n`
+              }
+            }
+          }
+        } else if (
+          nodeRef.type.is('RenewEnvironment') ||
+          nodeRef.type.is('NewEnvironment')
+        ) {
+          const nameNode = nodeRef.node.getChild('LiteralArgContent')
+          if (nameNode) {
+            const name = state.sliceDoc(nameNode.from, nameNode.to).trim()
+            if (/^\w+/.test(name)) {
+              const content = state.sliceDoc(nodeRef.from, nodeRef.to)
+              if (content) {
+                commandDefinitions += `${content}\n`
+              }
+            }
+          }
+        } else if (nodeRef.type.is('Let')) {
+          const commandNodes = nodeRef.node.getChildren('Csname')
+          if (commandNodes.length !== 2) {
+            return
+          }
+          const nameNode = commandNodes[0]
+          if (nameNode) {
+            // We support more flexible names in let (Csname) than in newcommand
+            const name = state.sliceDoc(nameNode.from, nameNode.to).trim()
+            if (name.length > 1 && name.startsWith('\\')) {
+              const content = state.sliceDoc(nodeRef.from, nodeRef.to)
+              if (content) {
+                commandDefinitions += `${content}\n`
+              }
+            }
+          }
         } else if (nodeRef.type.is('Cite')) {
           // \cite command with a bibkey argument
           if (shouldDecorate(state, nodeRef)) {
@@ -513,19 +685,24 @@ export const atomicDecorations = (options: Options) => {
           return false // no markup in cite content
         } else if (nodeRef.type.is('Ref')) {
           // \ref command with a ref label argument
-          if (shouldDecorate(state, nodeRef)) {
-            const argumentNode = nodeRef.node
-              .getChild('RefArgument')
-              ?.getChild('ShortTextArgument')
 
-            decorations.push(
-              ...decorateArgumentBraces(
-                new IconBraceWidget('🏷'),
-                argumentNode,
-                nodeRef.from
-              )
+          const argumentNode = nodeRef.node
+            .getChild('RefArgument')
+            ?.getChild('ShortTextArgument')
+
+          const shouldShowBraces =
+            !shouldDecorate(state, nodeRef) ||
+            argumentNode?.from === argumentNode?.to
+
+          decorations.push(
+            ...decorateArgumentBraces(
+              new IconBraceWidget(shouldShowBraces ? '🏷{' : '🏷'),
+              argumentNode,
+              nodeRef.from,
+              true,
+              new BraceWidget(shouldShowBraces ? '}' : '')
             )
-          }
+          )
 
           return false // no markup in ref content
         } else if (nodeRef.type.is('Label')) {
@@ -587,12 +764,7 @@ export const atomicDecorations = (options: Options) => {
           return false // no markup in input content
         } else if (nodeRef.type.is('Math')) {
           // math equations
-
-          const ancestorNode =
-            ancestorNodeOfType(state, nodeRef.from, '$MathContainer') ||
-            ancestorNodeOfType(state, nodeRef.from, 'EquationEnvironment') ||
-            // NOTE: EquationArrayEnvironment can be nested inside EquationEnvironment
-            ancestorNodeOfType(state, nodeRef.from, 'EquationArrayEnvironment')
+          const ancestorNode = mathAncestorNode(state, nodeRef.from)
 
           if (
             ancestorNode &&
@@ -600,68 +772,96 @@ export const atomicDecorations = (options: Options) => {
               ? shouldDecorateFromLineEdges(state, ancestorNode)
               : shouldDecorate(state, ancestorNode))
           ) {
-            // the content of the Math element, without braces
-            const innerContent = state.doc
-              .sliceString(nodeRef.from, nodeRef.to)
-              .trim()
+            const math = parseMathContainer(state, nodeRef, ancestorNode)
 
-            // only replace when there's content inside the braces
-            if (innerContent.length) {
-              let content = innerContent
-              let displayMode = false
-
-              if (ancestorNode.type.is('$Environment')) {
-                const environmentName = getEnvironmentName(ancestorNode, state)
-                if (environmentName) {
-                  // use the outer content of environments that MathJax supports
-                  // https://docs.mathjax.org/en/latest/input/tex/macros/index.html#environments
-                  if (
-                    environmentName !== 'math' &&
-                    environmentName !== 'displaymath'
-                  ) {
-                    content = state.doc
-                      .sliceString(ancestorNode.from, ancestorNode.to)
-                      .trim()
-                  }
-
-                  if (environmentName !== 'math') {
-                    displayMode = true
-                  }
-                }
-              } else {
-                if (
-                  ancestorNode.type.is('BracketMath') ||
-                  Boolean(ancestorNode.getChild('DisplayMath'))
-                ) {
-                  displayMode = true
-                }
-              }
-
+            if (math && math.passToMathJax) {
               decorations.push(
                 Decoration.replace({
-                  widget: new MathWidget(content, displayMode),
-                  block: displayMode,
+                  widget: new MathWidget(
+                    math.content,
+                    math.displayMode,
+                    commandDefinitions
+                  ),
+                  block: math.displayMode,
                 }).range(ancestorNode.from, ancestorNode.to)
               )
-              return false
             }
           }
+
+          return false // never decorate inside math
         } else if (nodeRef.type.is('HrefCommand')) {
           // a hyperlink with URL and content arguments
-          if (shouldDecorate(state, nodeRef)) {
-            const urlArgument = nodeRef.node.getChild('UrlArgument')
-            const textArgument = nodeRef.node.getChild('ShortTextArgument')
+          const urlArgumentNode = nodeRef.node.getChild('UrlArgument')
+          const urlNode = urlArgumentNode?.getChild('LiteralArgContent')
+          const contentArgumentNode = nodeRef.node.getChild('ShortTextArgument')
+          const contentNode = contentArgumentNode?.getChild('ShortArg')
 
-            if (urlArgument) {
+          if (
+            urlArgumentNode &&
+            urlNode &&
+            contentArgumentNode &&
+            contentNode
+          ) {
+            const shouldShowBraces =
+              !shouldDecorate(state, nodeRef) ||
+              contentNode.from === contentNode.to
+
+            const url = state.sliceDoc(urlNode.from, urlNode.to)
+
+            // avoid decorating when the URL spans multiple lines, as the argument node is probably unclosed
+            if (!url.includes('\n')) {
               decorations.push(
                 ...decorateArgumentBraces(
-                  new BraceWidget(),
-                  textArgument,
-                  nodeRef.from
+                  new BraceWidget(shouldShowBraces ? '{' : ''),
+                  contentArgumentNode,
+                  nodeRef.from,
+                  true,
+                  new BraceWidget(shouldShowBraces ? '}' : '')
                 )
               )
             }
           }
+        } else if (nodeRef.type.is('UrlCommand')) {
+          // a hyperlink with URL and content arguments
+          const argumentNode = nodeRef.node.getChild('UrlArgument')
+
+          if (argumentNode) {
+            const contentNode = argumentNode.getChild('LiteralArgContent')
+
+            const shouldShowBraces =
+              !shouldDecorate(state, nodeRef) ||
+              contentNode?.from === contentNode?.to
+
+            decorations.push(
+              ...decorateArgumentBraces(
+                new BraceWidget(shouldShowBraces ? '{' : ''),
+                argumentNode,
+                nodeRef.from,
+                false,
+                new BraceWidget(shouldShowBraces ? '}' : '')
+              )
+            )
+          }
+        } else if (nodeRef.type.is('Tilde')) {
+          // a tilde (non-breaking space)
+          if (shouldDecorate(state, nodeRef)) {
+            decorations.push(
+              Decoration.replace({
+                widget: new TildeWidget(),
+              }).range(nodeRef.from, nodeRef.to)
+            )
+          }
+        } else if (nodeRef.type.is('LineBreak')) {
+          // line break
+          const optionalArgument = nodeRef.node.getChild('OptionalArgument')
+          if (!optionalArgument || shouldDecorate(state, optionalArgument)) {
+            decorations.push(
+              Decoration.replace({
+                widget: new IndicatorWidget('\u21A9'),
+              }).range(nodeRef.from, nodeRef.to)
+            )
+          }
+          return false
         } else if (nodeRef.type.is('Caption')) {
           if (shouldDecorate(state, nodeRef)) {
             // a caption
@@ -698,6 +898,9 @@ export const atomicDecorations = (options: Options) => {
                   environmentNode &&
                     centeringNodeForEnvironment(environmentNode)
                 )
+                const figureData = environmentNode
+                  ? parseFigureData(environmentNode, state)
+                  : null
 
                 const line = state.doc.lineAt(nodeRef.from)
 
@@ -705,23 +908,31 @@ export const atomicDecorations = (options: Options) => {
                   line.text.trim().length === nodeRef.to - nodeRef.from
 
                 if (lineContainsOnlyNode) {
+                  const Widget = state.readOnly
+                    ? GraphicsWidget
+                    : EditableGraphicsWidget
                   decorations.push(
                     Decoration.replace({
-                      widget: new GraphicsWidget(
+                      widget: new Widget(
                         filePath,
-                        getPreviewByPath,
-                        centered
+                        previewByPath,
+                        centered,
+                        figureData
                       ),
                       block: true,
                     }).range(line.from, line.to)
                   )
                 } else {
+                  const Widget = state.readOnly
+                    ? InlineGraphicsWidget
+                    : EditableInlineGraphicsWidget
                   decorations.push(
                     Decoration.replace({
-                      widget: new InlineGraphicsWidget(
+                      widget: new Widget(
                         filePath,
-                        getPreviewByPath,
-                        centered
+                        previewByPath,
+                        centered,
+                        figureData
                       ),
                     }).range(nodeRef.from, nodeRef.to)
                   )
@@ -730,6 +941,23 @@ export const atomicDecorations = (options: Options) => {
 
               return false
             }
+          }
+        } else if (nodeRef.type.is('Maketitle')) {
+          if (shouldDecorate(state, nodeRef)) {
+            const line = state.doc.lineAt(nodeRef.from)
+            const from = extendBackwardsOverEmptyLines(state.doc, line)
+            const { to } = state.doc.lineAt(nodeRef.to)
+
+            if (shouldDecorate(state, { from, to })) {
+              decorations.push(
+                Decoration.replace({
+                  widget: new MakeTitleWidget(preamble),
+                  block: true,
+                }).range(from, to)
+              )
+            }
+
+            return false
           }
         } else if (nodeRef.type.is('Item')) {
           // only decorate \item inside a list
@@ -740,22 +968,108 @@ export const atomicDecorations = (options: Options) => {
               state.sliceDoc(line.from, nodeRef.from)
             )
             const from = onlySpaceBeforeNode ? line.from : nodeRef.from
-            decorations.push(
-              Decoration.replace({
-                widget: new ItemWidget(
-                  currentListEnvironment || 'document',
-                  currentOrdinal,
-                  listDepth
-                ),
-              }).range(from, nodeRef.to)
+
+            if (currentListEnvironment === 'description') {
+              const argumentNode = nodeRef.node.getChild(OptionalArgument)
+              const to = argumentNode ? argumentNode.from : nodeRef.to
+
+              const onlySpaceAfterNode =
+                !argumentNode &&
+                /^\s*$/.test(state.sliceDoc(nodeRef.to, line.to))
+
+              if (!onlySpaceAfterNode) {
+                // decorate the \item command and subsequent whitespace, if there is other content on the line
+                decorations.push(
+                  Decoration.replace({
+                    widget: new DescriptionItemWidget(listDepth),
+                  }).range(from, to)
+                )
+              }
+
+              if (argumentNode) {
+                // decorate the optional argument
+                const decorateBrackets = shouldDecorate(state, argumentNode)
+
+                decorations.push(
+                  ...decorateArgumentBraces(
+                    new BraceWidget(decorateBrackets ? '' : '['),
+                    argumentNode,
+                    from,
+                    false,
+                    new BraceWidget(decorateBrackets ? '' : ']'),
+                    { open: OpenBracket, close: CloseBracket }
+                  )
+                )
+              }
+            } else {
+              decorations.push(
+                Decoration.replace({
+                  widget: new ItemWidget(
+                    currentListEnvironment || 'document',
+                    currentOrdinal,
+                    listDepth
+                  ),
+                }).range(from, nodeRef.to)
+              )
+              return false
+            }
+          }
+        } else if (nodeRef.type.is('NewTheoremCommand')) {
+          const result = parseTheoremArguments(state, nodeRef.node)
+          if (result) {
+            const { name, label } = result
+            theoremEnvironments.set(name, label)
+          }
+        } else if (
+          nodeRef.type.is('TextColorCommand') ||
+          nodeRef.type.is('ColorBoxCommand')
+        ) {
+          if (shouldDecorate(state, nodeRef)) {
+            const colorArgumentNode = nodeRef.node.getChild(ShortTextArgument)
+            const contentArgumentNode = nodeRef.node.getChild(TextArgument)
+            if (colorArgumentNode && contentArgumentNode) {
+              // command name and opening brace
+              decorations.push(
+                ...decorateArgumentBraces(
+                  new BraceWidget(),
+                  contentArgumentNode,
+                  nodeRef.from
+                )
+              )
+            }
+          }
+        } else if (nodeRef.type.is('$ToggleTextFormattingCommand')) {
+          // markup that can be toggled using toolbar buttons/keyboard shortcuts
+          const textArgumentNode = nodeRef.node.getChild('TextArgument')
+          const argumentText = textArgumentNode?.getChild('LongArg')
+          const shouldShowBraces =
+            !shouldDecorate(state, nodeRef) ||
+            argumentText?.from === argumentText?.to
+          decorations.push(
+            ...decorateArgumentBraces(
+              new BraceWidget(shouldShowBraces ? '{' : ''),
+              textArgumentNode,
+              nodeRef.from,
+              true,
+              new BraceWidget(shouldShowBraces ? '}' : '')
             )
-            return false
+          )
+        } else if (nodeRef.type.is('$OtherTextFormattingCommand')) {
+          // markup that can't be toggled using toolbar buttons/keyboard shortcuts
+          const textArgumentNode = nodeRef.node.getChild('TextArgument')
+          if (shouldDecorate(state, nodeRef)) {
+            decorations.push(
+              ...decorateArgumentBraces(
+                new BraceWidget(),
+                textArgumentNode,
+                nodeRef.from
+              )
+            )
           }
         } else if (nodeRef.type.is('UnknownCommand')) {
           // a command that's not defined separately by the grammar
           const commandNode = nodeRef.node
           const commandNameNode = commandNode.getChild('$CtrlSeq')
-          const textArgumentNode = commandNode.getChild('TextArgument')
 
           if (commandNameNode) {
             const commandName = state.doc
@@ -763,49 +1077,56 @@ export const atomicDecorations = (options: Options) => {
               .trim()
 
             if (commandName.length > 0) {
-              if (
-                // markup that can be toggled using toolbar buttons/keyboard shortcuts
-                ['\\textbf', '\\textit', '\\underline'].includes(commandName)
-              ) {
-                const argumentText = textArgumentNode?.getChild('LongArg')
-                const shouldShowBraces =
-                  !shouldDecorate(state, nodeRef) ||
-                  argumentText?.from === argumentText?.to
-                decorations.push(
-                  ...decorateArgumentBraces(
-                    new BraceWidget(shouldShowBraces ? '{' : ''),
-                    textArgumentNode,
-                    nodeRef.from,
-                    true,
-                    new BraceWidget(shouldShowBraces ? '}' : '')
-                  )
-                )
-              } else if (
-                // markup that can't be toggled using toolbar buttons/keyboard shortcuts
-                ['\\textsc', '\\texttt', '\\sout', '\\emph'].includes(
-                  commandName
-                )
-              ) {
-                if (shouldDecorate(state, nodeRef)) {
-                  decorations.push(
-                    ...decorateArgumentBraces(
-                      new BraceWidget(),
-                      textArgumentNode,
-                      nodeRef.from
-                    )
-                  )
-                }
-              } else if (commandName === '\\url') {
+              const textArgumentNode = commandNode.getChild('TextArgument')
+
+              if (commandName === '\\keywords') {
                 if (shouldDecorate(state, nodeRef)) {
                   // command name and opening brace
                   decorations.push(
                     ...decorateArgumentBraces(
-                      new BraceWidget(),
+                      new BraceWidget('keywords: '),
                       textArgumentNode,
                       nodeRef.from
                     )
                   )
                   return false
+                }
+              } else if (
+                commandName === '\\footnote' ||
+                commandName === '\\endnote'
+              ) {
+                if (textArgumentNode) {
+                  if (
+                    state.readOnly &&
+                    selectionIntersects(state.selection, nodeRef)
+                  ) {
+                    // a special case for a read-only document:
+                    // always display the content, styled differently from the main content.
+                    decorations.push(
+                      ...decorateArgumentBraces(
+                        new BraceWidget(),
+                        textArgumentNode,
+                        nodeRef.from
+                      ),
+                      Decoration.mark({
+                        class: 'ol-cm-footnote ol-cm-footnote-view',
+                      }).range(textArgumentNode.from, textArgumentNode.to)
+                    )
+                  } else {
+                    if (shouldDecorate(state, nodeRef)) {
+                      // collapse the footnote when the selection is outside it
+                      decorations.push(
+                        Decoration.replace({
+                          widget: new FootnoteWidget(
+                            commandName === '\\footnote'
+                              ? 'footnote'
+                              : 'endnote'
+                          ),
+                        }).range(nodeRef.from, nodeRef.to)
+                      )
+                      return false
+                    }
+                  }
                 }
               } else if (commandName === '\\LaTeX') {
                 if (shouldDecorate(state, nodeRef)) {
@@ -825,18 +1146,28 @@ export const atomicDecorations = (options: Options) => {
                   )
                   return false
                 }
-              } else if (commandName === '\\maketitle') {
-                if (shouldDecorate(state, nodeRef)) {
-                  const line = state.doc.lineAt(nodeRef.from)
-                  const from = extendBackwardsOverEmptyLines(state.doc, line)
-                  const to = extendForwardsOverEmptyLines(state.doc, line)
+              } else if (commandName === '\\ce') {
+                // Chemical equation/formula, from the `mhchem` CTAN package.
+                // Handled by the MathJaX mhchem extension:
+                // https://docs.mathjax.org/en/latest/input/tex/extensions/mhchem.html
+                if (textArgumentNode && shouldDecorate(state, nodeRef)) {
+                  const innerContent = state.doc
+                    .sliceString(
+                      textArgumentNode.from + 1,
+                      textArgumentNode.to - 1
+                    )
+                    .trim()
 
-                  if (shouldDecorate(state, { from, to })) {
+                  if (innerContent.length) {
+                    const outerContent = state.doc.sliceString(
+                      nodeRef.from,
+                      nodeRef.to
+                    )
+
                     decorations.push(
                       Decoration.replace({
-                        widget: new MakeTitleWidget(preamble),
-                        block: true,
-                      }).range(from, to)
+                        widget: new MathWidget(outerContent, false),
+                      }).range(nodeRef.from, nodeRef.to)
                     )
                   }
 
@@ -854,6 +1185,18 @@ export const atomicDecorations = (options: Options) => {
                     return false
                   }
                 }
+              } else if (hasSpaceSubstitution(commandName)) {
+                if (shouldDecorate(state, nodeRef)) {
+                  const replacement = createSpaceCommand(commandName)
+                  if (replacement) {
+                    decorations.push(
+                      Decoration.replace({
+                        widget: replacement,
+                      }).range(nodeRef.from, nodeRef.to)
+                    )
+                    return false
+                  }
+                }
               }
             }
           }
@@ -861,22 +1204,69 @@ export const atomicDecorations = (options: Options) => {
       },
     })
 
-    return Decoration.set(decorations, true)
-  }
+    if (preamble.to > 0) {
+      // add environmentclass names to each line of the preamble
+      // note: this should be in markDecorations,
+      // but the preamble extents are calculated in this extension.
+      const endLine = state.doc.lineAt(preamble.to).number
+      for (let lineNumber = 1; lineNumber <= endLine; ++lineNumber) {
+        const line = state.doc.line(lineNumber)
+        const classes = ['ol-cm-preamble-line']
+        if (lineNumber === 1) {
+          classes.push('ol-cm-environment-first-line')
+        }
+        if (lineNumber === endLine) {
+          classes.push('ol-cm-environment-last-line')
+        }
+        decorations.push(
+          Decoration.line({
+            class: classes.join(' '),
+          }).range(line.from)
+        )
+      }
 
-  let previousTree: Tree
+      // hide the preamble. We use selectionIntersects directly, so that it also
+      // expands in readOnly mode.
+      const isExpanded = selectionIntersects(state.selection, preamble)
+      if (!isExpanded) {
+        decorations.push(
+          Decoration.replace({
+            widget: new PreambleWidget(isExpanded),
+            block: true,
+          }).range(0, preamble.to)
+        )
+      } else {
+        decorations.push(
+          Decoration.widget({
+            widget: new PreambleWidget(isExpanded),
+            block: true,
+            side: -1,
+          }).range(0)
+        )
+      }
+    }
+    return {
+      decorations: Decoration.set(decorations, true),
+      preamble,
+    }
+  }
 
   return [
     StateField.define<{
       mousedown: boolean
       decorations: DecorationSet
+      preamble: Preamble
+      previousTree: Tree
     }>({
       create(state) {
-        previousTree = syntaxTree(state)
+        const previousTree = syntaxTree(state)
+        const { decorations, preamble } = createDecorations(state, previousTree)
 
         return {
           mousedown: false,
-          decorations: createDecorations(state, previousTree),
+          decorations,
+          preamble,
+          previousTree,
         }
       },
       update(value, tr) {
@@ -884,33 +1274,37 @@ export const atomicDecorations = (options: Options) => {
           // store the "mousedown" value when it changes
           if (effect.is(mouseDownEffect)) {
             value = {
+              ...value,
               mousedown: effect.value,
-              decorations: value.decorations, // unchanged
             }
           }
         }
 
         const tree = syntaxTree(tr.state)
         if (
-          tree.type === previousTree.type &&
+          tree.type === value.previousTree.type &&
           tree.length < tr.state.doc.length
         ) {
           // still parsing
           value = {
-            mousedown: value.mousedown, // unchanged
+            ...value,
             decorations: value.decorations.map(tr.changes),
           }
         } else if (
           // only update the decorations when the mouse is not making a selection
           !value.mousedown &&
-          (tree !== previousTree || tr.selection || hasMouseDownEffect(tr))
+          (tree !== value.previousTree ||
+            tr.selection ||
+            hasMouseDownEffect(tr))
         ) {
-          // tree changed
-          previousTree = tree
+          // tree changed, or selection changed, or mousedown ended
           // TODO: update the existing decorations for the changed range(s)?
+          const { decorations, preamble } = createDecorations(tr.state, tree)
           value = {
-            mousedown: value.mousedown, // unchanged
-            decorations: createDecorations(tr.state, tree),
+            ...value,
+            decorations,
+            preamble,
+            previousTree: tree,
           }
         }
 
@@ -920,6 +1314,19 @@ export const atomicDecorations = (options: Options) => {
         return [
           EditorView.decorations.from(field, field => field.decorations),
           EditorView.atomicRanges.from(field, value => () => value.decorations),
+          ViewPlugin.define(view => {
+            return {
+              update(update) {
+                for (const tr of update.transactions) {
+                  if (tr.annotation(pickedCompletion)?.label === '\\href{}{}') {
+                    window.setTimeout(() => nextSnippetField(view))
+                  }
+                }
+              },
+            }
+          }),
+          skipPreambleWithCursor(field),
+          selectDecoratedArgument(field),
         ]
       },
     }),

@@ -5,10 +5,35 @@ import {
   cleanUpContext,
   renderWithSubscriptionDashContext,
 } from '../../helpers/render-with-subscription-dash-context'
+import { groupPlans, plans } from '../../fixtures/plans'
+import { annualActiveSubscription } from '../../fixtures/subscriptions'
 
 describe('<SubscriptionDashboard />', function () {
   afterEach(function () {
     cleanUpContext()
+  })
+
+  describe('With an active subscription', function () {
+    beforeEach(function () {
+      renderWithSubscriptionDashContext(<SubscriptionDashboard />, {
+        metaTags: [
+          { name: 'ol-plans', value: plans },
+          {
+            name: 'ol-groupPlans',
+            value: groupPlans,
+          },
+          { name: 'ol-subscription', value: annualActiveSubscription },
+          {
+            name: 'ol-recommendedCurrency',
+            value: 'USD',
+          },
+        ],
+      })
+    })
+
+    it('renders the "Get the most from your subscription" text', function () {
+      screen.getByText(/get the most from your Overleaf subscription/i)
+    })
   })
 
   describe('Free Plan', function () {

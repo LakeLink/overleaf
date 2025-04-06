@@ -1,34 +1,82 @@
-import { useState } from 'react'
-import { Alert } from 'react-bootstrap'
+import { ElementType } from 'react'
 import { useTranslation } from 'react-i18next'
 import importOverleafModules from '../../../../macros/import-overleaf-module.macro'
 import { useSSOContext, SSOSubscription } from '../context/sso-context'
 import { SSOLinkingWidget } from './linking/sso-widget'
 import getMeta from '../../../utils/meta'
+import { useBroadcastUser } from '@/shared/hooks/user-channel/use-broadcast-user'
+import OLNotification from '@/features/ui/components/ol/ol-notification'
+
+const availableIntegrationLinkingWidgets = importOverleafModules(
+  'integrationLinkingWidgets'
+) as any[]
+const availableReferenceLinkingWidgets = importOverleafModules(
+  'referenceLinkingWidgets'
+) as any[]
+const availableLangFeedbackLinkingWidgets = importOverleafModules(
+  'langFeedbackLinkingWidgets'
+) as any[]
 
 function LinkingSection() {
+  useBroadcastUser()
   const { t } = useTranslation()
   const { subscriptions } = useSSOContext()
-  const ssoErrorMessage = getMeta('ol-ssoErrorMessage') as string
-  const projectSyncSuccessMessage = getMeta(
-    'ol-projectSyncSuccessMessage'
-  ) as string
-  const [integrationLinkingWidgets] = useState<any[]>(
-    () =>
-      getMeta('integrationLinkingWidgets') ||
-      importOverleafModules('integrationLinkingWidgets')
-  )
-  const [referenceLinkingWidgets] = useState<any[]>(
-    () =>
-      getMeta('referenceLinkingWidgets') ||
-      importOverleafModules('referenceLinkingWidgets')
+  const ssoErrorMessage = getMeta('ol-ssoErrorMessage')
+  const cannotUseAi = getMeta('ol-cannot-use-ai')
+  const projectSyncSuccessMessage = getMeta('ol-projectSyncSuccessMessage')
+
+  // hide linking widgets in CI
+  const integrationLinkingWidgets = getMeta('ol-hideLinkingWidgets')
+    ? []
+    : availableIntegrationLinkingWidgets
+  const referenceLinkingWidgets = getMeta('ol-hideLinkingWidgets')
+    ? []
+    : availableReferenceLinkingWidgets
+  const langFeedbackLinkingWidgets = getMeta('ol-hideLinkingWidgets')
+    ? []
+    : availableLangFeedbackLinkingWidgets
+
+  const oauth2ServerComponents = importOverleafModules('oauth2Server') as {
+    import: { default: ElementType }
+    path: string
+  }[]
+
+  const renderSyncSection =
+    getMeta('ol-isSaas') || getMeta('ol-gitBridgeEnabled')
+
+  const allIntegrationLinkingWidgets = integrationLinkingWidgets.concat(
+    oauth2ServerComponents
   )
 
-  const hasIntegrationLinkingSection = integrationLinkingWidgets.length
+  // since we only have Writefull here currently, we should hide the whole section if they cant use ai
+  const haslangFeedbackLinkingWidgets =
+    langFeedbackLinkingWidgets.length && !cannotUseAi
+  const hasIntegrationLinkingSection =
+    renderSyncSection && allIntegrationLinkingWidgets.length
   const hasReferencesLinkingSection = referenceLinkingWidgets.length
+
+  // Filter out SSO providers that are not allowed to be linked by
+  // managed users. Allow unlinking them if they are already linked.
+  const hideGoogleSSO = getMeta('ol-cannot-link-google-sso')
+  const hideOtherThirdPartySSO = getMeta('ol-cannot-link-other-third-party-sso')
+
+  for (const providerId in subscriptions) {
+    const isLinked = subscriptions[providerId].linked
+    if (providerId === 'google') {
+      if (hideGoogleSSO && !isLinked) {
+        delete subscriptions[providerId]
+      }
+    } else {
+      if (hideOtherThirdPartySSO && !isLinked) {
+        delete subscriptions[providerId]
+      }
+    }
+  }
+
   const hasSSOLinkingSection = Object.keys(subscriptions).length > 0
 
   if (
+    !haslangFeedbackLinkingWidgets &&
     !hasIntegrationLinkingSection &&
     !hasReferencesLinkingSection &&
     !hasSSOLinkingSection
@@ -38,23 +86,46 @@ function LinkingSection() {
 
   return (
     <>
-      <h3>{t('integrations')}</h3>
+      <h3 id="integrations">{t('integrations')}</h3>
       <p className="small">{t('linked_accounts_explained')}</p>
+      {haslangFeedbackLinkingWidgets ? (
+        <>
+          <h3 id="language-feedback" className="text-capitalize">
+            {t('ai_features')}
+          </h3>
+          <div className="settings-widgets-container">
+            {langFeedbackLinkingWidgets.map(
+              ({ import: { default: widget }, path }, widgetIndex) => (
+                <ModuleLinkingWidget
+                  key={path}
+                  ModuleComponent={widget}
+                  isLast={widgetIndex === langFeedbackLinkingWidgets.length - 1}
+                />
+              )
+            )}
+          </div>
+        </>
+      ) : null}
       {hasIntegrationLinkingSection ? (
         <>
           <h3 id="project-sync" className="text-capitalize">
             {t('project_synchronisation')}
           </h3>
           {projectSyncSuccessMessage ? (
-            <Alert bsStyle="success">{projectSyncSuccessMessage}</Alert>
+            <OLNotification
+              type="success"
+              content={projectSyncSuccessMessage}
+            />
           ) : null}
           <div className="settings-widgets-container">
-            {integrationLinkingWidgets.map(
+            {allIntegrationLinkingWidgets.map(
               ({ import: importObject, path }, widgetIndex) => (
                 <ModuleLinkingWidget
                   key={Object.keys(importObject)[0]}
                   ModuleComponent={Object.values(importObject)[0]}
-                  isLast={widgetIndex === integrationLinkingWidgets.length - 1}
+                  isLast={
+                    widgetIndex === allIntegrationLinkingWidgets.length - 1
+                  }
                 />
               )
             )}
@@ -85,9 +156,10 @@ function LinkingSection() {
             {t('linked_accounts')}
           </h3>
           {ssoErrorMessage ? (
-            <Alert bsStyle="danger">
-              {t('sso_link_error')}: {ssoErrorMessage}
-            </Alert>
+            <OLNotification
+              type="error"
+              content={`${t('sso_link_error')}: ${ssoErrorMessage}`}
+            />
           ) : null}
           <div className="settings-widgets-container">
             {Object.values(subscriptions).map(
@@ -104,7 +176,8 @@ function LinkingSection() {
           </div>
         </>
       ) : null}
-      {hasIntegrationLinkingSection ||
+      {haslangFeedbackLinkingWidgets ||
+      hasIntegrationLinkingSection ||
       hasReferencesLinkingSection ||
       hasSSOLinkingSection ? (
         <hr />
@@ -145,7 +218,6 @@ function SSOLinkingWidgetContainer({
       description = t('linked_collabratec_description')
       break
     case 'google':
-    case 'twitter':
       description = `${t('login_with_service', {
         service: subscription.provider.name,
       })}.`

@@ -1,26 +1,28 @@
 import { useTranslation } from 'react-i18next'
-import { Row, Col } from 'react-bootstrap'
 import EmailCell from './cell'
+import OLCol from '@/features/ui/components/ol/ol-col'
+import OLRow from '@/features/ui/components/ol/ol-row'
+import classnames from 'classnames'
 
 function Header() {
   const { t } = useTranslation()
 
   return (
     <>
-      <Row>
-        <Col md={4} className="hidden-xs">
+      <OLRow>
+        <OLCol lg={4} className="d-none d-sm-block">
           <EmailCell>
             <strong>{t('email')}</strong>
           </EmailCell>
-        </Col>
-        <Col md={8} className="hidden-xs">
+        </OLCol>
+        <OLCol lg={8} className="d-none d-sm-block">
           <EmailCell>
             <strong>{t('institution_and_role')}</strong>
           </EmailCell>
-        </Col>
-      </Row>
-      <div className="hidden-xs horizontal-divider" />
-      <div className="hidden-xs horizontal-divider" />
+        </OLCol>
+      </OLRow>
+      <div className={classnames('d-none d-sm-block', 'horizontal-divider')} />
+      <div className={classnames('d-none d-sm-block', 'horizontal-divider')} />
     </>
   )
 }

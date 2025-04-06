@@ -1,6 +1,6 @@
 const UserGetter = require('./UserGetter')
 const SessionManager = require('../Authentication/SessionManager')
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 
 function getLoggedInUsersPersonalInfo(req, res, next) {
   const userId = SessionManager.getLoggedInUserId(req.session)
@@ -33,7 +33,7 @@ function getPersonalInfo(req, res, next) {
   if (/^\d+$/.test(userId)) {
     query = { 'overleaf.id': parseInt(userId, 10) }
   } else if (/^[a-f0-9]{24}$/.test(userId)) {
-    query = { _id: ObjectId(userId) }
+    query = { _id: new ObjectId(userId) }
   } else {
     return res.sendStatus(400)
   }

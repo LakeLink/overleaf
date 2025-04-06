@@ -1,44 +1,47 @@
+import { memo } from 'react'
+import classNames from 'classnames'
 import HistoryFileTreeItem from './history-file-tree-item'
 import iconTypeFromName from '../../../file-tree/util/icon-type-from-name'
-import Icon from '../../../../shared/components/icon'
-import { useFileTreeItemSelection } from '../../context/hooks/use-file-tree-item-selection'
-import { DiffOperation } from '../../services/types/diff-operation'
-import classNames from 'classnames'
+import type { FileDiff } from '../../services/types/file'
+import MaterialIcon from '@/shared/components/material-icon'
 
 type HistoryFileTreeDocProps = {
+  file: FileDiff
   name: string
-  pathname: string
-  operation?: DiffOperation
+  selected: boolean
+  onClick: (file: FileDiff, event: React.MouseEvent<HTMLLIElement>) => void
+  onKeyDown: (file: FileDiff, event: React.KeyboardEvent<HTMLLIElement>) => void
 }
 
-export default function HistoryFileTreeDoc({
+function HistoryFileTreeDoc({
+  file,
   name,
-  pathname,
-  operation,
+  selected,
+  onClick,
+  onKeyDown,
 }: HistoryFileTreeDocProps) {
-  const { isSelected, onClick } = useFileTreeItemSelection(pathname)
-
   return (
     <li
       role="treeitem"
-      className={classNames({ selected: isSelected })}
-      onClick={onClick}
-      onKeyDown={onClick}
-      aria-selected={isSelected}
+      className={classNames({ selected })}
+      onClick={e => onClick(file, e)}
+      onKeyDown={e => onKeyDown(file, e)}
+      aria-selected={selected}
       aria-label={name}
       tabIndex={0}
     >
       <HistoryFileTreeItem
         name={name}
-        operation={operation}
+        operation={'operation' in file ? file.operation : undefined}
         icons={
-          <Icon
+          <MaterialIcon
             type={iconTypeFromName(name)}
-            fw
-            className="spaced file-tree-icon"
+            className="file-tree-icon"
           />
         }
       />
     </li>
   )
 }
+
+export default memo(HistoryFileTreeDoc)

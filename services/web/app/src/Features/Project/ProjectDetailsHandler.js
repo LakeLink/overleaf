@@ -1,4 +1,4 @@
-const _ = require('underscore')
+const _ = require('lodash')
 const ProjectGetter = require('./ProjectGetter')
 const UserGetter = require('../User/UserGetter')
 const { Project } = require('../../models/Project')
@@ -137,6 +137,11 @@ async function validateProjectName(name) {
       'Project name cannot contain \\ characters'
     )
   }
+  if (name !== name.trim()) {
+    throw new Errors.InvalidNameError(
+      'Project name cannot start or end with whitespace'
+    )
+  }
 }
 
 // FIXME: we should put a lock around this to make it completely safe, but we would need to do that at
@@ -149,8 +154,8 @@ async function generateUniqueName(userId, name, suffixes = []) {
     await ProjectGetter.promises.findAllUsersProjects(userId, { name: 1 })
   // allUsersProjectNames is returned as a hash {owned: [name1, name2, ...], readOnly: [....]}
   // collect all of the names and flatten them into a single array
-  const projectNameList = _.pluck(
-    _.flatten(_.values(allUsersProjectNames)),
+  const projectNameList = _.map(
+    _.flattenDeep(_.values(allUsersProjectNames)),
     'name'
   )
   const uniqueName = await ProjectHelper.promises.ensureNameIsUnique(
@@ -163,7 +168,10 @@ async function generateUniqueName(userId, name, suffixes = []) {
 }
 
 function fixProjectName(name) {
-  if (name === '' || !name) {
+  // Remove any leading or trailing whitespace
+  name = typeof name === 'string' ? name.trim() : ''
+  // Apply a default name if the name is empty
+  if (name === '') {
     name = 'Untitled'
   }
   if (name.indexOf('/') > -1) {
@@ -177,6 +185,8 @@ function fixProjectName(name) {
   if (name.length > MAX_PROJECT_NAME_LENGTH) {
     name = name.substr(0, MAX_PROJECT_NAME_LENGTH)
   }
+  // Remove any leading or trailing whitespace after fixing
+  name = name.trim()
   return name
 }
 
@@ -184,7 +194,7 @@ async function setPublicAccessLevel(projectId, newAccessLevel) {
   if (
     projectId != null &&
     newAccessLevel != null &&
-    _.include(
+    _.includes(
       [PublicAccessLevels.PRIVATE, PublicAccessLevels.TOKEN_BASED],
       newAccessLevel
     )
@@ -207,14 +217,13 @@ async function ensureTokensArePresent(projectId) {
     project.tokens.readOnly != null &&
     project.tokens.readAndWrite != null
   ) {
-    return project.tokens
+    return
   }
   await _generateTokens(project)
   await Project.updateOne(
     { _id: projectId },
     { $set: { tokens: project.tokens } }
   ).exec()
-  return project.tokens
 }
 
 async function clearTokens(projectId) {

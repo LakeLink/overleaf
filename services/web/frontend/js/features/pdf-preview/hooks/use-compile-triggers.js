@@ -12,19 +12,25 @@ export const startCompileKeypress = event => {
     if (event.key === 's' || event.key === 'Enter' || event.key === '.') {
       return true
     }
+
+    // Ctrl+s with Caps-Lock on
+    if (event.key === 'S' && !event.shiftKey) {
+      return true
+    }
   } else if (event.metaKey) {
     // Cmd+s / Cmd+Enter
     if (event.key === 's' || event.key === 'Enter') {
       return true
     }
+
+    // Cmd+s with Caps-Lock on
+    if (event.key === 'S' && !event.shiftKey) {
+      return true
+    }
   }
 }
 
-export default function useCompileTriggers(
-  startCompile,
-  setChangedAt,
-  setSavedAt
-) {
+export default function useCompileTriggers(startCompile, setChangedAt) {
   const handleKeyDown = useCallback(
     event => {
       if (startCompileKeypress(event)) {
@@ -58,16 +64,4 @@ export default function useCompileTriggers(
     setOrTriggerChangedAt(Date.now())
   }, [setOrTriggerChangedAt])
   useEventListener('doc:changed', setChangedAtHandler)
-
-  // record when the server acknowledges saving changes
-  const setOrTriggerSavedAt = useDetachAction(
-    'set-saved-at',
-    setSavedAt,
-    'detacher',
-    'detached'
-  )
-  const setSavedAtHandler = useCallback(() => {
-    setOrTriggerSavedAt(Date.now())
-  }, [setOrTriggerSavedAt])
-  useEventListener('doc:saved', setSavedAtHandler)
 }

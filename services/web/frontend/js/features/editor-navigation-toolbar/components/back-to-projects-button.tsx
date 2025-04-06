@@ -1,26 +1,34 @@
 import { useTranslation } from 'react-i18next'
-import Tooltip from '../../../shared/components/tooltip'
-import Icon from '../../../shared/components/icon'
+import * as eventTracking from '../../../infrastructure/event-tracking'
+import OLTooltip from '@/features/ui/components/ol/ol-tooltip'
+import MaterialIcon from '@/shared/components/material-icon'
 
 function BackToProjectsButton() {
   const { t } = useTranslation()
 
   return (
-    <Tooltip
+    <OLTooltip
       id="back-to-projects"
       description={t('back_to_your_projects')}
       overlayProps={{ placement: 'right' }}
     >
       <div className="toolbar-item">
-        <a className="btn btn-full-height" href="/project">
-          <Icon
+        <a
+          className="btn btn-full-height"
+          draggable="false"
+          href="/project"
+          onClick={() => {
+            eventTracking.sendMB('navigation-clicked-home')
+          }}
+        >
+          <MaterialIcon
             type="home"
-            fw
+            className="align-text-bottom"
             accessibilityLabel={t('back_to_your_projects')}
           />
         </a>
       </div>
-    </Tooltip>
+    </OLTooltip>
   )
 }
 

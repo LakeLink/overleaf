@@ -1,44 +1,38 @@
 const dateformat = require('dateformat')
+const { formatCurrency } = require('../../util/currency')
 
-const currenySymbols = {
-  EUR: '€',
-  USD: '$',
-  GBP: '£',
-  SEK: 'kr',
-  CAD: '$',
-  NOK: 'kr',
-  DKK: 'kr',
-  AUD: '$',
-  NZD: '$',
-  CHF: 'Fr',
-  SGD: '$',
+/**
+ * @param {number} priceInCents - price in the smallest currency unit (e.g. dollar cents, CLP units, ...)
+ * @param {CurrencyCode?} currency - currency code (default to USD)
+ * @param {string} [locale] - locale string
+ * @returns {string} - formatted price
+ */
+function formatPriceLocalized(priceInCents, currency = 'USD', locale) {
+  const isNoCentsCurrency = ['CLP', 'JPY', 'KRW', 'VND'].includes(currency)
+
+  const priceInCurrencyUnit = isNoCentsCurrency
+    ? priceInCents
+    : priceInCents / 100
+
+  return formatCurrency(priceInCurrencyUnit, currency, locale)
+}
+
+function formatDateTime(date) {
+  if (!date) {
+    return null
+  }
+  return dateformat(date, 'mmmm dS, yyyy h:MM TT Z', true)
+}
+
+function formatDate(date) {
+  if (!date) {
+    return null
+  }
+  return dateformat(date, 'mmmm dS, yyyy', true)
 }
 
 module.exports = {
-  formatPrice(priceInCents, currency) {
-    if (!currency) {
-      currency = 'USD'
-    }
-    let string = String(Math.round(priceInCents))
-    if (string.length === 2) {
-      string = `0${string}`
-    }
-    if (string.length === 1) {
-      string = `00${string}`
-    }
-    if (string.length === 0) {
-      string = '000'
-    }
-    const cents = string.slice(-2)
-    const dollars = string.slice(0, -2)
-    const symbol = currenySymbols[currency]
-    return `${symbol}${dollars}.${cents}`
-  },
-
-  formatDate(date) {
-    if (!date) {
-      return null
-    }
-    return dateformat(date, 'dS mmmm yyyy')
-  },
+  formatPriceLocalized,
+  formatDateTime,
+  formatDate,
 }

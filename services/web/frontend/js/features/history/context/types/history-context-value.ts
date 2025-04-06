@@ -1,21 +1,34 @@
 import { Nullable } from '../../../../../../types/utils'
-import { LoadedUpdate, UpdateSelection } from '../../services/types/update'
+import { LoadedUpdate } from '../../services/types/update'
 import { LoadedLabel } from '../../services/types/label'
-import { FileSelection } from '../../services/types/file'
+import { Selection } from '../../services/types/selection'
+
+type UpdatesLoadingState = 'loadingInitial' | 'loadingUpdates' | 'ready'
 
 export type HistoryContextValue = {
-  updates: LoadedUpdate[]
-  nextBeforeTimestamp: number | undefined
-  atEnd: boolean
-  userHasFullFeature: boolean | undefined
-  freeHistoryLimitHit: boolean
-  isLoading: boolean
-  error: Nullable<unknown>
+  updatesInfo: {
+    updates: LoadedUpdate[]
+    visibleUpdateCount: Nullable<number>
+    atEnd: boolean
+    nextBeforeTimestamp: number | undefined
+    freeHistoryLimitHit: boolean
+    loadingState: UpdatesLoadingState
+  }
+  setUpdatesInfo: React.Dispatch<
+    React.SetStateAction<HistoryContextValue['updatesInfo']>
+  >
+  userHasFullFeature: boolean
+  currentUserIsOwner: boolean
+  loadingFileDiffs: boolean
   labels: Nullable<LoadedLabel[]>
-  loadingFileTree: boolean
+  setLabels: React.Dispatch<React.SetStateAction<HistoryContextValue['labels']>>
+  labelsOnly: boolean
+  setLabelsOnly: React.Dispatch<React.SetStateAction<boolean>>
   projectId: string
-  fileSelection: FileSelection | null
-  setFileSelection: (fileSelection: FileSelection) => void
-  updateSelection: UpdateSelection | null
-  setUpdateSelection: (updateSelection: UpdateSelection) => void
+  selection: Selection
+  setSelection: React.Dispatch<
+    React.SetStateAction<HistoryContextValue['selection']>
+  >
+  fetchNextBatchOfUpdates: () => (() => void) | void
+  resetSelection: () => void
 }

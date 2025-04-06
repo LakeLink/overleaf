@@ -52,7 +52,27 @@ export const PaidPlanActive = (args: any) => {
   return <CurrentPlanWidget {...args} />
 }
 
+export const PausedPlan = (args: any) => {
+  window.metaAttributesCache.set('ol-usersBestSubscription', {
+    type: 'individual',
+    plan: {
+      name: 'Individual',
+    },
+    subscription: {
+      name: 'Example Name',
+      recurlyStatus: {
+        state: 'paused',
+      },
+    },
+  })
+
+  return <CurrentPlanWidget {...args} />
+}
+
 export default {
   title: 'Project List / Current Plan Widget',
   component: CurrentPlanWidget,
+  parameters: {
+    bootstrap5: true,
+  },
 }

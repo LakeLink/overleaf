@@ -1,6 +1,12 @@
 import { expect } from 'chai'
 import sinon from 'sinon'
-import { screen, fireEvent, render, waitFor } from '@testing-library/react'
+import {
+  screen,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { FetchError } from '../../../../../../frontend/js/infrastructure/fetch-json'
 import { SSOLinkingWidget } from '../../../../../../frontend/js/features/settings/components/linking/sso-widget'
 
@@ -27,7 +33,7 @@ describe('<SSOLinkingWidget />', function () {
     it('should render a link to `linkPath`', function () {
       render(<SSOLinkingWidget {...defaultProps} linked={false} />)
       expect(
-        screen.getByRole('link', { name: 'Link' }).getAttribute('href')
+        screen.getByRole('button', { name: 'Link' }).getAttribute('href')
       ).to.equal('/integration/link?intent=link')
     })
   })
@@ -61,9 +67,7 @@ describe('<SSOLinkingWidget />', function () {
         hidden: false,
       })
       fireEvent.click(cancelBtn)
-      await waitFor(() =>
-        screen.getByRole('button', { name: 'Cancel', hidden: true })
-      )
+      await screen.findByRole('button', { name: 'Cancel', hidden: true })
       expect(unlinkFunction).not.to.have.been.called
     })
   })
@@ -77,7 +81,7 @@ describe('<SSOLinkingWidget />', function () {
         <SSOLinkingWidget {...defaultProps} linked onUnlink={unlinkFunction} />
       )
       fireEvent.click(screen.getByRole('button', { name: 'Unlink' }))
-      confirmBtn = screen.getByRole('button', {
+      confirmBtn = within(screen.getByRole('dialog')).getByRole('button', {
         name: 'Unlink',
         hidden: false,
       })
@@ -111,21 +115,22 @@ describe('<SSOLinkingWidget />', function () {
         <SSOLinkingWidget {...defaultProps} linked onUnlink={unlinkFunction} />
       )
       fireEvent.click(screen.getByRole('button', { name: 'Unlink' }))
-      const confirmBtn = screen.getByRole('button', {
-        name: 'Unlink',
-        hidden: false,
-      })
+      const confirmBtn = within(screen.getByRole('dialog')).getByRole(
+        'button',
+        {
+          name: 'Unlink',
+          hidden: false,
+        }
+      )
       fireEvent.click(confirmBtn)
     })
 
     it('should display an error message ', async function () {
-      await waitFor(() =>
-        screen.getByText('Something went wrong. Please try again.')
-      )
+      await screen.findByText('Something went wrong. Please try again.')
     })
 
     it('should display the unlink button ', async function () {
-      await waitFor(() => screen.getByRole('button', { name: 'Unlink' }))
+      await screen.findByRole('button', { name: 'Unlink' })
     })
   })
 })

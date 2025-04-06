@@ -1,8 +1,10 @@
 import {
+  MapMode,
   RangeSet,
   RangeValue,
   StateEffect,
   StateField,
+  Transaction,
   TransactionSpec,
 } from '@codemirror/state'
 import {
@@ -15,57 +17,69 @@ import {
 import { findValidPosition } from '../utils/position'
 import { Highlight } from '../../../../../types/highlight'
 import { fullHeightCoordsAtPos, getBase } from '../utils/layer'
+import { debugConsole } from '@/utils/debugging'
 
+/**
+ * A custom extension that displays collaborator cursors in a separate layer.
+ */
 export const cursorHighlights = () => {
   return [
     cursorHighlightsState,
     cursorHighlightsLayer,
+    cursorHighlightsTheme,
     hoverTooltip(cursorTooltip, {
       hoverTime: 1,
-    }),
-    EditorView.theme({
-      '.ol-cm-cursorHighlightsLayer': {
-        zIndex: 100,
-        contain: 'size style',
-        pointerEvents: 'none',
-      },
-      '.ol-cm-cursorHighlight': {
-        color: 'hsl(var(--hue), 70%, 50%)',
-        borderLeft: '2px solid hsl(var(--hue), 70%, 50%)',
-        display: 'inline-block',
-        height: '1.6em',
-        position: 'absolute',
-        pointerEvents: 'none',
-      },
-      '.ol-cm-cursorHighlight:before': {
-        content: "''",
-        position: 'absolute',
-        left: '-2px',
-        top: '-5px',
-        height: '5px',
-        width: '5px',
-        borderWidth: '3px 3px 2px 2px',
-        borderStyle: 'solid',
-        borderColor: 'inherit',
-      },
-      '.ol-cm-cursorHighlightLabel': {
-        lineHeight: 1,
-        backgroundColor: 'hsl(var(--hue), 70%, 50%)',
-        padding: '1em 1em',
-        fontSize: '0.8rem',
-        fontFamily: 'Lato, sans-serif',
-        color: 'white',
-        fontWeight: 700,
-        whiteSpace: 'nowrap',
-        pointerEvents: 'none',
-      },
     }),
   ]
 }
 
+const cursorHighlightsTheme = EditorView.theme({
+  '.ol-cm-cursorHighlightsLayer': {
+    zIndex: 100,
+    contain: 'size style',
+    pointerEvents: 'none',
+  },
+  '.ol-cm-cursorHighlight': {
+    color: 'hsl(var(--hue), 70%, 50%)',
+    borderLeft: '2px solid hsl(var(--hue), 70%, 50%)',
+    display: 'inline-block',
+    height: '1.6em',
+    position: 'absolute',
+    pointerEvents: 'none',
+  },
+  '.ol-cm-cursorHighlight:before': {
+    content: "''",
+    position: 'absolute',
+    left: '-2px',
+    top: '-5px',
+    height: '5px',
+    width: '5px',
+    borderWidth: '3px 3px 2px 2px',
+    borderStyle: 'solid',
+    borderColor: 'inherit',
+  },
+  '.ol-cm-cursorHighlightLabel': {
+    lineHeight: 1,
+    backgroundColor: 'hsl(var(--hue), 70%, 50%)',
+    padding: '1em 1em',
+    fontSize: '0.8rem',
+    fontFamily: 'Lato, sans-serif',
+    color: 'white',
+    fontWeight: 700,
+    whiteSpace: 'nowrap',
+    pointerEvents: 'none',
+  },
+})
+
 class HighlightRangeValue extends RangeValue {
+  mapMode = MapMode.Simple
+
   constructor(public highlight: Highlight) {
     super()
+  }
+
+  eq(other: HighlightRangeValue) {
+    return other.highlight === this.highlight
   }
 }
 
@@ -89,7 +103,7 @@ const cursorHighlightsState = StateField.define<RangeSet<HighlightRangeValue>>({
               )
             } catch (error) {
               // ignore invalid highlights
-              console.debug('invalid highlight position', error)
+              debugConsole.debug('invalid highlight position', error)
             }
           }
         }
@@ -98,7 +112,7 @@ const cursorHighlightsState = StateField.define<RangeSet<HighlightRangeValue>>({
       }
     }
 
-    if (tr.docChanged) {
+    if (tr.docChanged && !tr.annotation(Transaction.remote)) {
       value = value.map(tr.changes)
     }
 
@@ -130,7 +144,7 @@ const cursorTooltip = (view: EditorView, pos: number): Tooltip | null => {
       for (const highlight of highlights) {
         const label = document.createElement('div')
         label.classList.add('ol-cm-cursorHighlightLabel')
-        label.style.setProperty('--hue', highlight.hue)
+        label.style.setProperty('--hue', String(highlight.hue))
         label.textContent = highlight.label
         dom.appendChild(label)
       }
@@ -164,7 +178,7 @@ class CursorMarker extends RectangleMarker {
 
   draw(): HTMLDivElement {
     const element = super.draw()
-    element.style.setProperty('--hue', this.highlight.hue)
+    element.style.setProperty('--hue', String(this.highlight.hue))
     return element
   }
 }

@@ -1,79 +1,86 @@
-import _ from 'lodash'
 import type { Nullable } from '../../../../../types/utils'
-import type { HistoryContextValue } from '../context/types/history-context-value'
 import type { FileDiff } from '../services/types/file'
-import type { DiffOperation } from '../services/types/diff-operation'
-import type { Update } from '../services/types/update'
-
-function getUpdateForVersion(
-  version: Update['toV'],
-  updates: HistoryContextValue['updates']
-): Nullable<Update> {
-  return updates.filter(update => update.toV === version)?.[0] ?? null
-}
+import type { FileOperation } from '../services/types/file-operation'
+import type { LoadedUpdate, Version } from '../services/types/update'
+import type { Selection } from '../services/types/selection'
+import { fileFinalPathname, isFileEditable } from './file-diff'
 
 type FileWithOps = {
   pathname: FileDiff['pathname']
-  operation: DiffOperation
+  editable: boolean
+  operation: FileOperation
 }
 
 function getFilesWithOps(
   files: FileDiff[],
-  updateSelection: HistoryContextValue['updateSelection'],
-  updates: HistoryContextValue['updates']
+  toV: Version,
+  comparing: boolean,
+  updateForToV: LoadedUpdate | undefined
 ): FileWithOps[] {
-  if (!updateSelection) {
-    return []
-  }
-  if (updateSelection.update.toV && !updateSelection.comparing) {
+  if (toV && !comparing) {
     const filesWithOps: FileWithOps[] = []
-    const currentUpdate = getUpdateForVersion(
-      updateSelection.update.toV,
-      updates
-    )
 
-    if (currentUpdate !== null) {
-      for (const pathname of currentUpdate.pathnames) {
+    if (updateForToV) {
+      const filesByPathname = new Map<string, FileDiff>()
+      for (const file of files) {
+        const pathname = fileFinalPathname(file)
+        filesByPathname.set(pathname, file)
+      }
+
+      const isEditable = (pathname: string) => {
+        const fileDiff = filesByPathname.get(pathname)
+        if (!fileDiff) {
+          return false
+        }
+        return isFileEditable(fileDiff)
+      }
+
+      for (const pathname of updateForToV.pathnames) {
         filesWithOps.push({
           pathname,
+          editable: isEditable(pathname),
           operation: 'edited',
         })
       }
 
-      for (const op of currentUpdate.project_ops) {
-        let fileWithOps: Nullable<FileWithOps> = null
+      for (const op of updateForToV.project_ops) {
+        let pathAndOp: Nullable<Pick<FileWithOps, 'pathname' | 'operation'>> =
+          null
 
         if (op.add) {
-          fileWithOps = {
+          pathAndOp = {
             pathname: op.add.pathname,
             operation: 'added',
           }
         } else if (op.remove) {
-          fileWithOps = {
+          pathAndOp = {
             pathname: op.remove.pathname,
             operation: 'removed',
           }
         } else if (op.rename) {
-          fileWithOps = {
+          pathAndOp = {
             pathname: op.rename.newPathname,
             operation: 'renamed',
           }
         }
 
-        if (fileWithOps !== null) {
-          filesWithOps.push(fileWithOps)
+        if (pathAndOp !== null) {
+          filesWithOps.push({
+            editable: isEditable(pathAndOp.pathname),
+            ...pathAndOp,
+          })
         }
       }
     }
 
     return filesWithOps
   } else {
-    const filesWithOps = _.reduce(
-      files,
+    const filesWithOps = files.reduce(
       (curFilesWithOps, file) => {
         if ('operation' in file) {
           curFilesWithOps.push({
             pathname: file.pathname,
+            editable: isFileEditable(file),
             operation: file.operation,
           })
         }
@@ -86,7 +93,7 @@ function getFilesWithOps(
   }
 }
 
-const orderedOpTypes: DiffOperation[] = [
+const orderedOpTypes: FileOperation[] = [
   'edited',
   'added',
   'renamed',
@@ -95,46 +102,42 @@ const orderedOpTypes: DiffOperation[] = [
 
 export function autoSelectFile(
   files: FileDiff[],
-  updateSelection: HistoryContextValue['updateSelection'],
-  updates: HistoryContextValue['updates']
-) {
-  let fileToSelect: Nullable<FileDiff> = null
+  toV: Version,
+  comparing: boolean,
+  updateForToV: LoadedUpdate | undefined,
+  previouslySelectedPathname: Selection['previouslySelectedPathname']
+): FileDiff {
+  const filesWithOps = getFilesWithOps(files, toV, comparing, updateForToV)
+  const previouslySelectedFile = files.find(file => {
+    return file.pathname === previouslySelectedPathname
+  })
+  const previouslySelectedFileHasOp = filesWithOps.some(file => {
+    return file.pathname === previouslySelectedPathname
+  })
 
-  const filesWithOps = getFilesWithOps(files, updateSelection, updates)
-  for (const opType of orderedOpTypes) {
-    const fileWithMatchingOpType = _.find(filesWithOps, {
-      operation: opType,
-    })
-
-    if (fileWithMatchingOpType != null) {
-      fileToSelect =
-        _.find(files, {
-          pathname: fileWithMatchingOpType.pathname,
-        }) ?? null
-
-      break
-    }
+  if (previouslySelectedFile && previouslySelectedFileHasOp) {
+    return previouslySelectedFile
   }
 
-  if (!fileToSelect) {
-    const mainFile = _.find(files, function (file) {
-      return /main\.tex$/.test(file.pathname)
-    })
+  for (const opType of orderedOpTypes) {
+    const fileWithMatchingOpType = filesWithOps.find(
+      file => file.operation === opType && file.editable
+    )
 
-    if (mainFile) {
-      fileToSelect = mainFile
-    } else {
-      const anyTeXFile = _.find(files, function (file) {
-        return /\.tex$/.test(file.pathname)
-      })
-
-      if (anyTeXFile) {
-        fileToSelect = anyTeXFile
-      } else {
-        fileToSelect = files[0]
+    if (fileWithMatchingOpType) {
+      const fileToSelect = files.find(
+        file => fileFinalPathname(file) === fileWithMatchingOpType.pathname
+      )
+      if (fileToSelect) {
+        return fileToSelect
       }
     }
   }
 
-  return fileToSelect.pathname
+  return (
+    previouslySelectedFile ||
+    files.find(file => /main\.tex$/.test(file.pathname)) ||
+    files.find(file => /\.tex$/.test(file.pathname)) ||
+    files[0]
+  )
 }

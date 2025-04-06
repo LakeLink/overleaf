@@ -1,3 +1,4 @@
+const { EventEmitter } = require('node:events')
 const sinon = require('sinon')
 const chai = require('chai')
 const { expect } = chai
@@ -21,6 +22,7 @@ describe('GcsPersistorTests', function () {
 
   let Logger,
     Transform,
+    PassThrough,
     Storage,
     Fs,
     GcsNotFoundError,
@@ -39,46 +41,41 @@ describe('GcsPersistorTests', function () {
   beforeEach(function () {
     Settings = {
       directoryKeyRegex: /^[0-9a-fA-F]{24}\/[0-9a-fA-F]{24}/,
-      Metrics: {
-        count: sinon.stub(),
-      },
     }
 
     files = [
       {
-        metadata: { size: 11, md5Hash: '/////wAAAAD/////AAAAAA==' },
+        metadata: { size: '11', md5Hash: '/////wAAAAD/////AAAAAA==' },
         delete: sinon.stub(),
       },
       {
-        metadata: { size: 22, md5Hash: '/////wAAAAD/////AAAAAA==' },
+        metadata: { size: '22', md5Hash: '/////wAAAAD/////AAAAAA==' },
         delete: sinon.stub(),
       },
     ]
 
-    ReadStream = {
-      pipe: sinon.stub().returns('readStream'),
-      on: sinon.stub(),
-      removeListener: sinon.stub(),
-    }
-    ReadStream.on.withArgs('end').yields()
-    ReadStream.on.withArgs('pipe').yields({
-      unpipe: sinon.stub(),
-      resume: sinon.stub(),
-      on: sinon.stub(),
-    })
-
-    Transform = class {
-      on(event, callback) {
-        if (event === 'readable') {
-          callback()
-        }
+    class FakeGCSResponse extends EventEmitter {
+      constructor() {
+        super()
+        this.statusCode = 200
+        this.err = null
       }
 
+      read() {
+        if (this.err) return this.emit('error', this.err)
+        this.emit('response', { statusCode: this.statusCode, headers: {} })
+      }
+    }
+
+    ReadStream = new FakeGCSResponse()
+    PassThrough = class {}
+
+    Transform = class {
       once() {}
-      removeListener() {}
     }
 
     Stream = {
+      PassThrough,
       Transform,
     }
 
@@ -155,8 +152,8 @@ describe('GcsPersistorTests', function () {
         stream = await GcsPersistor.getObjectStream(bucket, key)
       })
 
-      it('returns a metered stream', function () {
-        expect(stream).to.be.instanceOf(Transform)
+      it('returns a PassThrough stream', function () {
+        expect(stream).to.be.instanceOf(PassThrough)
       })
 
       it('fetches the right key from the right bucket', function () {
@@ -172,8 +169,10 @@ describe('GcsPersistorTests', function () {
       })
 
       it('pipes the stream through the meter', function () {
-        expect(ReadStream.pipe).to.have.been.calledWith(
-          sinon.match.instanceOf(Transform)
+        expect(StreamPromises.pipeline).to.have.been.calledWith(
+          ReadStream,
+          sinon.match.instanceOf(Transform),
+          sinon.match.instanceOf(PassThrough)
         )
       })
     })
@@ -188,8 +187,8 @@ describe('GcsPersistorTests', function () {
         })
       })
 
-      it('returns a metered stream', function () {
-        expect(stream).to.be.instanceOf(Transform)
+      it('returns a PassThrough stream', function () {
+        expect(stream).to.be.instanceOf(PassThrough)
       })
 
       it('passes the byte range on to GCS', function () {
@@ -205,8 +204,7 @@ describe('GcsPersistorTests', function () {
       let error, stream
 
       beforeEach(async function () {
-        Transform.prototype.on = sinon.stub()
-        ReadStream.on.withArgs('error').yields(GcsNotFoundError)
+        ReadStream.statusCode = 404
         try {
           stream = await GcsPersistor.getObjectStream(bucket, key)
         } catch (e) {
@@ -231,12 +229,11 @@ describe('GcsPersistorTests', function () {
       })
     })
 
-    describe('when Gcs encounters an unkown error', function () {
+    describe('when Gcs encounters an unknown error', function () {
       let error, stream
 
       beforeEach(async function () {
-        Transform.prototype.on = sinon.stub()
-        ReadStream.on.withArgs('error').yields(genericError)
+        ReadStream.err = genericError
         try {
           stream = await GcsPersistor.getObjectStream(bucket, key)
         } catch (err) {
@@ -283,8 +280,7 @@ describe('GcsPersistorTests', function () {
       beforeEach(async function () {
         GcsPersistor.settings.unsignedUrls = true
         GcsPersistor.settings.endpoint = {
-          apiScheme: 'http',
-          apiEndpoint: 'custom.endpoint',
+          apiEndpoint: 'http://custom.endpoint',
         }
         signedUrl = await GcsPersistor.getRedirectUrl(bucket, key)
       })
@@ -306,7 +302,7 @@ describe('GcsPersistorTests', function () {
       })
 
       it('should return the object size', function () {
-        expect(size).to.equal(files[0].metadata.size)
+        expect(size).to.equal(11)
       })
 
       it('should pass the bucket and key to GCS', function () {
@@ -553,7 +549,7 @@ describe('GcsPersistorTests', function () {
   })
 
   describe('deleteDirectory', function () {
-    const directoryName = `${ObjectId()}/${ObjectId()}`
+    const directoryName = `${new ObjectId()}/${new ObjectId()}`
     const directoryPrefix = `${directoryName}/`
     describe('with valid parameters', function () {
       beforeEach(async function () {

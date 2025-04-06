@@ -1,4 +1,4 @@
-const sanitizeHtml = require('sanitize-html')
+import sanitizeHtml from 'sanitize-html'
 
 /**
  * Sanitize a translation string to prevent injection attacks
@@ -38,7 +38,9 @@ function sanitize(input) {
     })
       // Restore the escaping again.
       .replaceAll(/&lt;([/]?[0-9])&gt;/g, '<$1>')
+      // Restore escaped standalone ampersands
+      .replaceAll(/ &amp; /g, ' & ')
   )
 }
 
-module.exports = { sanitize }
+export default { sanitize }

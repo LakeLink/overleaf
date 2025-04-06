@@ -5,9 +5,8 @@ const Metrics = require('../../infrastructure/Metrics')
 const Queues = require('../../infrastructure/Queues')
 const crypto = require('crypto')
 const _ = require('lodash')
-const { expressify } = require('../../util/promises')
+const { expressify } = require('@overleaf/promise-utils')
 const logger = require('@overleaf/logger')
-const { getAnalyticsIdFromMongoUser } = require('./AnalyticsHelper')
 
 const analyticsEventsQueue = Queues.getQueue('analytics-events')
 const analyticsEditingSessionsQueue = Queues.getQueue(
@@ -15,6 +14,9 @@ const analyticsEditingSessionsQueue = Queues.getQueue(
 )
 const analyticsUserPropertiesQueue = Queues.getQueue(
   'analytics-user-properties'
+)
+const analyticsAccountMappingQueue = Queues.getQueue(
+  'analytics-account-mapping'
 )
 
 const ONE_MINUTE_MS = 60 * 1000
@@ -58,6 +60,15 @@ async function recordEventForUser(userId, event, segmentation) {
   }
 }
 
+function recordEventForUserInBackground(userId, event, segmentation) {
+  recordEventForUser(userId, event, segmentation).catch(err => {
+    logger.warn(
+      { err, userId, event, segmentation },
+      'failed to record event for user'
+    )
+  })
+}
+
 function recordEventForSession(session, event, segmentation) {
   const { analyticsId, userId } = getIdsFromSession(session)
   if (!analyticsId) {
@@ -66,14 +77,6 @@ function recordEventForSession(session, event, segmentation) {
   if (_isAnalyticsDisabled() || _isSmokeTestUser(userId)) {
     return
   }
-  logger.debug({
-    analyticsId,
-    userId,
-    event,
-    segmentation,
-    isLoggedIn: !!userId,
-    createdAt: new Date(),
-  })
   _recordEvent({
     analyticsId,
     userId,
@@ -93,8 +96,17 @@ async function setUserPropertyForUser(userId, propertyName, propertyValue) {
 
   const analyticsId = await UserAnalyticsIdCache.get(userId)
   if (analyticsId) {
-    _setUserProperty({ analyticsId, propertyName, propertyValue })
+    await _setUserProperty({ analyticsId, propertyName, propertyValue })
   }
+}
+
+function setUserPropertyForUserInBackground(userId, property, value) {
+  setUserPropertyForUser(userId, property, value).catch(err => {
+    logger.warn(
+      { err, userId, property, value },
+      'failed to set user property for user'
+    )
+  })
 }
 
 async function setUserPropertyForAnalyticsId(
@@ -108,7 +120,7 @@ async function setUserPropertyForAnalyticsId(
 
   _checkPropertyValue(propertyValue)
 
-  _setUserProperty({ analyticsId, propertyName, propertyValue })
+  await _setUserProperty({ analyticsId, propertyName, propertyValue })
 }
 
 async function setUserPropertyForSession(session, propertyName, propertyValue) {
@@ -120,8 +132,65 @@ async function setUserPropertyForSession(session, propertyName, propertyValue) {
   _checkPropertyValue(propertyValue)
 
   if (analyticsId) {
-    _setUserProperty({ analyticsId, propertyName, propertyValue })
+    await _setUserProperty({ analyticsId, propertyName, propertyValue })
   }
+}
+
+function setUserPropertyForSessionInBackground(session, property, value) {
+  setUserPropertyForSession(session, property, value).catch(err => {
+    const { analyticsId, userId } = getIdsFromSession(session)
+    logger.warn(
+      { err, analyticsId, userId, property, value },
+      'failed to set user property for session'
+    )
+  })
+}
+
+/**
+ * @typedef {(import('./types').AccountMapping)} AccountMapping
+ */
+
+/**
+ * Register mapping between two accounts.
+ *
+ * @param {AccountMapping} payload - The event payload to send to Analytics
+ */
+function registerAccountMapping({
+  source,
+  sourceEntity,
+  sourceEntityId,
+  target,
+  targetEntity,
+  targetEntityId,
+  createdAt,
+}) {
+  Metrics.analyticsQueue.inc({
+    status: 'adding',
+    event_type: 'account-mapping',
+  })
+
+  analyticsAccountMappingQueue
+    .add('account-mapping', {
+      source,
+      sourceEntity,
+      sourceEntityId,
+      target,
+      targetEntity,
+      targetEntityId,
+      createdAt: createdAt ?? new Date(),
+    })
+    .then(() => {
+      Metrics.analyticsQueue.inc({
+        status: 'added',
+        event_type: 'account-mapping',
+      })
+    })
+    .catch(() => {
+      Metrics.analyticsQueue.inc({
+        status: 'error',
+        event_type: 'account-mapping',
+      })
+    })
 }
 
 function updateEditingSession(userId, projectId, countryCode, segmentation) {
@@ -182,6 +251,17 @@ function _recordEvent(
     )
     return
   }
+  logger.debug(
+    {
+      analyticsId,
+      userId,
+      event,
+      segmentation,
+      isLoggedIn: !!userId,
+      createdAt: new Date(),
+    },
+    'queueing analytics event'
+  )
   Metrics.analyticsQueue.inc({ status: 'adding', event_type: 'event' })
   analyticsEventsQueue
     .add(
@@ -204,7 +284,7 @@ function _recordEvent(
     })
 }
 
-function _setUserProperty({ analyticsId, propertyName, propertyValue }) {
+async function _setUserProperty({ analyticsId, propertyName, propertyValue }) {
   if (!_isAttributeValid(propertyName)) {
     logger.info(
       { analyticsId, propertyName, propertyValue },
@@ -223,7 +303,7 @@ function _setUserProperty({ analyticsId, propertyName, propertyValue }) {
     status: 'adding',
     event_type: 'user-property',
   })
-  analyticsUserPropertiesQueue
+  await analyticsUserPropertiesQueue
     .add('user-property', {
       analyticsId,
       propertyName,
@@ -273,25 +353,16 @@ function _isAttributeValueValid(attributeValue) {
   return _isAttributeValid(attributeValue) || attributeValue instanceof Date
 }
 
-function _isSegmentationValueValid(attributeValue) {
-  // spaces and %-escaped values are allowed for segmentation values
-  return !attributeValue || /^[a-zA-Z0-9-_.:;,/ %]+$/.test(attributeValue)
-}
-
 function _isSegmentationValid(segmentation) {
-  if (!segmentation) {
-    return true
+  if (segmentation) {
+    for (const key of Object.keys(segmentation)) {
+      if (!_isAttributeValid(key)) {
+        return false
+      }
+    }
   }
 
-  const hasAnyInvalidKey = [...Object.keys(segmentation)].some(
-    key => !_isAttributeValid(key)
-  )
-
-  const hasAnyInvalidValue = [...Object.values(segmentation)].some(
-    value => !_isSegmentationValueValid(value)
-  )
-
-  return !hasAnyInvalidKey && !hasAnyInvalidValue
+  return true
 }
 
 function getIdsFromSession(session) {
@@ -305,11 +376,13 @@ async function analyticsIdMiddleware(req, res, next) {
   const sessionUser = SessionManager.getSessionUser(session)
 
   if (sessionUser) {
-    session.analyticsId = getAnalyticsIdFromMongoUser(sessionUser)
+    session.analyticsId = await UserAnalyticsIdCache.get(sessionUser._id)
   } else if (!session.analyticsId) {
     // generate an `analyticsId` if needed
     session.analyticsId = crypto.randomUUID()
   }
+
+  res.locals.getSessionAnalyticsId = () => session.analyticsId
 
   next()
 }
@@ -318,10 +391,14 @@ module.exports = {
   identifyUser,
   recordEventForSession,
   recordEventForUser,
+  recordEventForUserInBackground,
   setUserPropertyForUser,
+  setUserPropertyForUserInBackground,
   setUserPropertyForSession,
+  setUserPropertyForSessionInBackground,
   setUserPropertyForAnalyticsId,
   updateEditingSession,
   getIdsFromSession,
+  registerAccountMapping,
   analyticsIdMiddleware: expressify(analyticsIdMiddleware),
 }

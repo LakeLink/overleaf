@@ -1,7 +1,7 @@
 import { EditorSelection, StateEffect, StateField } from '@codemirror/state'
 import { Highlight } from '../services/types/doc'
 import { EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view'
-import { highlightsField } from './highlights'
+import { highlightDecorationsField } from './highlights'
 import { throttle, isEqual } from 'lodash'
 import { updateHasEffect } from '../../source-editor/utils/effects'
 
@@ -31,7 +31,8 @@ function calculateHighlightLocations(view: EditorView): HighlightLocations {
   let next
   let previous
 
-  const highlights = view.state.field(highlightsField) || []
+  const highlights =
+    view.state.field(highlightDecorationsField)?.highlights || []
 
   if (highlights.length === 0) {
     return { before: 0, after: 0 }
@@ -72,11 +73,6 @@ const plugin = ViewPlugin.fromClass(
     dispatchIfChanged() {
       const oldLocations = this.view.state.field(highlightLocationsField)
       const newLocations = calculateHighlightLocations(this.view)
-
-      console.log(
-        'dispatchIfChanged, changed is',
-        !isEqual(oldLocations, newLocations)
-      )
 
       if (!isEqual(oldLocations, newLocations)) {
         this.view.dispatch({
@@ -129,7 +125,10 @@ export function highlightLocations() {
 export function scrollToHighlight(view: EditorView, highlight: Highlight) {
   view.dispatch({
     effects: EditorView.scrollIntoView(
-      EditorSelection.range(highlight.range.from, highlight.range.to)
+      EditorSelection.range(highlight.range.from, highlight.range.to),
+      {
+        y: 'center',
+      }
     ),
   })
 }

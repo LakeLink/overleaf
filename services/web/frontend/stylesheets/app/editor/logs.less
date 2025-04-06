@@ -3,6 +3,7 @@
   top: @pdf-top-offset;
   overflow-y: auto;
   background-color: @logs-pane-bg;
+  z-index: 11; // above the PDF viewer + controls
 }
 
 .logs-pane-content {
@@ -29,11 +30,6 @@
   margin-bottom: @margin-sm;
   border-radius: @border-radius-base;
   overflow: hidden;
-}
-
-.log-entry-first-error-popup {
-  border-radius: 0;
-  overflow: auto;
 }
 
 .log-entry-header {
@@ -131,6 +127,10 @@
 }
 
 .log-entry-content {
+  &:empty {
+    display: none;
+  }
+
   background-color: #fff;
   padding: @padding-sm;
 }
@@ -147,13 +147,16 @@
   color: @ol-blue-gray-4;
   padding: @padding-sm;
   margin: 0;
+  white-space: pre-wrap;
 }
 
 .log-entry-content-button-container {
   position: relative;
   height: 40px;
   margin-top: 0;
-  transition: margin 0.15s ease-in-out, opacity 0.15s ease-in-out;
+  transition:
+    margin 0.15s ease-in-out,
+    opacity 0.15s ease-in-out;
   padding-bottom: @padding-sm;
   text-align: center;
   background-image: linear-gradient(0, @ol-blue-gray-1, transparent);
@@ -176,40 +179,6 @@
   &:first-of-type {
     margin-top: 0;
   }
-}
-
-.log-entry-formatted-content-list {
-  margin: @margin-xs 0;
-  padding-left: @padding-md;
-}
-
-.first-error-popup {
-  position: absolute;
-  z-index: 1;
-  top: @toolbar-small-height + 2px;
-  right: @padding-xs;
-  width: 90%;
-  max-width: 450px;
-  box-shadow: 0 4px 4px rgba(0, 0, 0, 0.25);
-  animation: fade-in 0.15s linear 0s 1 none;
-  background-color: #fff;
-  &::before {
-    content: '';
-    .triangle(top, @padding-sm, @padding-xs, @ol-red);
-    top: -@padding-xs;
-    right: @padding-xl;
-  }
-}
-
-.first-error-popup-actions {
-  display: flex;
-  justify-content: space-between;
-  padding: 0 @padding-sm @padding-sm @padding-sm;
-  border-radius: 0 0 @border-radius-base @border-radius-base;
-}
-
-.first-error-btn {
-  .no-outline-ring-on-click;
 }
 
 .log-location-tooltip {

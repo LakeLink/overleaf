@@ -1,7 +1,7 @@
 import {
-  customSnippetCompletion,
-  createRequiredParameterApplier,
-  createCommandApplier,
+  applySnippet,
+  extendOverUnpairedClosingBrace,
+  extendRequiredParameter,
 } from './apply'
 import { packageNames } from './data/package-names'
 import { Completions } from './types'
@@ -21,24 +21,24 @@ export function buildPackageCompletions(
     return
   }
 
-  const uniquePackageNames = new Set<string>(packageNames)
-
-  // package names and commands from packages in the project
-  for (const doc of Object.values(metadata.documents)) {
-    for (const [packageName, commands] of Object.entries(doc.packages)) {
-      uniquePackageNames.add(packageName)
-
-      for (const item of commands) {
-        completions.commands.push(
-          customSnippetCompletion(item.snippet, {
-            type: item.meta,
-            label: item.caption,
-          })
-        )
-      }
-    }
+  // commands from packages in the project
+  for (const command of metadata.commands) {
+    completions.commands.push({
+      type: command.meta,
+      label: command.caption,
+      apply: applySnippet(command.snippet),
+      extend: extendOverUnpairedClosingBrace,
+    })
   }
 
+  const uniquePackageNames = new Set<string>(packageNames)
+
+  // package names from packages in the project
+  for (const packageName of metadata.packageNames) {
+    uniquePackageNames.add(packageName)
+  }
+
+  // exclude package names that are already in this document
   const existingPackageNames = findExistingPackageNames(context)
 
   for (const item of uniquePackageNames) {
@@ -47,7 +47,7 @@ export function buildPackageCompletions(
       completions.packages.push({
         type: 'pkg',
         label: item,
-        apply: createRequiredParameterApplier(item),
+        extend: extendRequiredParameter,
       })
 
       const label = `\\usepackage{${item}}`
@@ -56,19 +56,19 @@ export function buildPackageCompletions(
       completions.commands.push({
         type: 'pkg',
         label,
-        apply: createCommandApplier(label),
+        extend: extendOverUnpairedClosingBrace,
       })
     }
   }
 
   // empty \\usepackage{…} snippet
-  completions.commands.push(
-    customSnippetCompletion('\\usepackage{#{}}', {
-      type: 'pkg',
-      label: '\\usepackage{}',
-      boost: 10,
-    })
-  )
+  completions.commands.push({
+    type: 'pkg',
+    label: '\\usepackage{}',
+    boost: 10,
+    apply: applySnippet('\\usepackage{#{}}'),
+    extend: extendOverUnpairedClosingBrace,
+  })
 }
 
 const findExistingPackageNames = (context: CompletionContext) => {

@@ -4,6 +4,7 @@
 // - throw errors on non-ok response
 // - parse JSON response body, unless response is empty
 import OError from '@overleaf/o-error'
+import getMeta from '@/utils/meta'
 
 type FetchPath = string
 // Custom config types are merged with `fetch`s RequestInit type
@@ -103,7 +104,7 @@ export class FetchError extends OError {
 function fetchJSON<T>(
   path: FetchPath,
   {
-    body = {},
+    body,
     headers = {},
     method = 'GET',
     credentials = 'same-origin',
@@ -116,14 +117,14 @@ function fetchJSON<T>(
     headers: {
       ...headers,
       'Content-Type': 'application/json',
-      'X-Csrf-Token': window.csrfToken,
+      'X-Csrf-Token': getMeta('ol-csrfToken'),
       Accept: 'application/json',
     },
     credentials,
     method,
   }
 
-  if (method !== 'GET' && method !== 'HEAD') {
+  if (body !== undefined) {
     options.body = JSON.stringify(body)
   }
 
@@ -153,6 +154,11 @@ function fetchJSON<T>(
             }
           },
           error => {
+            // swallow the error if the fetch was cancelled (e.g. by cancelling an AbortController on component unmount)
+            if (swallowAbortError && error.name === 'AbortError') {
+              // the fetch request was aborted while reading/parsing the response body
+              return
+            }
             // parsing the response body failed
             reject(
               new FetchError(
@@ -168,6 +174,7 @@ function fetchJSON<T>(
       error => {
         // swallow the error if the fetch was cancelled (e.g. by cancelling an AbortController on component unmount)
         if (swallowAbortError && error.name === 'AbortError') {
+          // the fetch request was aborted before a response was returned
           return
         }
         // the fetch failed
@@ -236,4 +243,11 @@ export function getUserFacingMessage(error: Error | null) {
   }
 
   return error.message
+}
+
+export function isRateLimited(error?: Error | FetchError | any) {
+  if (error && error instanceof FetchError) {
+    return error.response?.status === 429
+  }
+  return false
 }

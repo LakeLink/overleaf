@@ -2,51 +2,51 @@
 
 /* eslint-disable no-console */
 
-// Initialize metrics as early as possible because this is where the Google
-// profiling agents are also started.
-const Metrics = require('@overleaf/metrics')
-Metrics.initialize('history-v1')
+// Metrics must be initialized before importing anything else
+require('@overleaf/metrics/initialize')
 
+const config = require('config')
+const Events = require('node:events')
 const BPromise = require('bluebird')
 const express = require('express')
-const cors = require('cors')
 const helmet = require('helmet')
 const HTTPStatus = require('http-status')
 const logger = require('@overleaf/logger')
-const cookieParser = require('cookie-parser')
+const Metrics = require('@overleaf/metrics')
 const bodyParser = require('body-parser')
 const swaggerTools = require('swagger-tools')
 const swaggerDoc = require('./api/swagger')
 const security = require('./api/app/security')
 const healthChecks = require('./api/controllers/health_checks')
 const { mongodb, loadGlobalBlobs } = require('./storage')
-const path = require('path')
+const path = require('node:path')
 
+Events.setMaxListeners(20)
 const app = express()
 module.exports = app
 
 logger.initialize('history-v1')
+Metrics.open_sockets.monitor()
 Metrics.injectMetricsRoute(app)
 app.use(Metrics.http.monitor(logger))
+Metrics.leaked_sockets.monitor(logger)
 
 // We may have fairly large JSON bodies when receiving large Changes. Clients
 // may have to handle 413 status codes and try creating files instead of sending
 // text content in changes.
-app.use(bodyParser.json({ limit: '4MB' }))
+app.use(bodyParser.json({ limit: '6MB' }))
 app.use(
   bodyParser.urlencoded({
     extended: false,
   })
 )
-app.use(cookieParser())
-app.use(cors())
 
 security.setupSSL(app)
 security.setupBasicHttpAuthForSwaggerDocs(app)
 
+const HTTP_REQUEST_TIMEOUT = parseInt(config.get('httpRequestTimeout'), 10)
 app.use(function (req, res, next) {
-  // use a 5 minute timeout on all responses
-  res.setTimeout(5 * 60 * 1000)
+  res.setTimeout(HTTP_REQUEST_TIMEOUT)
   next()
 })
 
@@ -84,16 +84,17 @@ function setupErrorHandling() {
 
   // Handle Swagger errors.
   app.use(function (err, req, res, next) {
+    const projectId = req.swagger?.params?.project_id?.value
     if (res.headersSent) {
       return next(err)
     }
 
     if (err.code === 'SCHEMA_VALIDATION_FAILED') {
-      logger.error(err)
+      logger.error({ err, projectId }, err.message)
       return res.status(HTTPStatus.UNPROCESSABLE_ENTITY).json(err.results)
     }
     if (err.code === 'INVALID_TYPE' || err.code === 'PATTERN') {
-      logger.error(err)
+      logger.error({ err, projectId }, err.message)
       return res.status(HTTPStatus.UNPROCESSABLE_ENTITY).json({
         message: 'invalid type: ' + err.paramName,
       })
@@ -112,7 +113,8 @@ function setupErrorHandling() {
   })
 
   app.use(function (err, req, res, next) {
-    logger.error(err)
+    const projectId = req.swagger?.params?.project_id?.value
+    logger.error({ err, projectId }, err.message)
 
     if (res.headersSent) {
       return next(err)

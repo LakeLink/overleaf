@@ -1,6 +1,6 @@
 const sinon = require('sinon')
 const { expect } = require('chai')
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 const SandboxedModule = require('sandboxed-module')
 const { UserAuditLogEntry } = require('../helpers/models/UserAuditLogEntry')
 
@@ -8,8 +8,8 @@ const MODULE_PATH = '../../../../app/src/Features/User/UserAuditLogHandler'
 
 describe('UserAuditLogHandler', function () {
   beforeEach(function () {
-    this.userId = ObjectId()
-    this.initiatorId = ObjectId()
+    this.userId = new ObjectId()
+    this.initiatorId = new ObjectId()
     this.action = {
       operation: 'clear-sessions',
       initiatorId: this.initiatorId,
@@ -81,6 +81,18 @@ describe('UserAuditLogHandler', function () {
         )
         this.UserAuditLogEntryMock.verify()
       })
+
+      it('updates the log when no ip address or initiatorId is specified for a group join event', async function () {
+        this.UserAuditLogHandler.promises.addEntry(
+          this.userId,
+          'join-group-subscription',
+          undefined,
+          undefined,
+          {
+            subscriptionId: 'foo',
+          }
+        )
+      })
     })
 
     describe('errors', function () {
@@ -97,7 +109,7 @@ describe('UserAuditLogHandler', function () {
           ).to.be.rejected
         })
 
-        it('throws an error when no IP', async function () {
+        it('throws an error when no IP and not excempt', async function () {
           await expect(
             this.UserAuditLogHandler.promises.addEntry(
               this.userId,

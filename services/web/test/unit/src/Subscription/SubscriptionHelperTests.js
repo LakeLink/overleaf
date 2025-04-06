@@ -33,15 +33,7 @@ describe('SubscriptionHelper', function () {
   beforeEach(function () {
     this.INITIAL_LICENSE_SIZE = 2
     this.settings = {
-      groupPlanModalOptions: {
-        currencySymbols: {
-          USD: '$',
-          CHF: 'Fr',
-          DKK: 'kr',
-          NOK: 'kr',
-          SEK: 'kr',
-        },
-      },
+      groupPlanModalOptions: {},
     }
     this.GroupPlansData = {
       enterprise: {
@@ -151,16 +143,23 @@ describe('SubscriptionHelper', function () {
     describe('CHF currency', function () {
       it('should return the correct localized price for every plan', function () {
         const localizedPrice =
-          this.SubscriptionHelper.generateInitialLocalizedGroupPrice('CHF')
+          this.SubscriptionHelper.generateInitialLocalizedGroupPrice(
+            'CHF',
+            'fr'
+          )
 
         expect(localizedPrice).to.deep.equal({
           price: {
-            collaborator: 'Fr 10',
-            professional: 'Fr 100',
+            collaborator: '10 CHF',
+            professional: '100 CHF',
           },
           pricePerUser: {
-            collaborator: 'Fr 5',
-            professional: 'Fr 50',
+            collaborator: '5 CHF',
+            professional: '50 CHF',
+          },
+          pricePerUserPerMonth: {
+            collaborator: '0,45 CHF',
+            professional: '4,20 CHF',
           },
         })
       })
@@ -169,16 +168,23 @@ describe('SubscriptionHelper', function () {
     describe('DKK currency', function () {
       it('should return the correct localized price for every plan', function () {
         const localizedPrice =
-          this.SubscriptionHelper.generateInitialLocalizedGroupPrice('DKK')
+          this.SubscriptionHelper.generateInitialLocalizedGroupPrice(
+            'DKK',
+            'da'
+          )
 
         expect(localizedPrice).to.deep.equal({
           price: {
-            collaborator: '20 kr',
-            professional: '200 kr',
+            collaborator: '20 kr.',
+            professional: '200 kr.',
           },
           pricePerUser: {
-            collaborator: '10 kr',
-            professional: '100 kr',
+            collaborator: '10 kr.',
+            professional: '100 kr.',
+          },
+          pricePerUserPerMonth: {
+            collaborator: '0,85 kr.',
+            professional: '8,35 kr.',
           },
         })
       })
@@ -187,16 +193,23 @@ describe('SubscriptionHelper', function () {
     describe('SEK currency', function () {
       it('should return the correct localized price for every plan', function () {
         const localizedPrice =
-          this.SubscriptionHelper.generateInitialLocalizedGroupPrice('SEK')
+          this.SubscriptionHelper.generateInitialLocalizedGroupPrice(
+            'SEK',
+            'sv'
+          )
 
         expect(localizedPrice).to.deep.equal({
           price: {
-            collaborator: '30 kr',
-            professional: '300 kr',
+            collaborator: '30 kr',
+            professional: '300 kr',
           },
           pricePerUser: {
-            collaborator: '15 kr',
-            professional: '150 kr',
+            collaborator: '15 kr',
+            professional: '150 kr',
+          },
+          pricePerUserPerMonth: {
+            collaborator: '1,25 kr',
+            professional: '12,50 kr',
           },
         })
       })
@@ -205,16 +218,25 @@ describe('SubscriptionHelper', function () {
     describe('NOK currency', function () {
       it('should return the correct localized price for every plan', function () {
         const localizedPrice =
-          this.SubscriptionHelper.generateInitialLocalizedGroupPrice('NOK')
+          this.SubscriptionHelper.generateInitialLocalizedGroupPrice(
+            'NOK',
+            // there seem to be possible inconsistencies with the CI
+            // maybe it depends on what languages are installed on the server?
+            'en'
+          )
 
         expect(localizedPrice).to.deep.equal({
           price: {
-            collaborator: '40 kr',
-            professional: '400 kr',
+            collaborator: 'kr 40',
+            professional: 'kr 400',
           },
           pricePerUser: {
-            collaborator: '20 kr',
-            professional: '200 kr',
+            collaborator: 'kr 20',
+            professional: 'kr 200',
+          },
+          pricePerUserPerMonth: {
+            collaborator: 'kr 1.70',
+            professional: 'kr 16.70',
           },
         })
       })
@@ -223,7 +245,10 @@ describe('SubscriptionHelper', function () {
     describe('other supported currencies', function () {
       it('should return the correct localized price for every plan', function () {
         const localizedPrice =
-          this.SubscriptionHelper.generateInitialLocalizedGroupPrice('USD')
+          this.SubscriptionHelper.generateInitialLocalizedGroupPrice(
+            'USD',
+            'en'
+          )
 
         expect(localizedPrice).to.deep.equal({
           price: {
@@ -233,6 +258,10 @@ describe('SubscriptionHelper', function () {
           pricePerUser: {
             collaborator: '$25',
             professional: '$250',
+          },
+          pricePerUserPerMonth: {
+            collaborator: '$2.10',
+            professional: '$20.85',
           },
         })
       })

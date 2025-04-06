@@ -1,35 +1,88 @@
-const Crypto = require('crypto')
-const Stream = require('stream')
-const { pipeline } = require('stream/promises')
+const Crypto = require('node:crypto')
+const Stream = require('node:stream')
+const { pipeline } = require('node:stream/promises')
 const Logger = require('@overleaf/logger')
-const { WriteError, ReadError, NotFoundError } = require('./Errors')
+const Metrics = require('@overleaf/metrics')
+const { WriteError, NotFoundError, AlreadyWrittenError } = require('./Errors')
 
-// Observes data that passes through and computes some metadata for it
-// - specifically, it computes the number of bytes transferred, and optionally
-//   computes a cryptographic hash based on the 'hash' option. e.g., pass
-//   { hash: 'md5' } to compute the md5 hash of the stream
-// - if 'metric' is supplied as an option, this metric will be incremented by
-//   the number of bytes transferred
+const _128KiB = 128 * 1024
+const TIMING_BUCKETS = [
+  0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000,
+]
+const SIZE_BUCKETS = [
+  0,
+  1_000,
+  10_000,
+  100_000,
+  _128KiB,
+  1_000_000,
+  10_000_000,
+  50_000_000,
+  100_000_000,
+]
+
+/**
+ * Observes data that passes through and optionally computes hash for content.
+ */
 class ObserverStream extends Stream.Transform {
-  constructor(options) {
-    super({ autoDestroy: true, ...options })
+  /**
+   * @param {Object} opts
+   * @param {string} opts.metric prefix for metrics
+   * @param {string} opts.bucket name of source/target bucket
+   * @param {string} [opts.hash] optional hash algorithm, e.g. 'md5'
+   */
+  constructor(opts) {
+    super({ autoDestroy: true })
+    const { metric, bucket, hash = '' } = opts
 
     this.bytes = 0
+    this.start = performance.now()
 
-    if (options.hash) {
-      this.hash = Crypto.createHash(options.hash)
+    if (hash) {
+      this.hash = Crypto.createHash(hash)
     }
 
-    if (options.metric && options.Metrics) {
-      const onEnd = () => {
-        options.Metrics.count(options.metric, this.bytes)
+    const onEnd = status => {
+      const size = this.bytes < _128KiB ? 'lt-128KiB' : 'gte-128KiB'
+      const labels = { size, bucket, status }
+      // Keep this counter metric to allow rendering long-term charts.
+      Metrics.count(metric, this.bytes, 1, labels)
+      Metrics.inc(`${metric}.hit`, 1, labels)
+
+      if (status === 'error') return
+      // The below metrics are only relevant for successfully fetched objects.
+
+      Metrics.histogram(`${metric}.size`, this.bytes, SIZE_BUCKETS, {
+        status,
+        bucket,
+      })
+      if (this.firstByteAfterMs) {
+        Metrics.histogram(
+          `${metric}.latency.first-byte`,
+          this.firstByteAfterMs,
+          TIMING_BUCKETS,
+          labels
+        )
       }
-      this.once('error', onEnd)
-      this.once('end', onEnd)
+      Metrics.histogram(
+        `${metric}.latency`,
+        this.#getMsSinceStart(),
+        TIMING_BUCKETS,
+        labels
+      )
     }
+    this.once('error', () => onEnd('error'))
+    this.once('end', () => onEnd('success'))
+  }
+
+  #getMsSinceStart() {
+    return performance.now() - this.start
   }
 
   _transform(chunk, encoding, done) {
+    if (this.bytes === 0) {
+      this.firstByteAfterMs = this.#getMsSinceStart()
+    }
     if (this.hash) {
       this.hash.update(chunk)
     }
@@ -47,7 +100,6 @@ module.exports = {
   ObserverStream,
   calculateStreamMd5,
   verifyMd5,
-  getReadyPipeline,
   wrapError,
   hexToBase64,
   base64ToHex,
@@ -87,71 +139,11 @@ async function verifyMd5(persistor, bucket, key, sourceMd5, destMd5 = null) {
   }
 }
 
-// resolves when a stream is 'readable', or rejects if the stream throws an error
-// before that happens - this lets us handle protocol-level errors before trying
-// to read them
-function getReadyPipeline(...streams) {
-  return new Promise((resolve, reject) => {
-    const lastStream = streams.slice(-1)[0]
-
-    // in case of error or stream close, we must ensure that we drain the
-    // previous stream so that it can clean up its socket (if it has one)
-    const drainPreviousStream = function (previousStream) {
-      // this stream is no longer reliable, so don't pipe anything more into it
-      previousStream.unpipe(this)
-      previousStream.resume()
-    }
-
-    // handler to resolve when either:
-    // - an error happens, or
-    // - the last stream in the chain is readable
-    // for example, in the case of a 4xx error an error will occur and the
-    // streams will not become readable
-    const handler = function (err) {
-      // remove handler from all streams because we don't want to do this on
-      // later errors
-      lastStream.removeListener('readable', handler)
-      for (const stream of streams) {
-        stream.removeListener('error', handler)
-      }
-
-      // return control to the caller
-      if (err) {
-        reject(
-          wrapError(err, 'error before stream became ready', {}, ReadError)
-        )
-      } else {
-        resolve(lastStream)
-      }
-    }
-
-    // ensure the handler fires when the last strem becomes readable
-    lastStream.on('readable', handler)
-
-    for (const stream of streams) {
-      // when a stream receives a pipe, set up the drain handler to drain the
-      // connection if an error occurs or the stream is closed
-      stream.on('pipe', previousStream => {
-        stream.on('error', x => {
-          drainPreviousStream(previousStream)
-        })
-        stream.on('close', () => {
-          drainPreviousStream(previousStream)
-        })
-      })
-      // add the handler function to resolve this method on error if we can't
-      // set up the pipeline
-      stream.on('error', handler)
-    }
-
-    // begin the pipeline
-    for (let index = 0; index < streams.length - 1; index++) {
-      streams[index].pipe(streams[index + 1])
-    }
-  })
-}
-
 function wrapError(error, message, params, ErrorType) {
+  params = {
+    ...params,
+    cause: error,
+  }
   if (
     error instanceof NotFoundError ||
     ['NoSuchKey', 'NotFound', 404, 'AccessDenied', 'ENOENT'].includes(
@@ -160,6 +152,13 @@ function wrapError(error, message, params, ErrorType) {
     (error.response && error.response.statusCode === 404)
   ) {
     return new NotFoundError('no such file', params, error)
+  } else if (
+    params.ifNoneMatch === '*' &&
+    (error.code === 'PreconditionFailed' ||
+      error.response?.statusCode === 412 ||
+      error instanceof AlreadyWrittenError)
+  ) {
+    return new AlreadyWrittenError(message, params, error)
   } else {
     return new ErrorType(message, params, error)
   }

@@ -1,22 +1,19 @@
-import { FC, LegacyRef, memo } from 'react'
-import { Button, Overlay, Popover } from 'react-bootstrap'
+import { FC, useRef } from 'react'
 import classnames from 'classnames'
-import Icon from '../../../../shared/components/icon'
+import MaterialIcon from '@/shared/components/material-icon'
+import { useCodeMirrorViewContext } from '../codemirror-context'
+import OLOverlay from '@/features/ui/components/ol/ol-overlay'
+import OLPopover from '@/features/ui/components/ol/ol-popover'
 
 export const ToolbarOverflow: FC<{
   overflowed: boolean
-  target?: HTMLDivElement
   overflowOpen: boolean
   setOverflowOpen: (open: boolean) => void
-  overflowRef?: LegacyRef<Popover>
-}> = memo(function ToolbarOverflow({
-  overflowed,
-  target,
-  overflowOpen,
-  setOverflowOpen,
-  overflowRef,
-  children,
-}) {
+  overflowRef?: React.Ref<HTMLDivElement>
+}> = ({ overflowed, overflowOpen, setOverflowOpen, overflowRef, children }) => {
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const view = useCodeMirrorViewContext()
+
   const className = classnames(
     'ol-cm-toolbar-button',
     'ol-cm-toolbar-overflow-toggle',
@@ -27,12 +24,12 @@ export const ToolbarOverflow: FC<{
 
   return (
     <>
-      <Button
+      <button
+        ref={buttonRef}
         type="button"
         id="toolbar-more"
         className={className}
         aria-label="More"
-        bsStyle={null}
         onMouseDown={event => {
           event.preventDefault()
           event.stopPropagation()
@@ -41,22 +38,23 @@ export const ToolbarOverflow: FC<{
           setOverflowOpen(!overflowOpen)
         }}
       >
-        <Icon type="ellipsis-h" fw />
-      </Button>
+        <MaterialIcon type="more_horiz" />
+      </button>
 
-      <Overlay
+      <OLOverlay
         show={overflowOpen}
-        target={target}
+        target={buttonRef.current}
         placement="bottom"
-        container={document.querySelector('.cm-editor')}
-        containerPadding={0}
-        animation
+        container={view.dom}
+        // containerPadding={0}
+        transition
+        rootClose
         onHide={() => setOverflowOpen(false)}
       >
-        <Popover id="popover-toolbar-overflow" ref={overflowRef}>
+        <OLPopover id="popover-toolbar-overflow" ref={overflowRef}>
           <div className="ol-cm-toolbar-overflow">{children}</div>
-        </Popover>
-      </Overlay>
+        </OLPopover>
+      </OLOverlay>
     </>
   )
-})
+}

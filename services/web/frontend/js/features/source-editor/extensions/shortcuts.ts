@@ -1,4 +1,4 @@
-import { type KeyBinding, keymap } from '@codemirror/view'
+import { keymap } from '@codemirror/view'
 import { Prec } from '@codemirror/state'
 import { indentMore } from '../commands/indent'
 import {
@@ -16,69 +16,81 @@ import {
   selectSyntaxRight,
 } from '@codemirror/commands'
 import { changeCase, duplicateSelection } from '../commands/ranges'
-import { selectOccurrence } from '../commands/select'
+import { selectNextOccurrence, selectPrevOccurrence } from '../commands/select'
 import { cloneSelectionVertically } from '../commands/cursor'
-import { dispatchEditorEvent } from './changes/change-manager'
 import {
   deleteToVisualLineEnd,
   deleteToVisualLineStart,
 } from './visual-line-selection'
+import { emitShortcutEvent } from '@/features/source-editor/extensions/toolbar/utils/analytics'
 
-export const shortcuts = () => {
-  const toggleReviewPanel = () => {
-    dispatchEditorEvent('toggle-review-panel')
-    return true
-  }
+const toggleReviewPanel = () => {
+  window.dispatchEvent(new Event('ui.toggle-review-panel'))
+  return true
+}
 
-  const addNewCommentFromKbdShortcut = () => {
-    dispatchEditorEvent('add-new-comment')
-    return true
-  }
+const addNewCommentFromKbdShortcut = () => {
+  window.dispatchEvent(new Event('add-new-review-comment'))
+  return true
+}
 
-  const toggleTrackChangesFromKbdShortcut = () => {
-    dispatchEditorEvent('toggle-track-changes')
-    return true
-  }
+const toggleTrackChangesFromKbdShortcut = () => {
+  window.dispatchEvent(new Event('toggle-track-changes'))
+  return true
+}
 
-  const keyBindings: KeyBinding[] = [
+/**
+ * Custom key bindings for motion, transformation, selection, history, etc.
+ */
+export const shortcuts = Prec.high(
+  keymap.of([
     {
       key: 'Tab',
-      preventDefault: true,
       run: indentMore,
     },
     {
       key: 'Shift-Tab',
-      preventDefault: true,
       run: indentLess,
     },
     {
-      key: 'Ctrl-y',
-      mac: 'Mod-y',
+      key: 'Mod-y',
       preventDefault: true,
       run: redo,
     },
     {
-      key: 'Ctrl-Shift-z',
+      key: 'Mod-Shift-z',
       preventDefault: true,
       run: redo,
     },
+
+    // defaultKeymap maps Mod-/ to toggleLineComment, but
+    // w3c-keyname has a hard-coded mapping of Shift+key => character
+    // which uses a US keyboard layout, so we need to add more mappings.
+
+    // Mod-/, but Spanish, Portuguese, German and Swedish keyboard layouts have / at Shift+7
+    // (keyCode 55, mapped with Shift to &)
     {
-      key: 'Ctrl-Shift-/',
-      mac: 'Mod-Shift-/',
+      key: 'Mod-&',
       preventDefault: true,
       run: toggleLineComment,
     },
+    // Mod-/, but German keyboard layouts have / at Cmd+Shift+ß
+    // Mod-/, but Czech keyboard layouts have / at Shift-ú
+    // (keyCode 191, mapped with Shift to ?)
     {
-      key: 'Ctrl-ß',
-      mac: 'Mod-ß',
+      key: 'Mod-?',
       preventDefault: true,
       run: toggleLineComment,
     },
+    // German keyboard layouts map 0xBF to #,
+    // so VS Code on Windows/Linux uses Ctrl-# to toggle line comments.
+    // This is an additional, undocumented shortcut for compatibility.
     {
       key: 'Ctrl-#',
       preventDefault: true,
       run: toggleLineComment,
     },
+
     {
       key: 'Ctrl-u',
       preventDefault: true,
@@ -90,62 +102,90 @@ export const shortcuts = () => {
       run: changeCase(false), // lowercase
     },
     {
-      key: 'Ctrl-d',
-      mac: 'Mod-d',
+      key: 'Mod-d',
       preventDefault: true,
-      run: deleteLine,
+      run(view) {
+        emitShortcutEvent(view, 'delete-line')
+        return deleteLine(view)
+      },
     },
     {
-      key: 'Ctrl-j',
-      mac: 'Mod-j',
+      key: 'Mod-j',
       preventDefault: true,
       run: toggleReviewPanel,
     },
     {
-      key: 'Ctrl-Shift-c',
-      mac: 'Mod-Shift-c',
+      key: 'Mod-Shift-c',
       preventDefault: true,
       run: addNewCommentFromKbdShortcut,
     },
     {
-      key: 'Ctrl-Shift-a',
-      mac: 'Mod-Shift-a',
+      key: 'Mod-Shift-a',
       preventDefault: true,
       run: toggleTrackChangesFromKbdShortcut,
     },
     {
+      key: 'Cmd-Alt-ArrowUp',
+      preventDefault: true,
+      run: cloneSelectionVertically(false, true, 'cmd'),
+    },
+    {
+      key: 'Cmd-Alt-ArrowDown',
+      preventDefault: true,
+      run: cloneSelectionVertically(true, true, 'cmd'),
+    },
+    {
+      key: 'Cmd-Alt-Shift-ArrowUp',
+      preventDefault: true,
+      run: cloneSelectionVertically(false, false, 'cmd'),
+    },
+    {
+      key: 'Cmd-Alt-Shift-ArrowDown',
+      preventDefault: true,
+      run: cloneSelectionVertically(true, false, 'cmd'),
+    },
+    // Duplicates of the above commands,
+    // allowing Ctrl instead of Command (but still tracking the events separately).
+    // Note: both Ctrl and Commmand versions need to work on macOS, for backwards compatibility,
+    // so the duplicates shouldn't simply be combined to use `Mod-`.
+    {
       key: 'Ctrl-Alt-ArrowUp',
       preventDefault: true,
-      run: cloneSelectionVertically(false, true),
+      run: cloneSelectionVertically(false, true, 'ctrl'),
     },
     {
       key: 'Ctrl-Alt-ArrowDown',
       preventDefault: true,
-      run: cloneSelectionVertically(true, true),
+      run: cloneSelectionVertically(true, true, 'ctrl'),
     },
     {
       key: 'Ctrl-Alt-Shift-ArrowUp',
       preventDefault: true,
-      run: cloneSelectionVertically(false, false),
+      run: cloneSelectionVertically(false, false, 'ctrl'),
     },
     {
       key: 'Ctrl-Alt-Shift-ArrowDown',
       preventDefault: true,
-      run: cloneSelectionVertically(true, false),
+      run: cloneSelectionVertically(true, false, 'ctrl'),
     },
     {
       key: 'Ctrl-Alt-ArrowLeft',
       preventDefault: true,
-      run: selectOccurrence(false),
+      run(view) {
+        emitShortcutEvent(view, 'select-prev-occurrence')
+        return selectPrevOccurrence(view)
+      },
     },
     {
       key: 'Ctrl-Alt-ArrowRight',
       preventDefault: true,
-      run: selectOccurrence(true),
+      run(view) {
+        emitShortcutEvent(view, 'select-next-occurrence')
+        return selectNextOccurrence(view)
+      },
     },
     {
-      key: 'Ctrl-Shift-d',
-      mac: 'Mod-Shift-d',
+      key: 'Mod-Shift-d',
       run: duplicateSelection,
     },
     {
@@ -173,14 +213,12 @@ export const shortcuts = () => {
       shift: selectSyntaxRight,
     },
     {
-      mac: 'Mod-Backspace',
+      mac: 'Cmd-Backspace',
       run: deleteToVisualLineStart,
     },
     {
-      mac: 'Mod-Delete',
+      mac: 'Cmd-Delete',
       run: deleteToVisualLineEnd,
     },
-  ]
-
-  return Prec.high(keymap.of(keyBindings))
-}
+  ])
+)

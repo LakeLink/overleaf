@@ -50,6 +50,7 @@ const async = require('async')
 
 const RealTimeClient = require('./helpers/RealTimeClient')
 const FixturesManager = require('./helpers/FixturesManager')
+const MockWebServer = require('./helpers/MockWebServer')
 
 const settings = require('@overleaf/settings')
 const Keys = settings.redis.documentupdater.key_schema
@@ -64,26 +65,23 @@ function cleanupPreviousUpdates(docId, cb) {
 }
 
 describe('MatrixTests', function () {
-  let privateProjectId, privateDocId, readWriteProjectId, readWriteDocId
+  let privateProjectId,
+    privateDocId,
+    readWriteProjectId,
+    readWriteDocId,
+    readWriteAnonymousAccessToken
 
   let privateClient
   before(function setupPrivateProject(done) {
     FixturesManager.setUpEditorSession(
-      { privilegeLevel: 'owner' },
+      { privilegeLevel: 'owner', publicAccessLevel: 'readAndWrite' },
       (err, { project_id: projectId, doc_id: docId }) => {
         if (err) return done(err)
         privateProjectId = projectId
         privateDocId = docId
-        privateClient = RealTimeClient.connect()
-        privateClient.on('connectionAccepted', () => {
-          privateClient.emit(
-            'joinProject',
-            { project_id: privateProjectId },
-            err => {
-              if (err) return done(err)
-              privateClient.emit('joinDoc', privateDocId, done)
-            }
-          )
+        privateClient = RealTimeClient.connect(projectId, err => {
+          if (err) return done(err)
+          privateClient.emit('joinDoc', privateDocId, done)
         })
       }
     )
@@ -94,9 +92,10 @@ describe('MatrixTests', function () {
       {
         publicAccess: 'readAndWrite',
       },
-      (err, { project_id: projectId, doc_id: docId }) => {
+      (err, { project_id: projectId, doc_id: docId, anonymousAccessToken }) => {
         readWriteProjectId = projectId
         readWriteDocId = docId
+        readWriteAnonymousAccessToken = anonymousAccessToken
         done(err)
       }
     )
@@ -105,34 +104,33 @@ describe('MatrixTests', function () {
   const USER_SETUP = {
     anonymous: {
       setup(cb) {
-        RealTimeClient.setSession({}, err => {
-          if (err) return cb(err)
-          cb(null, {
-            client: RealTimeClient.connect(),
-          })
-        })
+        RealTimeClient.setAnonSession(
+          readWriteProjectId,
+          readWriteAnonymousAccessToken,
+          err => {
+            if (err) return cb(err)
+            cb(null, {})
+          }
+        )
       },
     },
 
     registered: {
       setup(cb) {
         const userId = FixturesManager.getRandomId()
-        RealTimeClient.setSession(
-          {
-            user: {
-              _id: userId,
-              first_name: 'Joe',
-              last_name: 'Bloggs',
-            },
-          },
-          err => {
-            if (err) return cb(err)
-            cb(null, {
-              user_id: userId,
-              client: RealTimeClient.connect(),
-            })
-          }
-        )
+        const user = { _id: userId, first_name: 'Joe', last_name: 'Bloggs' }
+        RealTimeClient.setSession({ user }, err => {
+          if (err) return cb(err)
+
+          MockWebServer.inviteUserToProject(
+            readWriteProjectId,
+            user,
+            'readAndWrite'
+          )
+          cb(null, {
+            user_id: userId,
+          })
+        })
       },
     },
 
@@ -142,11 +140,16 @@ describe('MatrixTests', function () {
           { privilegeLevel: 'owner' },
           (err, { project_id: projectId, user_id: userId, doc_id: docId }) => {
             if (err) return cb(err)
+
+            MockWebServer.inviteUserToProject(
+              readWriteProjectId,
+              { _id: userId },
+              'readAndWrite'
+            )
             cb(null, {
               user_id: userId,
               project_id: projectId,
               doc_id: docId,
-              client: RealTimeClient.connect(),
             })
           }
         )
@@ -160,18 +163,9 @@ describe('MatrixTests', function () {
     let options, client
 
     const SESSION_SETUP = {
-      noop: {
-        getActions(cb) {
-          cb(null, [])
-        },
-        needsOwnProject: false,
-      },
-
       joinReadWriteProject: {
         getActions(cb) {
-          cb(null, [
-            { rpc: 'joinProject', args: [{ project_id: readWriteProjectId }] },
-          ])
+          cb(null, [{ connect: readWriteProjectId }])
         },
         needsOwnProject: false,
       },
@@ -179,7 +173,7 @@ describe('MatrixTests', function () {
       joinReadWriteProjectAndDoc: {
         getActions(cb) {
           cb(null, [
-            { rpc: 'joinProject', args: [{ project_id: readWriteProjectId }] },
+            { connect: readWriteProjectId },
             { rpc: 'joinDoc', args: [readWriteDocId] },
           ])
         },
@@ -188,9 +182,7 @@ describe('MatrixTests', function () {
 
       joinOwnProject: {
         getActions(cb) {
-          cb(null, [
-            { rpc: 'joinProject', args: [{ project_id: options.project_id }] },
-          ])
+          cb(null, [{ connect: options.project_id }])
         },
         needsOwnProject: true,
       },
@@ -198,7 +190,7 @@ describe('MatrixTests', function () {
       joinOwnProjectAndDoc: {
         getActions(cb) {
           cb(null, [
-            { rpc: 'joinProject', args: [{ project_id: options.project_id }] },
+            { connect: options.project_id },
             { rpc: 'joinDoc', args: [options.doc_id] },
           ])
         },
@@ -212,19 +204,27 @@ describe('MatrixTests', function () {
 
         async.eachSeries(
           actions,
-          (action, cb) => {
-            if (action.rpc) {
-              client.emit(action.rpc, ...action.args, (...returnedArgs) => {
-                const error = returnedArgs.shift()
-                if (action.fails) {
-                  expect(error).to.exist
-                  expect(returnedArgs).to.have.length(0)
-                  return cb()
-                }
-                cb(error)
-              })
+          (action, next) => {
+            const cb = (...returnedArgs) => {
+              const error = returnedArgs.shift()
+              if (action.fails) {
+                expect(error).to.exist
+                expect(returnedArgs).to.have.length(0)
+                return next()
+              }
+              next(error)
+            }
+
+            if (action.connect) {
+              client = RealTimeClient.connect(action.connect, cb)
+            } else if (action.rpc) {
+              if (client?.socket?.connected) {
+                client.emit(action.rpc, ...action.args, cb)
+              } else {
+                cb(new Error('not connected!'))
+              }
             } else {
-              cb(new Error('unexpected action'))
+              next(new Error('unexpected action'))
             }
           },
           done
@@ -236,10 +236,8 @@ describe('MatrixTests', function () {
       beforeEach(function userSetup(done) {
         userItem.setup((err, _options) => {
           if (err) return done(err)
-
           options = _options
-          client = options.client
-          client.on('connectionAccepted', done)
+          done()
         })
       })
 
@@ -252,12 +250,29 @@ describe('MatrixTests', function () {
             },
           },
 
+          joinProjectWithBadAccessToken: {
+            getActions(cb) {
+              RealTimeClient.setAnonSession(
+                privateProjectId,
+                'invalid-access-token',
+                err => {
+                  if (err) return cb(err)
+                  cb(null, [
+                    {
+                      connect: privateProjectId,
+                      fails: 1,
+                    },
+                  ])
+                }
+              )
+            },
+          },
+
           joinProjectWithDocId: {
             getActions(cb) {
               cb(null, [
                 {
-                  rpc: 'joinProject',
-                  args: [{ project_id: privateDocId }],
+                  connect: privateDocId,
                   fails: 1,
                 },
               ])
@@ -274,8 +289,7 @@ describe('MatrixTests', function () {
             getActions(cb) {
               cb(null, [
                 {
-                  rpc: 'joinProject',
-                  args: [{ project_id: privateProjectId }],
+                  connect: privateProjectId,
                   fails: 1,
                 },
               ])
@@ -292,8 +306,7 @@ describe('MatrixTests', function () {
             getActions(cb) {
               cb(null, [
                 {
-                  rpc: 'joinProject',
-                  args: [{ project_id: privateProjectId }],
+                  connect: privateProjectId,
                   fails: 1,
                 },
                 { rpc: 'joinDoc', args: [privateDocId], fails: 1 },
@@ -324,6 +337,7 @@ describe('MatrixTests', function () {
                   RealTimeClient.getConnectedClient(
                     client.socket.sessionid,
                     (error, client) => {
+                      if (error?.message === 'not found') return done() // disconnected
                       if (error) return done(error)
                       expect(client.rooms).to.not.include(privateProjectId)
                       done()
@@ -335,6 +349,7 @@ describe('MatrixTests', function () {
                   RealTimeClient.getConnectedClient(
                     client.socket.sessionid,
                     (error, client) => {
+                      if (error?.message === 'not found') return done() // disconnected
                       if (error) return done(error)
                       expect(client.rooms).to.not.include(privateDocId)
                       done()
@@ -412,6 +427,10 @@ describe('MatrixTests', function () {
                 })
 
                 beforeEach(function sendAsUser(done) {
+                  if (!client?.socket?.connected) {
+                    // disconnected clients cannot emit messages
+                    return this.skip()
+                  }
                   const userUpdate = Object.assign({}, update, {
                     hash: 'user',
                   })

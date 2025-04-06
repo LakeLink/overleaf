@@ -1,7 +1,10 @@
 import useDetachLayout from '../../../../frontend/js/shared/hooks/use-detach-layout'
 import { detachChannel, testDetachChannel } from '../../helpers/detach-channel'
 import { EditorProviders } from '../../helpers/editor-providers'
-import { Button, Checkbox, ControlLabel, FormGroup } from 'react-bootstrap'
+import OLFormGroup from '@/features/ui/components/ol/ol-form-group'
+import OLFormCheckbox from '@/features/ui/components/ol/ol-form-checkbox'
+import OLFormLabel from '@/features/ui/components/ol/ol-form-label'
+import OLButton from '@/features/ui/components/ol/ol-button'
 
 const DetachLayoutTest = () => {
   const { role, reattach, detach, isLinked, isLinking, isRedundant } =
@@ -12,39 +15,39 @@ const DetachLayoutTest = () => {
       <legend>
         role: <span id="role">{role || 'none'}</span>
       </legend>
-      <FormGroup>
-        <Checkbox id="isLinked" inline checked={isLinked} readOnly />
-        <ControlLabel>linked</ControlLabel>
-      </FormGroup>
-      <FormGroup>
-        <Checkbox id="isLinking" inline checked={isLinking} readOnly />
-        <ControlLabel>linking</ControlLabel>
-      </FormGroup>
-      <FormGroup>
-        <Checkbox id="isRedundant" inline checked={isRedundant} readOnly />
-        <ControlLabel>redundant</ControlLabel>
-      </FormGroup>
-      <Button id="reattach" onClick={reattach}>
+      <OLFormGroup>
+        <OLFormCheckbox id="isLinked" inline checked={isLinked} readOnly />
+        <OLFormLabel>linked</OLFormLabel>
+      </OLFormGroup>
+      <OLFormGroup>
+        <OLFormCheckbox id="isLinking" inline checked={isLinking} readOnly />
+        <OLFormLabel>linking</OLFormLabel>
+      </OLFormGroup>
+      <OLFormGroup>
+        <OLFormCheckbox
+          id="isRedundant"
+          inline
+          checked={isRedundant}
+          readOnly
+        />
+        <OLFormLabel>redundant</OLFormLabel>
+      </OLFormGroup>
+      <OLButton id="reattach" onClick={reattach}>
         reattach
-      </Button>
-      <Button id="detach" onClick={detach}>
+      </OLButton>
+      <OLButton id="detach" onClick={detach}>
         detach
-      </Button>
+      </OLButton>
     </fieldset>
   )
 }
 
 describe('useDetachLayout', function () {
   beforeEach(function () {
-    window.metaAttributesCache = new Map()
     window.metaAttributesCache.set('ol-preventCompileOnLoad', true)
     cy.stub(window, 'open').as('openWindow')
     cy.stub(window, 'close').as('closeWindow')
     cy.interceptEvents()
-  })
-
-  afterEach(function () {
-    window.metaAttributesCache = new Map()
   })
 
   it('detaching', function () {
@@ -62,8 +65,8 @@ describe('useDetachLayout', function () {
     // 2. detach
     cy.get('#detach').click()
     cy.get('@openWindow').should(
-      'be.calledOnceWith',
-      Cypress.sinon.match(/\/detached$/),
+      'have.been.calledOnceWith',
+      Cypress.sinon.match(/\/detached/),
       '_blank'
     )
     cy.get('#isLinked').should('not.be.checked')
@@ -95,7 +98,7 @@ describe('useDetachLayout', function () {
     })
 
     // 2. simulate connected detached tab
-    cy.get('@postDetachMessage').should('be.calledWith', {
+    cy.get('@postDetachMessage').should('have.been.calledWith', {
       role: 'detacher',
       event: 'up',
     })
@@ -134,7 +137,7 @@ describe('useDetachLayout', function () {
     cy.get('#isLinked').should('not.be.checked')
     cy.get('#isLinking').should('not.be.checked')
     cy.get('#role').should('have.text', 'none')
-    cy.get('@postDetachMessage').should('be.calledWith', {
+    cy.get('@postDetachMessage').should('have.been.calledWith', {
       role: 'detacher',
       event: 'reattach',
     })
@@ -225,7 +228,7 @@ describe('useDetachLayout', function () {
     cy.get('#isLinked').should('be.checked')
     cy.get('#isLinking').should('not.be.checked')
     cy.get('#role').should('have.text', 'detached')
-    cy.get('@postDetachMessage').should('be.calledWith', {
+    cy.get('@postDetachMessage').should('have.been.calledWith', {
       role: 'detached',
       event: 'up',
     })
@@ -241,6 +244,6 @@ describe('useDetachLayout', function () {
     cy.get('#isLinked').should('not.be.checked')
     cy.get('#isLinking').should('not.be.checked')
     cy.get('#role').should('have.text', 'detached')
-    cy.get('@closeWindow').should('be.called')
+    cy.get('@closeWindow').should('have.been.called')
   })
 })

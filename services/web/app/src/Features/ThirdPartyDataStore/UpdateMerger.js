@@ -1,33 +1,50 @@
 const { callbackify } = require('util')
-const _ = require('underscore')
+const _ = require('lodash')
 const fsPromises = require('fs/promises')
+const fs = require('fs')
 const logger = require('@overleaf/logger')
 const EditorController = require('../Editor/EditorController')
 const FileTypeManager = require('../Uploads/FileTypeManager')
-const FileWriter = require('../../infrastructure/FileWriter')
 const ProjectEntityHandler = require('../Project/ProjectEntityHandler')
+const crypto = require('crypto')
+const Settings = require('@overleaf/settings')
+const { pipeline } = require('stream/promises')
 
 async function mergeUpdate(userId, projectId, path, updateRequest, source) {
-  const fsPath = await FileWriter.promises.writeStreamToDisk(
-    projectId,
-    updateRequest
-  )
+  const fsPath = await writeUpdateToDisk(projectId, updateRequest)
+
   try {
-    const metadata = await _mergeUpdate(userId, projectId, path, fsPath, source)
-    return metadata
+    // note: important to await here so file reading finishes before cleaning up below
+    return await _mergeUpdate(userId, projectId, path, fsPath, source)
   } finally {
-    try {
-      await fsPromises.unlink(fsPath)
-    } catch (err) {
-      logger.err({ projectId, fsPath }, 'error deleting file')
-    }
+    // note: not awaited or thrown
+    fsPromises.unlink(fsPath).catch(err => {
+      logger.err({ err, projectId, fsPath }, 'error deleting file')
+    })
   }
 }
 
+async function writeUpdateToDisk(projectId, updateStream) {
+  const fsPath = `${
+    Settings.path.dumpFolder
+  }/${projectId}_${crypto.randomUUID()}`
+  const writeStream = fs.createWriteStream(fsPath)
+  try {
+    await pipeline(updateStream, writeStream)
+  } catch (err) {
+    try {
+      await fsPromises.unlink(fsPath)
+    } catch (err) {
+      logger.error({ err, projectId, fsPath }, 'error deleting file')
+    }
+    throw err
+  }
+  return fsPath
+}
+
 async function _findExistingFileType(projectId, path) {
-  const { docs, files } = await ProjectEntityHandler.promises.getAllEntities(
-    projectId
-  )
+  const { docs, files } =
+    await ProjectEntityHandler.promises.getAllEntities(projectId)
   if (_.some(docs, d => d.path === path)) {
     return 'doc'
   }
@@ -111,7 +128,7 @@ async function _mergeUpdate(userId, projectId, path, fsPath, source) {
 
 async function deleteUpdate(userId, projectId, path, source) {
   try {
-    await EditorController.promises.deleteEntityWithPath(
+    return await EditorController.promises.deleteEntityWithPath(
       projectId,
       path,
       source,

@@ -14,6 +14,7 @@
 const SandboxedModule = require('sandboxed-module')
 const sinon = require('sinon')
 const { expect } = require('chai')
+const OError = require('@overleaf/o-error')
 
 const modulePath = require('path').join(
   __dirname,
@@ -21,7 +22,7 @@ const modulePath = require('path').join(
 )
 const MockClient = require('../helpers/MockClient')
 const assert = require('assert')
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 
 describe('EditorController', function () {
   beforeEach(function () {
@@ -873,7 +874,7 @@ describe('EditorController', function () {
         this.newAccessLevel = 'private'
         this.ProjectDetailsHandler.ensureTokensArePresent = sinon
           .stub()
-          .yields(null, this.tokens)
+          .yields()
         return this.EditorController.setPublicAccessLevel(
           this.project_id,
           this.newAccessLevel,
@@ -898,14 +899,6 @@ describe('EditorController', function () {
           .calledWith(this.project_id)
           .should.equal(false)
       })
-
-      it('should not broadcast a token change', function () {
-        return this.EditorRealTimeController.emitToRoom
-          .calledWith(this.project_id, 'project:tokens:changed', {
-            tokens: this.tokens,
-          })
-          .should.equal(false)
-      })
     })
 
     describe('when setting to tokenBased', function () {
@@ -914,7 +907,7 @@ describe('EditorController', function () {
         this.tokens = { readOnly: 'aaa', readAndWrite: '42bbb' }
         this.ProjectDetailsHandler.ensureTokensArePresent = sinon
           .stub()
-          .yields(null, this.tokens)
+          .yields()
         return this.EditorController.setPublicAccessLevel(
           this.project_id,
           this.newAccessLevel,
@@ -937,14 +930,6 @@ describe('EditorController', function () {
       it('should ensure tokens are present for project', function () {
         return this.ProjectDetailsHandler.ensureTokensArePresent
           .calledWith(this.project_id)
-          .should.equal(true)
-      })
-
-      it('should broadcast the token change too', function () {
-        return this.EditorRealTimeController.emitToRoom
-          .calledWith(this.project_id, 'project:tokens:changed', {
-            tokens: this.tokens,
-          })
           .should.equal(true)
       })
     })
@@ -971,6 +956,127 @@ describe('EditorController', function () {
       return this.EditorRealTimeController.emitToRoom
         .calledWith(this.project_id, 'rootDocUpdated', this.newRootDocID)
         .should.equal(true)
+    })
+  })
+
+  describe('setMainBibliographyDoc', function () {
+    describe('on success', function () {
+      beforeEach(function (done) {
+        this.mainBibliographyId = 'bib-doc-id'
+        this.ProjectEntityUpdateHandler.setMainBibliographyDoc = sinon
+          .stub()
+          .yields()
+
+        this.callback = sinon.stub().callsFake(done)
+        this.EditorController.setMainBibliographyDoc(
+          this.project_id,
+          this.mainBibliographyId,
+          this.callback
+        )
+      })
+
+      it('should forward the call to the ProjectEntityUpdateHandler', function () {
+        expect(
+          this.ProjectEntityUpdateHandler.setMainBibliographyDoc
+        ).to.have.been.calledWith(this.project_id, this.mainBibliographyId)
+      })
+
+      it('should emit the update to the room', function () {
+        expect(
+          this.EditorRealTimeController.emitToRoom
+        ).to.have.been.calledWith(
+          this.project_id,
+          'mainBibliographyDocUpdated',
+          this.mainBibliographyId
+        )
+      })
+
+      it('should return nothing', function () {
+        expect(this.callback).to.have.been.calledWithExactly()
+      })
+    })
+
+    describe('on error', function () {
+      beforeEach(function (done) {
+        this.mainBibliographyId = 'bib-doc-id'
+        this.error = new Error('oh no')
+        this.ProjectEntityUpdateHandler.setMainBibliographyDoc = sinon
+          .stub()
+          .yields(this.error)
+
+        this.callback = sinon.stub().callsFake(() => done())
+        this.EditorController.setMainBibliographyDoc(
+          this.project_id,
+          this.mainBibliographyId,
+          this.callback
+        )
+      })
+
+      it('should forward the call to the ProjectEntityUpdateHandler', function () {
+        expect(
+          this.ProjectEntityUpdateHandler.setMainBibliographyDoc
+        ).to.have.been.calledWith(this.project_id, this.mainBibliographyId)
+      })
+
+      it('should return the error', function () {
+        expect(this.callback).to.have.been.calledWithExactly(this.error)
+      })
+
+      it('should not emit the update to the room', function () {
+        expect(this.EditorRealTimeController.emitToRoom).to.not.have.been.called
+      })
+    })
+  })
+
+  describe('appendToDoc', function () {
+    describe('on success', function () {
+      beforeEach(function () {
+        this.docId = 'doc-1'
+        this.ProjectEntityUpdateHandler.appendToDoc = sinon
+          .stub()
+          .yields(null, { rev: '1' })
+        this.EditorController.appendToDoc(
+          this.project_id,
+          this.docId,
+          this.docLines,
+          this.source,
+          this.user_id,
+          this.callback
+        )
+      })
+
+      it('appends to the doc using the project entity handler', function () {
+        this.ProjectEntityUpdateHandler.appendToDoc
+          .calledWith(this.project_id, this.docId, this.docLines, this.source)
+          .should.equal(true)
+      })
+    })
+
+    describe('on error', function () {
+      beforeEach(function () {
+        this.docId = 'doc-1'
+        this.ProjectEntityUpdateHandler.appendToDoc = sinon
+          .stub()
+          .yields(new Error('foo'))
+        this.EditorController.appendToDoc(
+          this.project_id,
+          this.docId,
+          this.docLines,
+          this.source,
+          this.user_id,
+          this.callback
+        )
+      })
+
+      it('tries to append to the doc using the project entity handler', function () {
+        this.ProjectEntityUpdateHandler.appendToDoc
+          .calledWith(this.project_id, this.docId, this.docLines, this.source)
+          .should.equal(true)
+      })
+
+      it('tags the error', function () {
+        this.callback.calledWith(sinon.match.instanceOf(OError))
+      })
     })
   })
 })

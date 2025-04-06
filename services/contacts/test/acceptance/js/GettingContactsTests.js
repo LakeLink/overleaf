@@ -3,11 +3,11 @@ import request from 'request'
 import async from 'async'
 import { app } from '../../../app/js/server.js'
 
-const HOST = 'http://localhost:3036'
+const HOST = 'http://127.0.0.1:3036'
 
 describe('Getting Contacts', function () {
   before(function (done) {
-    this.server = app.listen(3036, 'localhost', error => {
+    this.server = app.listen(3036, '127.0.0.1', error => {
       if (error != null) {
         throw error
       }
@@ -22,7 +22,7 @@ describe('Getting Contacts', function () {
 
   describe('with no contacts', function () {
     beforeEach(function () {
-      this.user_id = ObjectId().toString()
+      this.user_id = new ObjectId().toString()
     })
 
     it('should return an empty array', function (done) {
@@ -46,10 +46,10 @@ describe('Getting Contacts', function () {
 
   describe('with contacts', function () {
     beforeEach(function (done) {
-      this.user_id = ObjectId().toString()
-      this.contact_id_1 = ObjectId().toString()
-      this.contact_id_2 = ObjectId().toString()
-      this.contact_id_3 = ObjectId().toString()
+      this.user_id = new ObjectId().toString()
+      this.contact_id_1 = new ObjectId().toString()
+      this.contact_id_2 = new ObjectId().toString()
+      this.contact_id_3 = new ObjectId().toString()
 
       const touchContact = (userId, contactId, cb) =>
         request(

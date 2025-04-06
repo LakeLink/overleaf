@@ -1,9 +1,9 @@
-import { createContext, useContext, useMemo } from 'react'
-import type { PropsWithChildren } from 'react'
+import { createContext, FC, useContext, useMemo } from 'react'
 import useProjectWideSettings from '../hooks/use-project-wide-settings'
 import useUserWideSettings from '../hooks/use-user-wide-settings'
 import useProjectWideSettingsSocketListener from '../hooks/use-project-wide-settings-socket-listener'
-import type { ProjectSettings, UserSettings } from '../utils/api'
+import type { ProjectSettings } from '../utils/api'
+import { UserSettings } from '../../../../../types/user-settings'
 
 type ProjectSettingsSetterContextValue = {
   setCompiler: (compiler: ProjectSettings['compiler']) => void
@@ -26,6 +26,7 @@ type ProjectSettingsSetterContextValue = {
   setFontFamily: (fontFamily: UserSettings['fontFamily']) => void
   setLineHeight: (lineHeight: UserSettings['lineHeight']) => void
   setPdfViewer: (pdfViewer: UserSettings['pdfViewer']) => void
+  setMathPreview: (mathPreview: UserSettings['mathPreview']) => void
 }
 
 type ProjectSettingsContextValue = Partial<ProjectSettings> &
@@ -36,9 +37,7 @@ export const ProjectSettingsContext = createContext<
   ProjectSettingsContextValue | undefined
 >(undefined)
 
-export function ProjectSettingsProvider({
-  children,
-}: PropsWithChildren<Record<string, never>>) {
+export const ProjectSettingsProvider: FC = ({ children }) => {
   const {
     compiler,
     setCompiler,
@@ -71,6 +70,8 @@ export function ProjectSettingsProvider({
     setLineHeight,
     pdfViewer,
     setPdfViewer,
+    mathPreview,
+    setMathPreview,
   } = useUserWideSettings()
 
   useProjectWideSettingsSocketListener()
@@ -105,6 +106,8 @@ export function ProjectSettingsProvider({
       setLineHeight,
       pdfViewer,
       setPdfViewer,
+      mathPreview,
+      setMathPreview,
     }),
     [
       compiler,
@@ -135,6 +138,8 @@ export function ProjectSettingsProvider({
       setLineHeight,
       pdfViewer,
       setPdfViewer,
+      mathPreview,
+      setMathPreview,
     ]
   )
 

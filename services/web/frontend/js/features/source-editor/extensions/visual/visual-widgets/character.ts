@@ -24,16 +24,22 @@ export class CharacterWidget extends WidgetType {
   ignoreEvent(event: Event) {
     return event.type !== 'mousedown' && event.type !== 'mouseup'
   }
+
+  coordsAt(element: HTMLElement) {
+    return element.getBoundingClientRect()
+  }
 }
 
-const SUBSTITUTIONS = new Map([
+export const COMMAND_SUBSTITUTIONS = new Map([
   ['\\', ' '], // a trimmed \\ '
   ['\\%', '\u0025'],
   ['\\_', '\u005F'],
   ['\\}', '\u007D'],
+  ['\\~', '\u007E'],
   ['\\&', '\u0026'],
   ['\\#', '\u0023'],
   ['\\{', '\u007B'],
+  ['\\$', '\u0024'],
   ['\\textasciicircum', '\u005E'],
   ['\\textless', '\u003C'],
   ['\\textasciitilde', '\u007E'],
@@ -149,12 +155,12 @@ const SUBSTITUTIONS = new Map([
 export function createCharacterCommand(
   command: string
 ): CharacterWidget | undefined {
-  const substitution = SUBSTITUTIONS.get(command)
+  const substitution = COMMAND_SUBSTITUTIONS.get(command)
   if (substitution !== undefined) {
     return new CharacterWidget(substitution)
   }
 }
 
 export function hasCharacterSubstitution(command: string): boolean {
-  return SUBSTITUTIONS.has(command)
+  return COMMAND_SUBSTITUTIONS.has(command)
 }

@@ -1,8 +1,9 @@
 notifications
 --dependencies=mongo
---docker-repos=gcr.io/overleaf-ops
+--docker-repos=us-east1-docker.pkg.dev/overleaf-ops/ol-docker
 --env-add=
 --env-pass-through=
---node-version=16.17.1
+--esmock-loader=False
+--node-version=20.18.2
 --public-repo=True
---script-version=4.1.0
+--script-version=4.5.0

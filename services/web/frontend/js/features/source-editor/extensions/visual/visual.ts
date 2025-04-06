@@ -11,48 +11,44 @@ import { atomicDecorations } from './atomic-decorations'
 import { markDecorations } from './mark-decorations'
 import { EditorView, ViewPlugin } from '@codemirror/view'
 import { visualKeymap } from './visual-keymap'
-import { skipPreambleWithCursor } from './skip-preamble-cursor'
-import { mouseDownEffect, mouseDownListener } from './selection'
-import { findEffect } from '../../utils/effects'
+import { mousedown, mouseDownEffect } from './selection'
 import { forceParsing, syntaxTree } from '@codemirror/language'
 import { hasLanguageLoadedEffect } from '../language'
 import { restoreScrollPosition } from '../scroll-position'
-import { toolbarPanel } from '../toolbar/toolbar-panel'
-import { CurrentDoc } from '../../../../../../types/current-doc'
-import isValidTeXFile from '../../../../main/is-valid-tex-file'
 import { listItemMarker } from './list-item-marker'
+import { pasteHtml } from './paste-html'
+import { commandTooltip } from '../command-tooltip'
+import { tableGeneratorTheme } from './table-generator'
+import { debugConsole } from '@/utils/debugging'
+import { PreviewPath } from '../../../../../../types/preview-path'
 
 type Options = {
   visual: boolean
-  fileTreeManager: {
-    getPreviewByPath: (
-      path: string
-    ) => { url: string; extension: string } | null
-  }
+  previewByPath: (path: string) => PreviewPath | null
 }
 
 const visualConf = new Compartment()
 
 export const toggleVisualEffect = StateEffect.define<boolean>()
-export const findToggleVisualEffect = findEffect(toggleVisualEffect)
 
 const visualState = StateField.define<boolean>({
   create() {
     return false
   },
   update(value, tr) {
-    return findToggleVisualEffect(tr)?.value ?? value
+    for (const effect of tr.effects) {
+      if (effect.is(toggleVisualEffect)) {
+        return effect.value
+      }
+    }
+    return value
   },
 })
 
 const configureVisualExtensions = (options: Options) =>
   options.visual ? extension(options) : []
 
-export const visual = (currentDoc: CurrentDoc, options: Options): Extension => {
-  if (!isValidTeXFile(currentDoc.docName)) {
-    return []
-  }
-
+export const visual = (options: Options): Extension => {
   return [
     visualState.init(() => options.visual),
     visualConf.of(configureVisualExtensions(options)),
@@ -80,35 +76,24 @@ export const sourceOnly = (visual: boolean, extension: Extension) => {
 
     // Respond to switching editor modes
     EditorState.transactionExtender.of(tr => {
-      const effect = findToggleVisualEffect(tr)
-      if (effect) {
-        return {
-          effects: conf.reconfigure(configure(effect.value)),
-        }
-      }
-      return null
-    }),
-
-    // restore the scroll position when switching to source mode
-    EditorView.updateListener.of(update => {
-      for (const tr of update.transactions) {
-        for (const effect of tr.effects) {
-          if (effect.is(toggleVisualEffect)) {
-            if (!effect.value) {
-              // switching to the source editor
-              window.setTimeout(() => {
-                update.view.dispatch(restoreScrollPosition())
-                update.view.focus()
-              })
-            }
+      for (const effect of tr.effects) {
+        if (effect.is(toggleVisualEffect)) {
+          return {
+            effects: conf.reconfigure(configure(effect.value)),
           }
         }
       }
+      return null
     }),
   ]
 }
 
 const parsedAttributesConf = new Compartment()
+
+/**
+ * A view plugin which shows the editor content, makes it focusable,
+ * and restores the scroll position, once the initial decorations have been applied.
+ */
 const showContentWhenParsed = [
   parsedAttributesConf.of([EditorView.editable.of(false)]),
   ViewPlugin.define(view => {
@@ -153,9 +138,7 @@ const showContentWhenParsed = [
               window.clearTimeout(fallbackTimer)
               // show the content, in a timeout so the decorations can build first
               window.setTimeout(showContent)
-            }).catch(error => {
-              console.error(error)
-            })
+            }).catch(debugConsole.error)
           })
         }
       },
@@ -163,6 +146,9 @@ const showContentWhenParsed = [
   }),
 ]
 
+/**
+ * A transaction extender which scrolls mouse clicks into view, in case decorations have moved the cursor out of view.
+ */
 const scrollJumpAdjuster = EditorState.transactionExtender.of(tr => {
   // Attach a "scrollIntoView" effect on all mouse selections to adjust for
   // any jumps that may occur when hiding/showing decorations.
@@ -182,13 +168,14 @@ const scrollJumpAdjuster = EditorState.transactionExtender.of(tr => {
 const extension = (options: Options) => [
   visualTheme,
   visualHighlightStyle,
-  mouseDownListener,
+  mousedown,
   listItemMarker,
-  markDecorations,
   atomicDecorations(options),
-  skipPreambleWithCursor,
+  markDecorations, // NOTE: must be after atomicDecorations, so that mark decorations wrap inline widgets
   visualKeymap,
-  toolbarPanel(),
+  commandTooltip,
   scrollJumpAdjuster,
   showContentWhenParsed,
+  pasteHtml,
+  tableGeneratorTheme,
 ]

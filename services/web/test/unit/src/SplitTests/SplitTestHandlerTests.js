@@ -1,7 +1,7 @@
 const Path = require('path')
 const SandboxedModule = require('sandboxed-module')
 const sinon = require('sinon')
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 const { assert, expect } = require('chai')
 const MockRequest = require('../helpers/MockRequest')
 const MockResponse = require('../helpers/MockResponse')
@@ -14,7 +14,8 @@ const MODULE_PATH = Path.join(
 describe('SplitTestHandler', function () {
   beforeEach(function () {
     this.splitTests = [
-      makeSplitTest('active-test'),
+      makeSplitTest('active-test', { versionNumber: 2 }),
+      makeSplitTest('not-active-test', { active: false }),
       makeSplitTest('legacy-test'),
       makeSplitTest('no-analytics-test-1', { analyticsEnabled: false }),
       makeSplitTest('no-analytics-test-2', {
@@ -22,11 +23,9 @@ describe('SplitTestHandler', function () {
         versionNumber: 2,
       }),
     ]
-
-    this.UserGetter = {
-      promises: {
-        getUser: sinon.stub().resolves(null),
-      },
+    this.cachedSplitTests = new Map()
+    for (const splitTest of this.splitTests) {
+      this.cachedSplitTests.set(splitTest.name, splitTest)
     }
 
     this.SplitTest = {
@@ -36,21 +35,36 @@ describe('SplitTestHandler', function () {
     }
 
     this.SplitTestCache = {
-      get: sinon.stub().resolves(null),
+      get: sinon.stub().resolves({}),
     }
-    for (const splitTest of this.splitTests) {
-      this.SplitTestCache.get.withArgs(splitTest.name).resolves(splitTest)
-    }
+    this.SplitTestCache.get.resolves(this.cachedSplitTests)
     this.Settings = {
       moduleImportSequence: [],
       overleaf: {},
+      devToolbar: {
+        enabled: false,
+      },
     }
     this.AnalyticsManager = {
       getIdsFromSession: sinon.stub(),
+      setUserPropertyForAnalyticsId: sinon.stub().resolves(),
     }
     this.LocalsHelper = {
       setSplitTestVariant: sinon.stub(),
       setSplitTestInfo: sinon.stub(),
+    }
+    this.SplitTestSessionHandler = {
+      collectSessionStats: sinon.stub(),
+      getCachedVariant: sinon.stub(),
+      setVariantInCache: sinon.stub(),
+    }
+    this.SplitTestUserGetter = {
+      promises: {
+        getUser: sinon.stub().resolves(null),
+      },
+    }
+    this.SessionManager = {
+      isUserLoggedIn: sinon.stub().returns(false),
     }
 
     this.SplitTestHandler = SandboxedModule.require(MODULE_PATH, {
@@ -61,6 +75,9 @@ describe('SplitTestHandler', function () {
         '../User/UserUpdater': {},
         '../Analytics/AnalyticsManager': this.AnalyticsManager,
         './LocalsHelper': this.LocalsHelper,
+        './SplitTestSessionHandler': this.SplitTestSessionHandler,
+        './SplitTestUserGetter': this.SplitTestUserGetter,
+        '../Authentication/SessionManager': this.SessionManager,
         '@overleaf/settings': this.Settings,
       },
     })
@@ -72,7 +89,7 @@ describe('SplitTestHandler', function () {
   describe('with an existing user', function () {
     beforeEach(async function () {
       this.user = {
-        _id: ObjectId(),
+        _id: new ObjectId(),
         splitTests: {
           'active-test': [
             {
@@ -93,12 +110,32 @@ describe('SplitTestHandler', function () {
           ],
         },
       }
-      this.UserGetter.promises.getUser
-        .withArgs(this.user._id)
-        .resolves(this.user)
+      this.SplitTestUserGetter.promises.getUser.resolves(this.user)
+      this.SessionManager.isUserLoggedIn.returns(true)
       this.assignments =
         await this.SplitTestHandler.promises.getActiveAssignmentsForUser(
           this.user._id
+        )
+      this.explicitAssignments =
+        await this.SplitTestHandler.promises.getActiveAssignmentsForUser(
+          this.user._id,
+          false,
+          true
+        )
+      this.assignedToActiveTest =
+        await this.SplitTestHandler.promises.hasUserBeenAssignedToVariant(
+          this.req,
+          this.user._id,
+          'active-test',
+          'variant-1'
+        )
+      this.assignedToActiveTestAnyVersion =
+        await this.SplitTestHandler.promises.hasUserBeenAssignedToVariant(
+          this.req,
+          this.user._id,
+          'active-test',
+          'variant-1',
+          true
         )
     })
 
@@ -114,7 +151,15 @@ describe('SplitTestHandler', function () {
       expect(this.assignments['active-test']).to.deep.equal({
         variantName: 'variant-1',
         phase: 'release',
-        versionNumber: 1,
+        versionNumber: 2,
+      })
+    })
+
+    it('returns the explicit assignment for each active test', function () {
+      expect(this.explicitAssignments['active-test']).to.deep.equal({
+        variantName: 'variant-1',
+        phase: 'release',
+        versionNumber: 2,
         assignedAt: 'active-test-assigned-at',
       })
     })
@@ -135,6 +180,14 @@ describe('SplitTestHandler', function () {
       })
     })
 
+    it('shows user has been assigned to previous version of variant', function () {
+      expect(this.assignedToActiveTestAnyVersion).to.be.true
+    })
+
+    it('shows user has not been explicitly assigned to current version of variant', function () {
+      expect(this.assignedToActiveTest).to.be.false
+    })
+
     it('does not return assignments for unknown tests', function () {
       expect(this.assignments).not.to.have.property('unknown-test')
     })
@@ -142,7 +195,7 @@ describe('SplitTestHandler', function () {
 
   describe('with an non-existent user', function () {
     beforeEach(async function () {
-      const unknownUserId = ObjectId()
+      const unknownUserId = new ObjectId()
       this.assignments =
         await this.SplitTestHandler.promises.getActiveAssignmentsForUser(
           unknownUserId
@@ -156,13 +209,24 @@ describe('SplitTestHandler', function () {
 
   describe('with a user without assignments', function () {
     beforeEach(async function () {
-      this.user = { _id: ObjectId() }
-      this.UserGetter.promises.getUser
-        .withArgs(this.user._id)
-        .resolves(this.user)
+      this.user = { _id: new ObjectId() }
+      this.SplitTestUserGetter.promises.getUser.resolves(this.user)
       this.assignments =
         await this.SplitTestHandler.promises.getActiveAssignmentsForUser(
           this.user._id
+        )
+      this.explicitAssignments =
+        await this.SplitTestHandler.promises.getActiveAssignmentsForUser(
+          this.user._id,
+          false,
+          true
+        )
+      this.assignedToActiveTest =
+        await this.SplitTestHandler.promises.hasUserBeenAssignedToVariant(
+          this.req,
+          this.user._id,
+          'active-test',
+          'variant-1'
         )
     })
 
@@ -171,7 +235,7 @@ describe('SplitTestHandler', function () {
         'active-test': {
           phase: 'release',
           variantName: 'variant-1',
-          versionNumber: 1,
+          versionNumber: 2,
         },
         'legacy-test': {
           phase: 'release',
@@ -188,7 +252,16 @@ describe('SplitTestHandler', function () {
           variantName: 'variant-1',
           versionNumber: 2,
         },
+        'not-active-test': {
+          phase: 'release',
+          variantName: 'variant-1',
+          versionNumber: 1,
+        },
       })
+    })
+
+    it('shows user not assigned to variant', function () {
+      expect(this.assignedToActiveTest).to.be.false
     })
   })
 
@@ -203,22 +276,29 @@ describe('SplitTestHandler', function () {
       this.AnalyticsManager.getIdsFromSession.returns({
         userId: 'abc123abc123',
       })
-      this.SplitTestCache.get.returns({
-        name: 'my-test-name',
-        versions: [
-          {
-            versionNumber: 0,
-            active: true,
-            variants: [
-              {
-                name: '100-percent-variant',
-                rolloutPercent: 100,
-                rolloutStripes: [{ start: 0, end: 100 }],
-              },
-            ],
-          },
-        ],
-      })
+      this.SplitTestCache.get.resolves(
+        new Map([
+          [
+            'my-test-name',
+            {
+              name: 'my-test-name',
+              versions: [
+                {
+                  versionNumber: 0,
+                  active: true,
+                  variants: [
+                    {
+                      name: '100-percent-variant',
+                      rolloutPercent: 100,
+                      rolloutStripes: [{ start: 0, end: 100 }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        ])
+      )
 
       const assignment = await this.SplitTestHandler.promises.getAssignment(
         this.req,
@@ -255,6 +335,41 @@ describe('SplitTestHandler', function () {
       )
 
       assert.equal('default', assignment.variant)
+    })
+  })
+
+  describe('save assignments to res.locals', function () {
+    beforeEach(function () {
+      this.AnalyticsManager.getIdsFromSession.returns({
+        userId: 'abc123abc123',
+      })
+    })
+
+    it('when in SaaS mode it should set the variant', async function () {
+      await this.SplitTestHandler.promises.getAssignment(
+        this.req,
+        this.res,
+        'active-test'
+      )
+      expect(this.LocalsHelper.setSplitTestVariant).to.have.been.calledWith(
+        this.res.locals,
+        'active-test',
+        'variant-1'
+      )
+    })
+
+    it('when not in SaaS mode it should set the default variant', async function () {
+      this.Settings.overleaf = undefined
+      await this.SplitTestHandler.promises.getAssignment(
+        this.req,
+        this.res,
+        'active-test'
+      )
+      expect(this.LocalsHelper.setSplitTestVariant).to.have.been.calledWith(
+        this.res.locals,
+        'active-test',
+        'default'
+      )
     })
   })
 })

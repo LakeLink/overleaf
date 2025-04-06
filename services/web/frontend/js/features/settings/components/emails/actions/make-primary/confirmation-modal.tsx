@@ -1,7 +1,14 @@
 import { useTranslation, Trans } from 'react-i18next'
-import { Modal, Button } from 'react-bootstrap'
 import AccessibleModal from '../../../../../../shared/components/accessible-modal'
 import { MergeAndOverride } from '../../../../../../../../types/utils'
+import OLButton from '@/features/ui/components/ol/ol-button'
+import OLModal, {
+  OLModalBody,
+  OLModalFooter,
+  OLModalHeader,
+  OLModalTitle,
+} from '@/features/ui/components/ol/ol-modal'
+import { type UserEmailData } from '../../../../../../../../types/user-email'
 
 type ConfirmationModalProps = MergeAndOverride<
   React.ComponentProps<typeof AccessibleModal>,
@@ -10,6 +17,7 @@ type ConfirmationModalProps = MergeAndOverride<
     isConfirmDisabled: boolean
     onConfirm: () => void
     onHide: () => void
+    primary?: UserEmailData
   }
 >
 
@@ -19,43 +27,51 @@ function ConfirmationModal({
   show,
   onConfirm,
   onHide,
+  primary,
 }: ConfirmationModalProps) {
   const { t } = useTranslation()
 
   return (
-    <AccessibleModal show={show} onHide={onHide}>
-      <Modal.Header closeButton>
-        <Modal.Title>{t('confirm_primary_email_change')}</Modal.Title>
-      </Modal.Header>
-      <Modal.Body className="modal-body-share">
+    <OLModal show={show} onHide={onHide}>
+      <OLModalHeader closeButton>
+        <OLModalTitle>{t('confirm_primary_email_change')}</OLModalTitle>
+      </OLModalHeader>
+      <OLModalBody className="pb-0">
         <p>
           <Trans
             i18nKey="do_you_want_to_change_your_primary_email_address_to"
             components={{ b: <b /> }}
             values={{ email }}
+            shouldUnescape
+            tOptions={{ interpolation: { escapeValue: true } }}
           />
         </p>
-        <p className="mb-0">{t('log_in_with_primary_email_address')}</p>
-      </Modal.Body>
-      <Modal.Footer>
-        <Button
-          bsStyle={null}
-          className="btn-secondary-info btn-secondary"
-          onClick={onHide}
-        >
+        <p>{t('log_in_with_primary_email_address')}</p>
+        {primary && !primary.confirmedAt && (
+          <p>
+            <Trans
+              i18nKey="this_will_remove_primary_email"
+              components={{ b: <b /> }}
+              values={{ email: primary.email }}
+              shouldUnescape
+              tOptions={{ interpolation: { escapeValue: true } }}
+            />
+          </p>
+        )}
+      </OLModalBody>
+      <OLModalFooter>
+        <OLButton variant="secondary" onClick={onHide}>
           {t('cancel')}
-        </Button>
-        <Button
-          type="button"
-          bsStyle={null}
-          className="btn-primary"
+        </OLButton>
+        <OLButton
+          variant="primary"
           disabled={isConfirmDisabled}
           onClick={onConfirm}
         >
-          {t('confirm')}
-        </Button>
-      </Modal.Footer>
-    </AccessibleModal>
+          {t('change_primary_email')}
+        </OLButton>
+      </OLModalFooter>
+    </OLModal>
   )
 }
 

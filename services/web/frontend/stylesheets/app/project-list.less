@@ -121,14 +121,9 @@
 .project-list-table-name-cell,
 .project-list-table-owner-cell,
 .project-list-table-lastupdated-cell,
-.project-list-table-actions-cell,
-.project-list-table-no-projects-cell {
+.project-list-table-actions-cell {
   padding: (@line-height-computed / 4) 0;
   vertical-align: top;
-}
-
-.project-list-table-no-projects-cell {
-  text-align: center;
 }
 
 .project-list-table-name-cell {
@@ -208,8 +203,7 @@ input.project-list-table-select-item[type='checkbox'] {
   }
 }
 .action-btn {
-  padding: 0 0.3em;
-  margin-left: 0.2em;
+  padding: 0 0.2em;
 }
 
 .first-project {
@@ -241,6 +235,7 @@ input.project-list-table-select-item[type='checkbox'] {
   }
   .notification-entry {
     .alert {
+      // old alert style
       .box-shadow(2px 4px 6px rgba(0, 0, 0, 0.25));
       display: flex;
       flex-wrap: wrap;
@@ -248,32 +243,13 @@ input.project-list-table-select-item[type='checkbox'] {
         flex-wrap: nowrap;
       }
     }
-  }
-}
-.notification-body {
-  flex-grow: 1;
-  width: 90%;
-  @media (min-width: @screen-sm-min) {
-    width: auto;
-  }
-}
-
-.notification-action {
-  margin-top: (@line-height-computed / 2); // match paragraph padding
-  order: 1;
-  @media (min-width: @screen-sm-min) {
-    margin-top: 0;
-    order: 0;
-    padding-left: @padding-sm;
-  }
-}
-
-.notification-close {
-  padding-left: @padding-sm;
-  text-align: right;
-  width: 10%;
-  @media (min-width: @screen-sm-min) {
-    width: auto;
+    .notification {
+      // new alert style. match the existing margin on .alert since there is a mix of old and new alert styles
+      margin-bottom: @line-height-computed;
+    }
+    &.centered-alert .alert {
+      align-items: center;
+    }
   }
 }
 
@@ -410,21 +386,7 @@ ul.folders-menu {
 
 form.project-search {
   .form-group {
-    @media (min-width: @screen-md) {
-      margin-bottom: 0;
-    }
-  }
-}
-
-.project-search-clear-btn {
-  width: 100%;
-  padding: 0;
-  border: 0;
-  color: @ol-type-color;
-
-  &:hover,
-  &:active {
-    color: @ol-type-color;
+    margin-bottom: 0;
   }
 }
 
@@ -434,7 +396,7 @@ ul.structured-list {
   overflow: hidden;
   overflow-y: auto;
   -ms-overflow-style: -ms-autohiding-scrollbar;
-  li {
+  > li {
     border-bottom: 1px solid @structured-list-border-color;
     padding: (@line-height-computed / 4) 0;
 
@@ -487,6 +449,10 @@ ul.project-list {
 
 i.tablesort {
   padding-left: 8px;
+}
+
+.tablesort-text {
+  padding-right: 8px;
 }
 
 .tag-label {
@@ -578,15 +544,5 @@ i.tablesort {
   }
   .autocomplete .highlight {
     font-weight: 700;
-  }
-}
-
-.minimal-create-proj-dropdown {
-  text-align: center;
-
-  &-menu {
-    width: 200px;
-    left: 50%;
-    margin-left: -100px;
   }
 }

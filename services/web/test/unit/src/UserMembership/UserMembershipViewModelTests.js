@@ -14,7 +14,7 @@ const { expect } = require('chai')
 const sinon = require('sinon')
 const assertCalledWith = sinon.assert.calledWith
 const assertNotCalled = sinon.assert.notCalled
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 const modulePath =
   '../../../../app/src/Features/UserMembership/UserMembershipViewModel'
 const SandboxedModule = require('sandboxed-module')
@@ -28,7 +28,7 @@ describe('UserMembershipViewModel', function () {
     this.UserGetter = { getUser: sinon.stub() }
     this.UserMembershipViewModel = SandboxedModule.require(modulePath, {
       requires: {
-        mongodb: { ObjectId },
+        'mongodb-legacy': { ObjectId },
         '../Helpers/Mongo': { isObjectIdInstance, normalizeQuery },
         '../User/UserGetter': this.UserGetter,
       },
@@ -39,6 +39,15 @@ describe('UserMembershipViewModel', function () {
       email: 'mock-email@baz.com',
       first_name: 'Name',
       lastLoggedIn: '2020-05-20T10:41:11.407Z',
+      enrollment: {
+        managedBy: 'mock-group-id',
+        enrolledAt: new Date(),
+        sso: {
+          groupId: 'abc123abc123',
+          linkedAt: new Date(),
+          primary: true,
+        },
+      },
     }
   })
 
@@ -53,6 +62,7 @@ describe('UserMembershipViewModel', function () {
         first_name: null,
         last_name: null,
         _id: null,
+        enrollment: undefined,
       })
     })
 
@@ -66,6 +76,7 @@ describe('UserMembershipViewModel', function () {
         first_name: this.user.first_name,
         last_name: null,
         _id: this.user._id,
+        enrollment: this.user.enrollment,
       })
     })
   })
@@ -98,7 +109,7 @@ describe('UserMembershipViewModel', function () {
     it('build user id', function (done) {
       this.UserGetter.getUser.yields(null, this.user)
       return this.UserMembershipViewModel.buildAsync(
-        ObjectId(),
+        new ObjectId(),
         (error, viewModel) => {
           expect(error).not.to.exist
           assertNotCalled(this.UserMembershipViewModel.build)
@@ -107,6 +118,8 @@ describe('UserMembershipViewModel', function () {
           expect(viewModel.first_name).to.equal(this.user.first_name)
           expect(viewModel.invite).to.equal(false)
           expect(viewModel.email).to.exist
+          expect(viewModel.enrollment).to.exist
+          expect(viewModel.enrollment).to.deep.equal(this.user.enrollment)
           return done()
         }
       )
@@ -114,7 +127,7 @@ describe('UserMembershipViewModel', function () {
 
     it('build user id with error', function (done) {
       this.UserGetter.getUser.yields(new Error('nope'))
-      const userId = ObjectId()
+      const userId = new ObjectId()
       return this.UserMembershipViewModel.buildAsync(
         userId,
         (error, viewModel) => {

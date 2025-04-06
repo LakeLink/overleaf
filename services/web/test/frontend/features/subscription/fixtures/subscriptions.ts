@@ -3,11 +3,12 @@ import {
   GroupSubscription,
   RecurlySubscription,
 } from '../../../../../types/subscription/dashboard/subscription'
+import dateformat from 'dateformat'
 
-const dateformat = require('dateformat')
 const today = new Date()
 const oneYearFromToday = new Date().setFullYear(today.getFullYear() + 1)
 const nextPaymentDueAt = dateformat(oneYearFromToday, 'dS mmmm yyyy')
+const nextPaymentDueDate = dateformat(oneYearFromToday, 'dS mmmm yyyy')
 const sevenDaysFromToday = new Date().setDate(today.getDate() + 7)
 const sevenDaysFromTodayFormatted = dateformat(
   sevenDaysFromToday,
@@ -40,6 +41,7 @@ export const annualActiveSubscription: RecurlySubscription = {
     additionalLicenses: 0,
     totalLicenses: 0,
     nextPaymentDueAt,
+    nextPaymentDueDate,
     currency: 'USD',
     state: 'active',
     trialEndsAtFormatted: null,
@@ -47,10 +49,14 @@ export const annualActiveSubscription: RecurlySubscription = {
     activeCoupons: [],
     account: {
       email: 'fake@example.com',
+      created_at: '2024-12-31T09:40:27.000Z',
       has_canceled_subscription: { _: 'false', $: { type: 'boolean' } },
       has_past_due_invoice: { _: 'false', $: { type: 'boolean' } },
     },
     displayPrice: '$199.00',
+    planOnlyDisplayPrice: '',
+    addOns: [],
+    addOnDisplayPricesWithoutAdditionalLicense: {},
   },
 }
 
@@ -80,6 +86,7 @@ export const annualActiveSubscriptionEuro: RecurlySubscription = {
     additionalLicenses: 0,
     totalLicenses: 0,
     nextPaymentDueAt,
+    nextPaymentDueDate,
     currency: 'EUR',
     state: 'active',
     trialEndsAtFormatted: null,
@@ -87,10 +94,14 @@ export const annualActiveSubscriptionEuro: RecurlySubscription = {
     activeCoupons: [],
     account: {
       email: 'fake@example.com',
+      created_at: '2024-12-31T09:40:27.000Z',
       has_canceled_subscription: { _: 'false', $: { type: 'boolean' } },
       has_past_due_invoice: { _: 'false', $: { type: 'boolean' } },
     },
     displayPrice: '€221.96',
+    planOnlyDisplayPrice: '',
+    addOns: [],
+    addOnDisplayPricesWithoutAdditionalLicense: {},
   },
 }
 
@@ -119,6 +130,7 @@ export const annualActiveSubscriptionPro: RecurlySubscription = {
     additionalLicenses: 0,
     totalLicenses: 0,
     nextPaymentDueAt,
+    nextPaymentDueDate,
     currency: 'USD',
     state: 'active',
     trialEndsAtFormatted: null,
@@ -126,10 +138,14 @@ export const annualActiveSubscriptionPro: RecurlySubscription = {
     activeCoupons: [],
     account: {
       email: 'fake@example.com',
+      created_at: '2024-12-31T09:40:27.000Z',
       has_canceled_subscription: { _: 'false', $: { type: 'boolean' } },
       has_past_due_invoice: { _: 'false', $: { type: 'boolean' } },
     },
     displayPrice: '$42.00',
+    planOnlyDisplayPrice: '',
+    addOns: [],
+    addOnDisplayPricesWithoutAdditionalLicense: {},
   },
 }
 
@@ -159,6 +175,7 @@ export const pastDueExpiredSubscription: RecurlySubscription = {
     additionalLicenses: 0,
     totalLicenses: 0,
     nextPaymentDueAt,
+    nextPaymentDueDate,
     currency: 'USD',
     state: 'expired',
     trialEndsAtFormatted: null,
@@ -166,10 +183,14 @@ export const pastDueExpiredSubscription: RecurlySubscription = {
     activeCoupons: [],
     account: {
       email: 'fake@example.com',
+      created_at: '2024-12-31T09:40:27.000Z',
       has_canceled_subscription: { _: 'false', $: { type: 'boolean' } },
       has_past_due_invoice: { _: 'true', $: { type: 'boolean' } },
     },
     displayPrice: '$199.00',
+    planOnlyDisplayPrice: '',
+    addOns: [],
+    addOnDisplayPricesWithoutAdditionalLicense: {},
   },
 }
 
@@ -199,6 +220,7 @@ export const canceledSubscription: RecurlySubscription = {
     additionalLicenses: 0,
     totalLicenses: 0,
     nextPaymentDueAt,
+    nextPaymentDueDate,
     currency: 'USD',
     state: 'canceled',
     trialEndsAtFormatted: null,
@@ -206,10 +228,14 @@ export const canceledSubscription: RecurlySubscription = {
     activeCoupons: [],
     account: {
       email: 'fake@example.com',
+      created_at: '2024-12-31T09:40:27.000Z',
       has_canceled_subscription: { _: 'true', $: { type: 'boolean' } },
       has_past_due_invoice: { _: 'false', $: { type: 'boolean' } },
     },
     displayPrice: '$199.00',
+    planOnlyDisplayPrice: '',
+    addOns: [],
+    addOnDisplayPricesWithoutAdditionalLicense: {},
   },
 }
 
@@ -239,6 +265,7 @@ export const pendingSubscriptionChange: RecurlySubscription = {
     additionalLicenses: 0,
     totalLicenses: 0,
     nextPaymentDueAt,
+    nextPaymentDueDate,
     currency: 'USD',
     state: 'active',
     trialEndsAtFormatted: null,
@@ -246,10 +273,14 @@ export const pendingSubscriptionChange: RecurlySubscription = {
     activeCoupons: [],
     account: {
       email: 'fake@example.com',
+      created_at: '2024-12-31T09:40:27.000Z',
       has_canceled_subscription: { _: 'false', $: { type: 'boolean' } },
       has_past_due_invoice: { _: 'false', $: { type: 'boolean' } },
     },
     displayPrice: '$199.00',
+    planOnlyDisplayPrice: '',
+    addOns: [],
+    addOnDisplayPricesWithoutAdditionalLicense: {},
   },
   pendingPlan: {
     planCode: 'professional-annual',
@@ -290,6 +321,7 @@ export const groupActiveSubscription: GroupSubscription = {
     additionalLicenses: 0,
     totalLicenses: 10,
     nextPaymentDueAt,
+    nextPaymentDueDate,
     currency: 'USD',
     state: 'active',
     trialEndsAtFormatted: null,
@@ -297,10 +329,14 @@ export const groupActiveSubscription: GroupSubscription = {
     activeCoupons: [],
     account: {
       email: 'fake@example.com',
+      created_at: '2024-12-31T09:40:27.000Z',
       has_canceled_subscription: { _: 'false', $: { type: 'boolean' } },
       has_past_due_invoice: { _: 'false', $: { type: 'boolean' } },
     },
     displayPrice: '$1290.00',
+    planOnlyDisplayPrice: '',
+    addOns: [],
+    addOnDisplayPricesWithoutAdditionalLicense: {},
   },
 }
 
@@ -335,6 +371,7 @@ export const groupActiveSubscriptionWithPendingLicenseChange: GroupSubscription 
       additionalLicenses: 11,
       totalLicenses: 21,
       nextPaymentDueAt,
+      nextPaymentDueDate,
       currency: 'USD',
       state: 'active',
       trialEndsAtFormatted: null,
@@ -342,6 +379,7 @@ export const groupActiveSubscriptionWithPendingLicenseChange: GroupSubscription 
       activeCoupons: [],
       account: {
         email: 'fake@example.com',
+        created_at: '2024-12-31T09:40:27.000Z',
         has_canceled_subscription: {
           _: 'false',
           $: {
@@ -359,6 +397,9 @@ export const groupActiveSubscriptionWithPendingLicenseChange: GroupSubscription 
       currentPlanDisplayPrice: '$2709.00',
       pendingAdditionalLicenses: 13,
       pendingTotalLicenses: 23,
+      planOnlyDisplayPrice: '',
+      addOns: [],
+      addOnDisplayPricesWithoutAdditionalLicense: {},
     },
     pendingPlan: {
       planCode: 'group_collaborator_10_enterprise',
@@ -398,6 +439,7 @@ export const trialSubscription: RecurlySubscription = {
     additionalLicenses: 0,
     totalLicenses: 0,
     nextPaymentDueAt: sevenDaysFromTodayFormatted,
+    nextPaymentDueDate: sevenDaysFromTodayFormatted,
     currency: 'USD',
     state: 'active',
     trialEndsAtFormatted: sevenDaysFromTodayFormatted,
@@ -405,6 +447,7 @@ export const trialSubscription: RecurlySubscription = {
     activeCoupons: [],
     account: {
       email: 'fake@example.com',
+      created_at: '2024-12-31T09:40:27.000Z',
       has_canceled_subscription: {
         _: 'false',
         $: {
@@ -419,6 +462,9 @@ export const trialSubscription: RecurlySubscription = {
       },
     },
     displayPrice: '$14.00',
+    planOnlyDisplayPrice: '',
+    addOns: [],
+    addOnDisplayPricesWithoutAdditionalLicense: {},
   },
 }
 
@@ -469,6 +515,7 @@ export const trialCollaboratorSubscription: RecurlySubscription = {
     additionalLicenses: 0,
     totalLicenses: 0,
     nextPaymentDueAt: sevenDaysFromTodayFormatted,
+    nextPaymentDueDate: sevenDaysFromTodayFormatted,
     currency: 'USD',
     state: 'active',
     trialEndsAtFormatted: sevenDaysFromTodayFormatted,
@@ -476,6 +523,7 @@ export const trialCollaboratorSubscription: RecurlySubscription = {
     activeCoupons: [],
     account: {
       email: 'foo@example.com',
+      created_at: '2024-12-31T09:40:27.000Z',
       has_canceled_subscription: {
         _: 'false',
         $: {
@@ -490,6 +538,9 @@ export const trialCollaboratorSubscription: RecurlySubscription = {
       },
     },
     displayPrice: '$21.00',
+    planOnlyDisplayPrice: '',
+    addOns: [],
+    addOnDisplayPricesWithoutAdditionalLicense: {},
   },
 }
 
@@ -518,6 +569,7 @@ export const monthlyActiveCollaborator: RecurlySubscription = {
     additionalLicenses: 0,
     totalLicenses: 0,
     nextPaymentDueAt,
+    nextPaymentDueDate,
     currency: 'USD',
     state: 'active',
     trialEndsAtFormatted: null,
@@ -525,9 +577,13 @@ export const monthlyActiveCollaborator: RecurlySubscription = {
     activeCoupons: [],
     account: {
       email: 'foo@example.com',
+      created_at: '2024-12-31T09:40:27.000Z',
       has_canceled_subscription: { _: 'false', $: { type: 'boolean' } },
       has_past_due_invoice: { _: 'false', $: { type: 'boolean' } },
     },
     displayPrice: '$21.00',
+    planOnlyDisplayPrice: '',
+    addOns: [],
+    addOnDisplayPricesWithoutAdditionalLicense: {},
   },
 }

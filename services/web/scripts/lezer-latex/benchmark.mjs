@@ -1,8 +1,8 @@
 import { parser } from '../../frontend/js/features/source-editor/lezer-latex/latex.mjs'
 
-import * as fs from 'fs'
-import * as path from 'path'
-import { fileURLToPath } from 'url'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import minimist from 'minimist'
 
 const argv = minimist(process.argv.slice(2))
@@ -13,7 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const examplesDir = path.join(
   __dirname,
-  '../../test/unit/src/lezer-latex/examples'
+  '../../test/unit/src/LezerLatex/examples'
 )
 
 const strictParser = parser.configure({ strict: true }) // throw exception for invalid documents

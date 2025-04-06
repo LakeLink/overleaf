@@ -20,6 +20,7 @@ import {
 } from 'react'
 import { Tag } from '../../../../../app/src/Features/Tags/types'
 import {
+  ClonedProject,
   GetProjectsResponseBody,
   Project,
   Sort,
@@ -34,6 +35,7 @@ import {
   isDeletableProject,
   isLeavableProject,
 } from '../util/project'
+import { debugConsole } from '@/utils/debugging'
 
 const MAX_PROJECT_PER_PAGE = 20
 
@@ -68,7 +70,7 @@ const filters: FilterMap = {
 export const UNCATEGORIZED_KEY = 'uncategorized'
 
 export type ProjectListContextValue = {
-  addClonedProjectToViewData: (project: Project) => void
+  addClonedProjectToViewData: (project: ClonedProject) => void
   selectOrUnselectAllProjects: React.Dispatch<React.SetStateAction<boolean>>
   visibleProjects: Project[]
   totalProjectsCount: number
@@ -94,6 +96,9 @@ export type ProjectListContextValue = {
   searchText: string
   setSearchText: React.Dispatch<React.SetStateAction<string>>
   selectedProjects: Project[]
+  selectedProjectIds: Set<string>
+  setSelectedProjectIds: React.Dispatch<React.SetStateAction<Set<string>>>
+  toggleSelectedProject: (projectId: string, selected?: boolean) => void
   hiddenProjectsCount: number
   loadMoreCount: number
   showAllProjects: () => void
@@ -140,7 +145,7 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
   >('project-list-selected-tag-id', undefined)
   const [showCustomPicker, setShowCustomPicker] = useState(false)
 
-  const olTags: Tag[] = getMeta('ol-tags', [])
+  const olTags = getMeta('ol-tags') || []
 
   const [tags, setTags] = useState<Tag[]>(() =>
     // `tag.name` data may be null for some old users
@@ -168,7 +173,7 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
         setLoadedProjects(data.projects)
         setTotalProjectsCount(data.totalSize)
       })
-      .catch(error => console.error(error))
+      .catch(debugConsole.error)
       .finally(() => {
         setLoadProgress(100)
       })
@@ -260,22 +265,46 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
     setMaxVisibleProjects(maxVisibleProjects + loadMoreCount)
   }, [maxVisibleProjects, loadMoreCount])
 
+  const [selectedProjectIds, setSelectedProjectIds] = useState(
+    () => new Set<string>()
+  )
+
+  const toggleSelectedProject = useCallback(
+    (projectId: string, selected?: boolean) => {
+      setSelectedProjectIds(prevSelectedProjectIds => {
+        const selectedProjectIds = new Set(prevSelectedProjectIds)
+        if (selected === true) {
+          selectedProjectIds.add(projectId)
+        } else if (selected === false) {
+          selectedProjectIds.delete(projectId)
+        } else if (selectedProjectIds.has(projectId)) {
+          selectedProjectIds.delete(projectId)
+        } else {
+          selectedProjectIds.add(projectId)
+        }
+        return selectedProjectIds
+      })
+    },
+    []
+  )
+
   const selectedProjects = useMemo(() => {
-    return visibleProjects.filter(project => project.selected)
-  }, [visibleProjects])
+    return visibleProjects.filter(project => selectedProjectIds.has(project.id))
+  }, [selectedProjectIds, visibleProjects])
 
   const selectOrUnselectAllProjects = useCallback(
     checked => {
-      const visibleProjectIds = visibleProjects.map(p => p.id)
-      setLoadedProjects(loadedProjects =>
-        loadedProjects.map(p => {
-          if (visibleProjectIds.includes(p.id)) {
-            return { ...p, selected: checked }
+      setSelectedProjectIds(prevSelectedProjectIds => {
+        const selectedProjectIds = new Set(prevSelectedProjectIds)
+        for (const project of visibleProjects) {
+          if (checked) {
+            selectedProjectIds.add(project.id)
           } else {
-            return p
+            selectedProjectIds.delete(project.id)
           }
-        })
-      )
+        }
+        return selectedProjectIds
+      })
     },
     [visibleProjects]
   )
@@ -374,7 +403,7 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
   )
 
   const addClonedProjectToViewData = useCallback(
-    project => {
+    (project: ClonedProject) => {
       // clone API not using camelCase and does not return all data
 
       const owner = {
@@ -384,7 +413,7 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
         lastName: project.owner?.last_name,
       }
 
-      const clonedProject = {
+      const clonedProject: Project = {
         ...project,
         id: project.project_id,
         owner,
@@ -446,16 +475,19 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
       selectedTagId,
       selectFilter,
       selectedProjects,
+      selectedProjectIds,
       selectOrUnselectAllProjects,
       selectTag,
       searchText,
       setSearchText,
+      setSelectedProjectIds,
       setShowCustomPicker,
       setSort,
       showAllProjects,
       showCustomPicker,
       sort,
       tags,
+      toggleSelectedProject,
       totalProjectsCount,
       untaggedProjectsCount,
       updateProjectViewData,
@@ -481,17 +513,20 @@ export function ProjectListProvider({ children }: ProjectListProviderProps) {
       removeProjectFromView,
       selectedTagId,
       selectFilter,
+      selectedProjectIds,
       selectedProjects,
       selectOrUnselectAllProjects,
       selectTag,
       searchText,
       setSearchText,
+      setSelectedProjectIds,
       setShowCustomPicker,
       setSort,
       showAllProjects,
       showCustomPicker,
       sort,
       tags,
+      toggleSelectedProject,
       totalProjectsCount,
       untaggedProjectsCount,
       updateProjectViewData,

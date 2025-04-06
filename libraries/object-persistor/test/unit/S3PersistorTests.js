@@ -3,6 +3,7 @@ const chai = require('chai')
 const { expect } = chai
 const SandboxedModule = require('sandboxed-module')
 const Errors = require('../../src/Errors')
+const { EventEmitter } = require('node:events')
 
 const MODULE_PATH = '../../src/S3Persistor.js'
 
@@ -31,14 +32,15 @@ describe('S3PersistorTests', function () {
 
   let Logger,
     Transform,
+    PassThrough,
     S3,
     Fs,
     ReadStream,
     Stream,
     StreamPromises,
+    S3GetObjectRequest,
     S3Persistor,
     S3Client,
-    S3ReadStream,
     S3NotFoundError,
     S3AccessDeniedError,
     FileNotFoundError,
@@ -55,18 +57,15 @@ describe('S3PersistorTests', function () {
     }
 
     Transform = class {
-      on(event, callback) {
-        if (event === 'readable') {
-          callback()
-        }
-      }
-
       once() {}
-      removeListener() {}
     }
+
+    PassThrough = class {}
 
     Stream = {
       Transform,
+      PassThrough,
+      pipeline: sinon.stub().yields(),
     }
 
     StreamPromises = {
@@ -77,16 +76,42 @@ describe('S3PersistorTests', function () {
       promise: sinon.stub().resolves(),
     }
 
-    ReadStream = {
-      pipe: sinon.stub().returns('readStream'),
-      on: sinon.stub(),
-      removeListener: sinon.stub(),
+    ReadStream = new EventEmitter()
+    class FakeS3GetObjectRequest extends EventEmitter {
+      constructor() {
+        super()
+        this.statusCode = 200
+        this.err = null
+        this.aborted = false
+      }
+
+      abort() {
+        this.aborted = true
+      }
+
+      createReadStream() {
+        setTimeout(() => {
+          if (this.notFoundSSEC) {
+            // special case for AWS S3: 404 NoSuchKey wrapped in a 400. A single request received a single response, and multiple httpHeaders events are triggered. Don't ask.
+            this.emit('httpHeaders', 400, {})
+            this.emit('httpHeaders', 404, {})
+            ReadStream.emit('error', S3NotFoundError)
+            return
+          }
+
+          if (this.err) return ReadStream.emit('error', this.err)
+          this.emit('httpHeaders', this.statusCode, {})
+          if (this.statusCode === 403) {
+            ReadStream.emit('error', S3AccessDeniedError)
+          }
+          if (this.statusCode === 404) {
+            ReadStream.emit('error', S3NotFoundError)
+          }
+        })
+        return ReadStream
+      }
     }
-    ReadStream.on.withArgs('end').yields()
-    ReadStream.on.withArgs('pipe').yields({
-      unpipe: sinon.stub(),
-      resume: sinon.stub(),
-    })
+    S3GetObjectRequest = new FakeS3GetObjectRequest()
 
     FileNotFoundError = new Error('File not found')
     FileNotFoundError.code = 'ENOENT'
@@ -101,20 +126,8 @@ describe('S3PersistorTests', function () {
     S3AccessDeniedError = new Error('access denied')
     S3AccessDeniedError.code = 'AccessDenied'
 
-    S3ReadStream = {
-      on: sinon.stub(),
-      pipe: sinon.stub(),
-      removeListener: sinon.stub(),
-    }
-    S3ReadStream.on.withArgs('end').yields()
-    S3ReadStream.on.withArgs('pipe').yields({
-      unpipe: sinon.stub(),
-      resume: sinon.stub(),
-    })
     S3Client = {
-      getObject: sinon.stub().returns({
-        createReadStream: sinon.stub().returns(S3ReadStream),
-      }),
+      getObject: sinon.stub().returns(S3GetObjectRequest),
       headObject: sinon.stub().returns({
         promise: sinon.stub().resolves({
           ContentLength: objectSize,
@@ -134,7 +147,7 @@ describe('S3PersistorTests', function () {
       deleteObjects: sinon.stub().returns(EmptyPromise),
       getSignedUrlPromise: sinon.stub().resolves(redirectUrl),
     }
-    S3 = sinon.stub().returns(S3Client)
+    S3 = sinon.stub().callsFake(() => Object.assign({}, S3Client))
 
     Hash = {
       end: sinon.stub(),
@@ -160,7 +173,7 @@ describe('S3PersistorTests', function () {
         crypto,
       },
       globals: { console, Buffer },
-    }))(settings)
+    }).S3Persistor)(settings)
   })
 
   describe('getObjectStream', function () {
@@ -171,8 +184,8 @@ describe('S3PersistorTests', function () {
         stream = await S3Persistor.getObjectStream(bucket, key)
       })
 
-      it('returns a metered stream', function () {
-        expect(stream).to.be.instanceOf(Transform)
+      it('returns a PassThrough stream', function () {
+        expect(stream).to.be.instanceOf(PassThrough)
       })
 
       it('sets the AWS client up with credentials from settings', function () {
@@ -187,9 +200,15 @@ describe('S3PersistorTests', function () {
       })
 
       it('pipes the stream through the meter', async function () {
-        expect(S3ReadStream.pipe).to.have.been.calledWith(
-          sinon.match.instanceOf(Transform)
+        expect(Stream.pipeline).to.have.been.calledWith(
+          ReadStream,
+          sinon.match.instanceOf(Transform),
+          sinon.match.instanceOf(PassThrough)
         )
+      })
+
+      it('does not abort the request', function () {
+        expect(S3GetObjectRequest.aborted).to.equal(false)
       })
     })
 
@@ -203,8 +222,8 @@ describe('S3PersistorTests', function () {
         })
       })
 
-      it('returns a metered stream', function () {
-        expect(stream).to.be.instanceOf(Stream.Transform)
+      it('returns a PassThrough stream', function () {
+        expect(stream).to.be.instanceOf(Stream.PassThrough)
       })
 
       it('passes the byte range on to S3', function () {
@@ -213,6 +232,23 @@ describe('S3PersistorTests', function () {
           Key: key,
           Range: 'bytes=5-10',
         })
+      })
+    })
+
+    describe('when streaming fails', function () {
+      let stream
+
+      beforeEach(async function () {
+        Stream.pipeline.yields(new Error())
+        stream = await S3Persistor.getObjectStream(bucket, key)
+      })
+
+      it('returns a PassThrough stream', function () {
+        expect(stream).to.be.instanceOf(Stream.PassThrough)
+      })
+
+      it('aborts the request', function () {
+        expect(S3GetObjectRequest.aborted).to.equal(true)
       })
     })
 
@@ -237,8 +273,8 @@ describe('S3PersistorTests', function () {
         stream = await S3Persistor.getObjectStream(bucket, key)
       })
 
-      it('returns a metered stream', function () {
-        expect(stream).to.be.instanceOf(Stream.Transform)
+      it('returns a PassThrough stream', function () {
+        expect(stream).to.be.instanceOf(Stream.PassThrough)
       })
 
       it('sets the AWS client up with the alternative credentials', function () {
@@ -259,14 +295,16 @@ describe('S3PersistorTests', function () {
         expect(S3.firstCall).to.have.been.calledWith(alternativeS3Credentials)
         expect(S3.secondCall).to.have.been.calledWith(defaultS3Credentials)
       })
+    })
 
-      it('throws an error if there are no credentials for the bucket', async function () {
+    describe('without hard-coded credentials', function () {
+      it('uses the default provider chain', async function () {
         delete settings.key
         delete settings.secret
 
-        await expect(
-          S3Persistor.getObjectStream('anotherBucket', key)
-        ).to.eventually.be.rejected.and.be.an.instanceOf(Errors.SettingsError)
+        await S3Persistor.getObjectStream(bucket, key)
+        expect(S3).to.have.been.calledOnce
+        expect(S3.args[0].credentials).to.not.exist
       })
     })
 
@@ -289,8 +327,7 @@ describe('S3PersistorTests', function () {
       let error, stream
 
       beforeEach(async function () {
-        Transform.prototype.on = sinon.stub()
-        S3ReadStream.on.withArgs('error').yields(S3NotFoundError)
+        S3GetObjectRequest.statusCode = 404
         try {
           stream = await S3Persistor.getObjectStream(bucket, key)
         } catch (err) {
@@ -298,6 +335,34 @@ describe('S3PersistorTests', function () {
         }
       })
 
+      it('does not return a stream', function () {
+        expect(stream).not.to.exist
+      })
+
+      it('throws a NotFoundError', function () {
+        expect(error).to.be.an.instanceOf(Errors.NotFoundError)
+      })
+
+      it('wraps the error', function () {
+        expect(error.cause).to.exist
+      })
+
+      it('stores the bucket and key in the error', function () {
+        expect(error.info).to.include({ bucketName: bucket, key })
+      })
+    })
+
+    describe("when the file doesn't exist -- SSEC", function () {
+      let error, stream
+
+      beforeEach(async function () {
+        S3GetObjectRequest.notFoundSSEC = 404
+        try {
+          stream = await S3Persistor.getObjectStream(bucket, key)
+        } catch (err) {
+          error = err
+        }
+      })
       it('does not return a stream', function () {
         expect(stream).not.to.exist
       })
@@ -319,8 +384,7 @@ describe('S3PersistorTests', function () {
       let error, stream
 
       beforeEach(async function () {
-        Transform.prototype.on = sinon.stub()
-        S3ReadStream.on.withArgs('error').yields(S3AccessDeniedError)
+        S3GetObjectRequest.statusCode = 403
         try {
           stream = await S3Persistor.getObjectStream(bucket, key)
         } catch (err) {
@@ -337,7 +401,7 @@ describe('S3PersistorTests', function () {
       })
 
       it('wraps the error', function () {
-        expect(error.cause).to.exist
+        expect(error.cause).to.equal(S3AccessDeniedError)
       })
 
       it('stores the bucket and key in the error', function () {
@@ -345,12 +409,11 @@ describe('S3PersistorTests', function () {
       })
     })
 
-    describe('when S3 encounters an unkown error', function () {
+    describe('when S3 encounters an unknown error', function () {
       let error, stream
 
       beforeEach(async function () {
-        Transform.prototype.on = sinon.stub()
-        S3ReadStream.on.withArgs('error').yields(genericError)
+        S3GetObjectRequest.err = genericError
         try {
           stream = await S3Persistor.getObjectStream(bucket, key)
         } catch (err) {
@@ -480,7 +543,8 @@ describe('S3PersistorTests', function () {
       })
 
       it('should meter the stream', function () {
-        expect(ReadStream.pipe).to.have.been.calledWith(
+        expect(Stream.pipeline).to.have.been.calledWith(
+          ReadStream,
           sinon.match.instanceOf(Stream.Transform)
         )
       })
@@ -606,12 +670,6 @@ describe('S3PersistorTests', function () {
           Bucket: bucket,
           Key: key,
         })
-      })
-
-      it('should meter the download', function () {
-        expect(S3ReadStream.pipe).to.have.been.calledWith(
-          sinon.match.instanceOf(Stream.Transform)
-        )
       })
 
       it('should calculate the md5 hash from the file', function () {
@@ -967,6 +1025,24 @@ describe('S3PersistorTests', function () {
       it('should eventually wrap the error', function () {
         expect(error.cause.cause).to.equal(genericError)
       })
+    })
+  })
+
+  describe('_getClientForBucket', function () {
+    it('should return same instance for same bucket', function () {
+      const a = S3Persistor._getClientForBucket('foo')
+      const b = S3Persistor._getClientForBucket('foo')
+      expect(a).to.equal(b)
+    })
+    it('should return different instance for different bucket', function () {
+      const a = S3Persistor._getClientForBucket('foo')
+      const b = S3Persistor._getClientForBucket('bar')
+      expect(a).to.not.equal(b)
+    })
+    it('should return different instance for same bucket different computeChecksums', function () {
+      const a = S3Persistor._getClientForBucket('foo', false)
+      const b = S3Persistor._getClientForBucket('foo', true)
+      expect(a).to.not.equal(b)
     })
   })
 })

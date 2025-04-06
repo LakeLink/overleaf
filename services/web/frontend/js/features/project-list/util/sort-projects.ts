@@ -1,7 +1,7 @@
 import { Project, Sort } from '../../../../../types/project/dashboard/api'
 import { SortingOrder } from '../../../../../types/sorting-order'
 import { getOwnerName } from './project'
-import { Compare } from '../../../../../types/array/sort'
+import { Compare } from '../../../../../types/helpers/array/sort'
 
 const order = (order: SortingOrder, projects: Project[]) => {
   return order === 'asc' ? [...projects] : projects.reverse()
@@ -49,9 +49,7 @@ export const ownerNameComparator = (v1: Project, v2: Project) => {
     return Compare.SORT_A_AFTER_B
   }
 
-  return ownerNameV1 > ownerNameV2
-    ? Compare.SORT_A_BEFORE_B
-    : Compare.SORT_A_AFTER_B
+  return ownerNameV1.localeCompare(ownerNameV2)
 }
 
 export const defaultComparator = (

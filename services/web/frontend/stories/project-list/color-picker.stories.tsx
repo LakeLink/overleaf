@@ -2,8 +2,6 @@ import { ColorPicker } from '../../js/features/project-list/components/color-pic
 import { ColorPickerProvider } from '../../js/features/project-list/context/color-picker-context'
 
 export const Select = (args: any) => {
-  window.metaAttributesCache = new Map()
-
   return (
     <ColorPickerProvider>
       <ColorPicker {...args} />
@@ -14,4 +12,7 @@ export const Select = (args: any) => {
 export default {
   title: 'Project List / Color Picker',
   component: ColorPicker,
+  parameters: {
+    bootstrap5: true,
+  },
 }

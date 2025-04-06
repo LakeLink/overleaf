@@ -1,8 +1,12 @@
-import localStorage from '../../../../frontend/js/infrastructure/local-storage'
+import localStorage from '@/infrastructure/local-storage'
 import PdfPreview from '../../../../frontend/js/features/pdf-preview/components/pdf-preview'
 import { EditorProviders } from '../../helpers/editor-providers'
 import { mockScope } from './scope'
-import { useLayoutContext } from '../../../../frontend/js/shared/context/layout-context'
+import {
+  IdeLayout,
+  IdeView,
+  useLayoutContext,
+} from '../../../../frontend/js/shared/context/layout-context'
 import { FC, useEffect } from 'react'
 
 const storeAndFireEvent = (win: typeof window, key: string, value: unknown) => {
@@ -10,7 +14,10 @@ const storeAndFireEvent = (win: typeof window, key: string, value: unknown) => {
   win.dispatchEvent(new StorageEvent('storage', { key }))
 }
 
-const Layout: FC<{ layout: string; view?: string }> = ({ layout, view }) => {
+const Layout: FC<{ layout: IdeLayout; view?: IdeView }> = ({
+  layout,
+  view,
+}) => {
   const { changeLayout } = useLayoutContext()
 
   useEffect(() => {
@@ -23,11 +30,11 @@ const Layout: FC<{ layout: string; view?: string }> = ({ layout, view }) => {
 describe('<PdfPreview/>', function () {
   beforeEach(function () {
     window.metaAttributesCache.set('ol-preventCompileOnLoad', true)
+    window.metaAttributesCache.set(
+      'ol-compilesUserContentDomain',
+      'https://compiles-user.dev-overleaf.com'
+    )
     cy.interceptEvents()
-  })
-
-  afterEach(function () {
-    window.metaAttributesCache = new Map()
   })
 
   it('renders the PDF preview', function () {
@@ -110,25 +117,23 @@ describe('<PdfPreview/>', function () {
         )
 
         // start compiling
-        cy.findByRole('button', { name: 'Recompile' })
-          .click()
-          .then(() => {
-            cy.findByRole('button', { name: 'Compiling…' })
+        cy.findByRole('button', { name: 'Recompile' }).click()
 
-            // trigger a recompile
-            cy.window().then(win => {
-              win.dispatchEvent(new CustomEvent('pdf:recompile'))
-            })
+        cy.findByRole('button', { name: 'Compiling…' }).then(() => {
+          // trigger a recompile
+          cy.window().then(win => {
+            win.dispatchEvent(new CustomEvent('pdf:recompile'))
+          })
 
-            // finish the original compile
-            resolveDeferredCompile()
+          // finish the original compile
+          resolveDeferredCompile()
 
-            // wait for the original compile to finish
-            cy.waitForCompile({ pdf: true })
-
+          // wait for the original compile to finish
+          cy.waitForCompile().then(() => {
             // NOTE: difficult to assert that a second request won't be sent, at some point
             expect(counter).to.equal(1)
           })
+        })
       }
     )
   })
@@ -148,7 +153,7 @@ describe('<PdfPreview/>', function () {
       cy.findByRole('button', { name: 'Recompile' }).click()
       cy.findByRole('button', { name: 'Compiling…' })
         .should('be.disabled')
-        .then(resolveDeferredCompile)
+        .then(() => resolveDeferredCompile())
 
       cy.waitForCompile()
       cy.findByRole('button', { name: 'Recompile' }).should('not.be.disabled')
@@ -226,12 +231,12 @@ describe('<PdfPreview/>', function () {
 
     const scope = mockScope()
     // enable linting in the editor
-    scope.settings.syntaxValidation = true
+    const userSettings = { syntaxValidation: true }
     // mock a linting error
     scope.hasLintingError = true
 
     cy.mount(
-      <EditorProviders scope={scope}>
+      <EditorProviders scope={scope} userSettings={userSettings}>
         <div className="pdf-viewer">
           <PdfPreview />
         </div>
@@ -435,9 +440,14 @@ describe('<PdfPreview/>', function () {
         'not.be.disabled'
       )
 
-      cy.intercept('DELETE', '/project/*/output*', {
-        statusCode: 204,
-        delay: 100,
+      const { promise, resolve } = Promise.withResolvers<void>()
+
+      cy.intercept('DELETE', '/project/*/output*', req => {
+        return promise
+          .then(() => Cypress.Promise.delay(100))
+          .then(() => {
+            req.reply({ statusCode: 204 })
+          })
       }).as('clear-cache')
 
       // click the button
@@ -445,6 +455,9 @@ describe('<PdfPreview/>', function () {
       cy.findByRole('button', { name: 'Clear cached files' }).should(
         'be.disabled'
       )
+      cy.then(() => {
+        resolve()
+      })
       cy.wait('@clear-cache')
       cy.findByRole('button', { name: 'Clear cached files' }).should(
         'not.be.disabled'
@@ -467,6 +480,7 @@ describe('<PdfPreview/>', function () {
       cy.findByRole('button', { name: 'Recompile' }).click()
       cy.waitForCompile({ pdf: true })
       cy.interceptCompile('recompile')
+
       cy.intercept('DELETE', '/project/*/output*', {
         statusCode: 204,
         delay: 100,
@@ -479,23 +493,28 @@ describe('<PdfPreview/>', function () {
         'not.be.disabled'
       )
 
-      // TODO: open the menu?
-      cy.findByRole('menuitem', {
-        name: 'Recompile from scratch',
-        hidden: true,
-      }).trigger('click', { force: true })
+      cy.interceptDeferredCompile().then(resolveDeferredCompile => {
+        cy.findByRole('button', { name: 'Toggle compile options menu' }).click()
 
-      cy.findByRole('button', { name: 'Clear cached files' }).should(
-        'be.disabled'
-      )
+        cy.findByRole('menuitem', {
+          name: 'Recompile from scratch',
+        }).trigger('click')
 
-      cy.findByRole('button', { name: 'Compiling…' })
-      cy.wait('@clear-cache')
+        cy.findByRole('button', { name: 'Clear cached files' }).should(
+          'be.disabled'
+        )
 
-      // wait for recompile from scratch to finish
-      cy.waitForCompile({ pdf: true, prefix: 'recompile' })
+        cy.wait('@clear-cache')
 
-      cy.findByRole('button', { name: 'Recompile' })
+        cy.findByRole('button', { name: 'Compiling…' }).then(() =>
+          resolveDeferredCompile()
+        )
+
+        // wait for recompile from scratch to finish
+        cy.waitForCompile({ pdf: true })
+
+        cy.findByRole('button', { name: 'Recompile' })
+      })
     })
   })
 

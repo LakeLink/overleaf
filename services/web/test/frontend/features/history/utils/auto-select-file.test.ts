@@ -1,9 +1,10 @@
 import { expect } from 'chai'
-import type { HistoryContextValue } from '../../../../../frontend/js/features/history/context/types/history-context-value'
 import type { FileDiff } from '../../../../../frontend/js/features/history/services/types/file'
 import { autoSelectFile } from '../../../../../frontend/js/features/history/utils/auto-select-file'
 import type { User } from '../../../../../frontend/js/features/history/services/types/shared'
-import { UpdateSelection } from '../../../../../frontend/js/features/history/services/types/update'
+import { LoadedUpdate } from '../../../../../frontend/js/features/history/services/types/update'
+import { fileFinalPathname } from '../../../../../frontend/js/features/history/utils/file-diff'
+import { getUpdateForVersion } from '../../../../../frontend/js/features/history/utils/history-details'
 
 describe('autoSelectFile', function () {
   const historyUsers: User[] = [
@@ -22,18 +23,23 @@ describe('autoSelectFile', function () {
       const files: FileDiff[] = [
         {
           pathname: 'main.tex',
+          editable: true,
         },
         {
           pathname: 'sample.bib',
+          editable: true,
         },
         {
           pathname: 'frog.jpg',
+          editable: false,
         },
         {
           pathname: 'newfile5.tex',
+          editable: true,
         },
         {
           pathname: 'newfolder1/newfolder2/newfile2.tex',
+          editable: true,
         },
         {
           pathname: 'newfolder1/newfile10.tex',
@@ -41,7 +47,7 @@ describe('autoSelectFile', function () {
         },
       ]
 
-      const updates: HistoryContextValue['updates'] = [
+      const updates: LoadedUpdate[] = [
         {
           fromV: 25,
           toV: 26,
@@ -260,12 +266,13 @@ describe('autoSelectFile', function () {
         },
       ]
 
-      const updateSelection: UpdateSelection = {
-        update: updates[0],
+      const { pathname } = autoSelectFile(
+        files,
+        updates[0].toV,
         comparing,
-      }
-
-      const pathname = autoSelectFile(files, updateSelection, updates)
+        getUpdateForVersion(updates[0].toV, updates),
+        null
+      )
 
       expect(pathname).to.equal('newfolder1/newfile10.tex')
     })
@@ -275,22 +282,26 @@ describe('autoSelectFile', function () {
         {
           pathname: 'main.tex',
           operation: 'added',
+          editable: true,
         },
         {
           pathname: 'sample.bib',
           operation: 'added',
+          editable: true,
         },
         {
           pathname: 'frog.jpg',
           operation: 'added',
+          editable: false,
         },
         {
           pathname: 'newfile1.tex',
           operation: 'added',
+          editable: true,
         },
       ]
 
-      const updates: HistoryContextValue['updates'] = [
+      const updates: LoadedUpdate[] = [
         {
           fromV: 0,
           toV: 4,
@@ -330,12 +341,13 @@ describe('autoSelectFile', function () {
         },
       ]
 
-      const updateSelection: UpdateSelection = {
-        update: updates[0],
+      const { pathname } = autoSelectFile(
+        files,
+        updates[0].toV,
         comparing,
-      }
-
-      const pathname = autoSelectFile(files, updateSelection, updates)
+        getUpdateForVersion(updates[0].toV, updates),
+        null
+      )
 
       expect(pathname).to.equal('newfile1.tex')
     })
@@ -346,21 +358,25 @@ describe('autoSelectFile', function () {
           pathname: 'main.tex',
           operation: 'removed',
           deletedAtV: 6,
+          editable: true,
         },
         {
           pathname: 'sample.bib',
+          editable: true,
         },
         {
           pathname: 'main2.tex',
           operation: 'added',
+          editable: true,
         },
         {
           pathname: 'main3.tex',
           operation: 'added',
+          editable: true,
         },
       ]
 
-      const updates: HistoryContextValue['updates'] = [
+      const updates: LoadedUpdate[] = [
         {
           fromV: 4,
           toV: 7,
@@ -431,12 +447,13 @@ describe('autoSelectFile', function () {
         },
       ]
 
-      const updateSelection: UpdateSelection = {
-        update: updates[0],
+      const { pathname } = autoSelectFile(
+        files,
+        updates[0].toV,
         comparing,
-      }
-
-      const pathname = autoSelectFile(files, updateSelection, updates)
+        getUpdateForVersion(updates[0].toV, updates),
+        null
+      )
 
       expect(pathname).to.equal('main3.tex')
     })
@@ -445,22 +462,26 @@ describe('autoSelectFile', function () {
       const files: FileDiff[] = [
         {
           pathname: 'main.tex',
+          editable: true,
         },
         {
           pathname: 'sample.bib',
+          editable: true,
         },
         {
           pathname: 'frog.jpg',
+          editable: false,
         },
         {
           pathname: 'newfolder/maybewillbedeleted.tex',
           newPathname: 'newfolder2/maybewillbedeleted.tex',
           operation: 'removed',
           deletedAtV: 10,
+          editable: true,
         },
       ]
 
-      const updates: HistoryContextValue['updates'] = [
+      const updates: LoadedUpdate[] = [
         {
           fromV: 9,
           toV: 11,
@@ -602,12 +623,13 @@ describe('autoSelectFile', function () {
         },
       ]
 
-      const updateSelection: UpdateSelection = {
-        update: updates[0],
+      const { pathname } = autoSelectFile(
+        files,
+        updates[0].toV,
         comparing,
-      }
-
-      const pathname = autoSelectFile(files, updateSelection, updates)
+        getUpdateForVersion(updates[0].toV, updates),
+        null
+      )
 
       expect(pathname).to.equal('main.tex')
     })
@@ -616,16 +638,19 @@ describe('autoSelectFile', function () {
       const files: FileDiff[] = [
         {
           pathname: 'certainly_not_main.tex',
+          editable: true,
         },
         {
           pathname: 'newfile.tex',
+          editable: true,
         },
         {
           pathname: 'file2.tex',
+          editable: true,
         },
       ]
 
-      const updates: HistoryContextValue['updates'] = [
+      const updates: LoadedUpdate[] = [
         {
           fromV: 7,
           toV: 8,
@@ -710,14 +735,165 @@ describe('autoSelectFile', function () {
         },
       ]
 
-      const updateSelection: UpdateSelection = {
-        update: updates[0],
+      const { pathname } = autoSelectFile(
+        files,
+        updates[0].toV,
         comparing,
-      }
-
-      const pathname = autoSelectFile(files, updateSelection, updates)
+        getUpdateForVersion(updates[0].toV, updates),
+        null
+      )
 
       expect(pathname).to.equal('certainly_not_main.tex')
+    })
+
+    it('selects renamed file', function () {
+      const files: FileDiff[] = [
+        {
+          pathname: 'main.tex',
+          editable: true,
+        },
+        {
+          pathname: 'original.bib',
+          newPathname: 'new.bib',
+          operation: 'renamed',
+          editable: true,
+        },
+      ]
+
+      const updates: LoadedUpdate[] = [
+        {
+          fromV: 4,
+          toV: 7,
+          meta: {
+            users: historyUsers,
+            start_ts: 1680874742389,
+            end_ts: 1680874755552,
+          },
+          labels: [],
+          pathnames: [],
+          project_ops: [
+            {
+              rename: {
+                pathname: 'original.bib',
+                newPathname: 'new.bib',
+              },
+              atV: 5,
+            },
+          ],
+        },
+        {
+          fromV: 0,
+          toV: 4,
+          meta: {
+            users: historyUsers,
+            start_ts: 1680861975947,
+            end_ts: 1680861988442,
+          },
+          labels: [],
+          pathnames: [],
+          project_ops: [
+            {
+              add: {
+                pathname: 'original.bib',
+              },
+              atV: 1,
+            },
+            {
+              add: {
+                pathname: 'main.tex',
+              },
+              atV: 0,
+            },
+          ],
+        },
+      ]
+
+      const pathname = fileFinalPathname(
+        autoSelectFile(
+          files,
+          updates[0].toV,
+          comparing,
+          getUpdateForVersion(updates[0].toV, updates),
+          null
+        )
+      )
+
+      expect(pathname).to.equal('new.bib')
+    })
+
+    it('ignores binary file', function () {
+      const files: FileDiff[] = [
+        {
+          pathname: 'frog.jpg',
+          editable: false,
+          operation: 'added',
+        },
+        {
+          pathname: 'main.tex',
+          editable: true,
+        },
+        {
+          pathname: 'sample.bib',
+          editable: true,
+        },
+      ]
+
+      const updates: LoadedUpdate[] = [
+        {
+          fromV: 4,
+          toV: 7,
+          meta: {
+            users: historyUsers,
+            start_ts: 1680874742389,
+            end_ts: 1680874755552,
+          },
+          labels: [],
+          pathnames: [],
+          project_ops: [
+            {
+              add: {
+                pathname: 'frog.jpg',
+              },
+              atV: 5,
+            },
+          ],
+        },
+        {
+          fromV: 0,
+          toV: 4,
+          meta: {
+            users: historyUsers,
+            start_ts: 1680861975947,
+            end_ts: 1680861988442,
+          },
+          labels: [],
+          pathnames: [],
+          project_ops: [
+            {
+              add: {
+                pathname: 'sample.bib',
+              },
+              atV: 1,
+            },
+            {
+              add: {
+                pathname: 'main.tex',
+              },
+              atV: 0,
+            },
+          ],
+        },
+      ]
+
+      const { pathname } = autoSelectFile(
+        files,
+        updates[0].toV,
+        comparing,
+        getUpdateForVersion(updates[0].toV, updates),
+        null
+      )
+
+      expect(pathname).to.equal('main.tex')
     })
   })
 })

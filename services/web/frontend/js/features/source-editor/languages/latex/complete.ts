@@ -6,7 +6,10 @@ import {
 } from '@codemirror/autocomplete'
 import { customEndCompletions } from './completions/environments'
 import { customCommandCompletions } from './completions/doc-commands'
-import { customEnvironmentCompletions } from './completions/doc-environments'
+import {
+  customEnvironmentCompletions,
+  findEnvironmentsInDoc,
+} from './completions/doc-environments'
 import { Completions } from './completions/types'
 import { buildReferenceCompletions } from './completions/references'
 import { buildPackageCompletions } from './completions/packages'
@@ -20,6 +23,12 @@ import {
   cursorIsAtBeginEnvironment,
   cursorIsAtEndEnvironment,
 } from '../../utils/tree-query'
+import {
+  applySnippet,
+  extendOverUnpairedClosingBrace,
+} from './completions/apply'
+import { snippet } from './completions/data/environments'
+import { syntaxTree } from '@codemirror/language'
 
 function blankCompletions(): Completions {
   return {
@@ -83,12 +92,7 @@ export function getCompletionDetails(
 
   command = command.toLowerCase()
 
-  const existingKeys = existing
-    ? existing
-        .split(',')
-        .map(key => key.trim())
-        .filter(Boolean)
-    : []
+  const existingKeys = existing ? splitExistingKeys(existing) : []
 
   const from =
     matchBefore.from + (before?.length || 0) + (existing?.length || 0)
@@ -110,7 +114,9 @@ export type CompletionBuilderOptions = {
 
 export const makeArgumentCompletionSource = (
   ifInSpec: string[],
-  builder: (builderOptions: CompletionBuilderOptions) => CompletionResult | null
+  builder: (
+    builderOptions: CompletionBuilderOptions
+  ) => CompletionResult | null | Promise<CompletionResult | null>
 ): CompletionSource => {
   const completionSource: CompletionSource = (context: CompletionContext) => {
     const completionMatches = getCompletionMatches(context)
@@ -150,8 +156,44 @@ export const makeArgumentCompletionSource = (
   return ifIn(ifInSpec, completionSource)
 }
 
+const splitExistingKeys = (text: string) =>
+  text
+    .split(',')
+    .map(key => key.trim())
+    .filter(Boolean)
+
+export const makeMultipleArgumentCompletionSource = (
+  ifInSpec: string[],
+  builder: (
+    builderOptions: Pick<
+      CompletionBuilderOptions,
+      'completions' | 'context' | 'existingKeys' | 'from' | 'validFor'
+    >
+  ) => ReturnType<CompletionSource>
+): CompletionSource => {
+  const completionSource: CompletionSource = (context: CompletionContext) => {
+    const token = context.tokenBefore(ifInSpec)
+
+    if (!token) {
+      return null
+    }
+
+    // match multiple comma-separated arguments, up to the last separator
+    const existing = token.text.match(/^\{(.+\s*,\s*)?.*$/)?.[1] ?? ''
+
+    return builder({
+      completions: blankCompletions(),
+      context,
+      existingKeys: splitExistingKeys(existing),
+      from: token.from + 1 + existing.length,
+      validFor: /[^}\s]*/,
+    })
+  }
+  return ifIn(ifInSpec, completionSource)
+}
+
 export const bibKeyArgumentCompletionSource: CompletionSource =
-  makeArgumentCompletionSource(
+  makeMultipleArgumentCompletionSource(
     ['BibKeyArgument'],
     ({ completions, context, from, validFor, existingKeys }) => {
       buildReferenceCompletions(completions, context)
@@ -167,7 +209,7 @@ export const bibKeyArgumentCompletionSource: CompletionSource =
   )
 
 export const refArgumentCompletionSource: CompletionSource =
-  makeArgumentCompletionSource(
+  makeMultipleArgumentCompletionSource(
     ['RefArgument'],
     ({ completions, context, from, validFor, existingKeys }) => {
       buildLabelCompletions(completions, context)
@@ -183,7 +225,7 @@ export const refArgumentCompletionSource: CompletionSource =
   )
 
 export const packageArgumentCompletionSource: CompletionSource =
-  makeArgumentCompletionSource(
+  makeMultipleArgumentCompletionSource(
     ['PackageArgument'],
     ({ completions, context, from, validFor, existingKeys }) => {
       buildPackageCompletions(completions, context)
@@ -338,16 +380,6 @@ const commandCompletionSource = (context: CompletionContext) => {
 
   buildAllCompletions(completions, context)
 
-  // ensure that there's only one completion for each label
-  const uniqueCommandCompletions = Array.from(
-    new Map(
-      [
-        ...completions.commands,
-        ...customCommandCompletions(context, completions.commands),
-      ].map(completion => [completion.label, completion])
-    ).values()
-  )
-
   // Unknown commands
   const prefixMatcher = /^\\[^{\s]*$/
   const prefixMatch = matchBefore.text.match(prefixMatcher)
@@ -356,7 +388,8 @@ const commandCompletionSource = (context: CompletionContext) => {
       from: matchBefore.from,
       validFor: prefixMatcher,
       options: [
-        ...uniqueCommandCompletions,
+        ...completions.commands,
+        ...customCommandCompletions(context, completions.commands),
         ...customEnvironmentCompletions(context),
       ],
     }
@@ -365,7 +398,10 @@ const commandCompletionSource = (context: CompletionContext) => {
   // anything else (no validFor)
   return {
     from: matchBefore.to,
-    options: uniqueCommandCompletions,
+    options: [
+      ...completions.commands,
+      ...customCommandCompletions(context, completions.commands),
+    ],
   }
 }
 
@@ -378,4 +414,58 @@ export const inCommandCompletionSource: CompletionSource = ifInType(
 
 export const explicitCommandCompletionSource: CompletionSource = context => {
   return context.explicit ? commandCompletionSource(context) : null
+}
+
+/**
+ * An additional completion source that handles two situations:
+ *
+ * 1. Typing the environment name within an already-complete `\begin{…}` command.
+ * 2. After typing the closing brace of a complete `\begin{foo}` command, where the environment
+ * isn't previously known, leaving the cursor after the closing brace.
+ */
+export const beginEnvironmentCompletionSource: CompletionSource = context => {
+  const beginEnvToken = context.tokenBefore(['BeginEnv'])
+  if (!beginEnvToken) {
+    return null
+  }
+
+  const beginEnv = syntaxTree(context.state).resolveInner(
+    beginEnvToken.from,
+    1
+  ).parent
+  if (!beginEnv?.type.is('BeginEnv')) {
+    return null
+  }
+
+  const envNameGroup = beginEnv.getChild('EnvNameGroup')
+  if (!envNameGroup) {
+    return null
+  }
+
+  const envName = envNameGroup.getChild('$EnvName')
+  if (!envName) {
+    return null
+  }
+
+  const name = context.state.sliceDoc(envName.from, envName.to)
+
+  // if not directly after `\begin{…}`, exclude known environments
+  if (context.pos !== envNameGroup.to) {
+    const existingEnvironmentNames = findEnvironmentsInDoc(context)
+    if (existingEnvironmentNames.has(name)) {
+      return null
+    }
+  }
+
+  const completion = {
+    label: `\\begin{${name}} …`,
+    apply: applySnippet(snippet(name)),
+    extend: extendOverUnpairedClosingBrace,
+    boost: -99,
+  }
+
+  return {
+    from: beginEnvToken.from,
+    options: [completion],
+  }
 }

@@ -2,16 +2,25 @@ import { Meta, User } from './shared'
 import { Label } from './label'
 import { Nullable } from '../../../../../../types/utils'
 
+export type Version = number
+
 export interface ProjectOp {
   add?: { pathname: string }
   rename?: { pathname: string; newPathname: string }
   remove?: { pathname: string }
-  atV: number
+  atV: Version
+}
+
+export interface UpdateRange {
+  fromV: Version
+  toV: Version
+  fromVTimestamp: number
+  toVTimestamp: number
 }
 
 export interface Update {
-  fromV: number
-  toV: number
+  fromV: Version
+  toV: Version
   meta: Meta
   labels: Label[]
   pathnames: string[]
@@ -33,7 +42,7 @@ export interface LoadedUpdate extends Update {
   meta: LoadedUpdateMeta
 }
 
-export interface UpdateSelection {
-  update: Update
-  comparing: boolean
+export type FetchUpdatesResponse = {
+  updates: Update[]
+  nextBeforeTimestamp?: number
 }

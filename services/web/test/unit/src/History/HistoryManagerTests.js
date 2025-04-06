@@ -1,32 +1,27 @@
 const { expect } = require('chai')
 const sinon = require('sinon')
 const SandboxedModule = require('sandboxed-module')
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 
 const MODULE_PATH = '../../../../app/src/Features/History/HistoryManager'
 
 describe('HistoryManager', function () {
   beforeEach(function () {
     this.user_id = 'user-id-123'
-    this.historyId = ObjectId().toString()
+    this.historyId = new ObjectId().toString()
     this.AuthenticationController = {
       getLoggedInUserId: sinon.stub().returns(this.user_id),
     }
-    this.response = {
-      ok: true,
-      json: sinon.stub(),
+    this.FetchUtils = {
+      fetchJson: sinon.stub(),
+      fetchNothing: sinon.stub().resolves(),
     }
-    this.fetch = sinon.stub().resolves(this.response)
     this.projectHistoryUrl = 'http://project_history.example.com'
     this.v1HistoryUrl = 'http://v1_history.example.com'
     this.v1HistoryUser = 'system'
     this.v1HistoryPassword = 'verysecret'
     this.settings = {
       apis: {
-        trackchanges: {
-          enabled: false,
-          url: 'http://trackchanges.example.com',
-        },
         project_history: {
           url: this.projectHistoryUrl,
         },
@@ -45,66 +40,76 @@ describe('HistoryManager', function () {
       },
     }
 
+    this.project = {
+      overleaf: {
+        history: {
+          id: this.historyId,
+        },
+      },
+    }
+
+    this.ProjectGetter = {
+      promises: {
+        getProject: sinon.stub().resolves(this.project),
+      },
+    }
+
+    this.HistoryBackupDeletionHandler = {
+      deleteProject: sinon.stub().resolves(),
+    }
+
     this.HistoryManager = SandboxedModule.require(MODULE_PATH, {
       requires: {
-        'node-fetch': this.fetch,
+        '../../infrastructure/mongodb': { ObjectId },
+        '@overleaf/fetch-utils': this.FetchUtils,
         '@overleaf/settings': this.settings,
         '../User/UserGetter': this.UserGetter,
+        '../Project/ProjectGetter': this.ProjectGetter,
+        './HistoryBackupDeletionHandler': this.HistoryBackupDeletionHandler,
       },
     })
   })
 
   describe('initializeProject', function () {
-    describe('with project history enabled', function () {
-      beforeEach(function () {
-        this.settings.apis.project_history.initializeHistoryForNewProjects = true
+    beforeEach(function () {
+      this.settings.apis.project_history.initializeHistoryForNewProjects = true
+    })
+
+    describe('project history returns a successful response', function () {
+      beforeEach(async function () {
+        this.FetchUtils.fetchJson.resolves({ project: { id: this.historyId } })
+        this.result = await this.HistoryManager.promises.initializeProject(
+          this.historyId
+        )
       })
 
-      describe('project history returns a successful response', function () {
-        beforeEach(async function () {
-          this.response.json.resolves({ project: { id: this.historyId } })
-          this.result = await this.HistoryManager.promises.initializeProject(
-            this.historyId
-          )
-        })
-
-        it('should call the project history api', function () {
-          this.fetch.should.have.been.calledWithMatch(
-            `${this.settings.apis.project_history.url}/project`,
-            { method: 'POST' }
-          )
-        })
-
-        it('should return the overleaf id', function () {
-          expect(this.result).to.equal(this.historyId)
-        })
+      it('should call the project history api', function () {
+        this.FetchUtils.fetchJson.should.have.been.calledWithMatch(
+          `${this.settings.apis.project_history.url}/project`,
+          { method: 'POST' }
+        )
       })
 
-      describe('project history returns a response without the project id', function () {
-        it('should throw an error', async function () {
-          this.response.json.resolves({ project: {} })
-          await expect(
-            this.HistoryManager.promises.initializeProject(this.historyId)
-          ).to.be.rejected
-        })
-      })
-
-      describe('project history errors', function () {
-        it('should propagate the error', async function () {
-          this.fetch.rejects(new Error('problem connecting'))
-          await expect(
-            this.HistoryManager.promises.initializeProject(this.historyId)
-          ).to.be.rejected
-        })
+      it('should return the overleaf id', function () {
+        expect(this.result).to.equal(this.historyId)
       })
     })
 
-    describe('with project history disabled', function () {
-      it('should return without errors', async function () {
-        this.settings.apis.project_history.initializeHistoryForNewProjects = false
+    describe('project history returns a response without the project id', function () {
+      it('should throw an error', async function () {
+        this.FetchUtils.fetchJson.resolves({ project: {} })
         await expect(
           this.HistoryManager.promises.initializeProject(this.historyId)
-        ).to.be.fulfilled
+        ).to.be.rejected
+      })
+    })
+
+    describe('project history errors', function () {
+      it('should propagate the error', async function () {
+        this.FetchUtils.fetchJson.rejects(new Error('problem connecting'))
+        await expect(
+          this.HistoryManager.promises.initializeProject(this.historyId)
+        ).to.be.rejected
       })
     })
   })
@@ -270,26 +275,29 @@ describe('HistoryManager', function () {
     })
 
     it('should call the project-history service', async function () {
-      expect(this.fetch).to.have.been.calledWith(
+      expect(this.FetchUtils.fetchNothing).to.have.been.calledWith(
         `${this.projectHistoryUrl}/project/${projectId}`,
         { method: 'DELETE' }
       )
     })
 
     it('should call the v1-history service', async function () {
-      expect(this.fetch).to.have.been.calledWith(
+      expect(this.FetchUtils.fetchNothing).to.have.been.calledWith(
         `${this.v1HistoryUrl}/projects/${historyId}`,
         {
           method: 'DELETE',
-          headers: {
-            Authorization:
-              'Basic ' +
-              Buffer.from(
-                `${this.v1HistoryUser}:${this.v1HistoryPassword}`
-              ).toString('base64'),
+          basicAuth: {
+            user: this.v1HistoryUser,
+            password: this.v1HistoryPassword,
           },
         }
       )
+    })
+
+    it('should call the history-backup-deletion service', async function () {
+      expect(
+        this.HistoryBackupDeletionHandler.deleteProject
+      ).to.have.been.calledWith(projectId)
     })
   })
 })

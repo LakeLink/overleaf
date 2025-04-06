@@ -4,10 +4,21 @@ import * as eventTracking from '../../../../infrastructure/event-tracking'
 import getMeta from '../../../../utils/meta'
 import customLocalStorage from '../../../../infrastructure/local-storage'
 import { useProjectListContext } from '../../context/project-list-context'
-import { Trans, useTranslation } from 'react-i18next'
+import { useTranslation } from 'react-i18next'
+import {
+  GroupsAndEnterpriseBannerVariant,
+  GroupsAndEnterpriseBannerVariants,
+} from '../../../../../../types/project/dashboard/notification'
+import OLButton from '@/features/ui/components/ol/ol-button'
 
-const variants = ['did-you-know', 'on-premise', 'people', 'FOMO'] as const
-type GroupsAndEnterpriseBannerVariant = typeof variants[number]
+type urlForVariantsType = {
+  [key in GroupsAndEnterpriseBannerVariant]: string // eslint-disable-line no-unused-vars
+}
+
+const urlForVariants: urlForVariantsType = {
+  'on-premise': '/for/contact-sales-2',
+  FOMO: '/for/contact-sales-4',
+}
 
 let viewEventSent = false
 
@@ -15,17 +26,16 @@ export default function GroupsAndEnterpriseBanner() {
   const { t } = useTranslation()
   const { totalProjectsCount } = useProjectListContext()
 
-  const showGroupsAndEnterpriseBanner: boolean = getMeta(
+  const showGroupsAndEnterpriseBanner = getMeta(
     'ol-showGroupsAndEnterpriseBanner'
   )
-  const groupsAndEnterpriseBannerVariant: GroupsAndEnterpriseBannerVariant =
-    getMeta('ol-groupsAndEnterpriseBannerVariant')
+  const groupsAndEnterpriseBannerVariant = getMeta(
+    'ol-groupsAndEnterpriseBannerVariant'
+  )
 
   const hasDismissedGroupsAndEnterpriseBanner = hasRecentlyDismissedBanner()
 
-  const contactSalesUrl = `/for/contact-sales-${
-    variants.indexOf(groupsAndEnterpriseBannerVariant) + 1
-  }`
+  const contactSalesUrl = urlForVariants[groupsAndEnterpriseBannerVariant]
 
   const shouldRenderBanner =
     showGroupsAndEnterpriseBanner &&
@@ -62,39 +72,51 @@ export default function GroupsAndEnterpriseBanner() {
   }
 
   return (
-    <Notification bsStyle="info" onDismiss={handleClose}>
-      <Notification.Body>
-        <span>{getText(groupsAndEnterpriseBannerVariant)}</span>
-      </Notification.Body>
-      <Notification.Action>
-        <a
-          className="pull-right btn btn-info btn-sm"
+    <Notification
+      type="info"
+      onDismiss={handleClose}
+      content={<BannerContent variant={groupsAndEnterpriseBannerVariant} />}
+      action={
+        <OLButton
+          variant="secondary"
           href={contactSalesUrl}
           target="_blank"
           rel="noreferrer"
           onClick={handleClickContact}
         >
           {t('contact_sales')}
-        </a>
-      </Notification.Action>
-    </Notification>
+        </OLButton>
+      }
+    />
   )
 }
 
 function isVariantValid(variant: GroupsAndEnterpriseBannerVariant) {
-  return variants.includes(variant)
+  return GroupsAndEnterpriseBannerVariants.includes(variant)
 }
 
-function getText(variant: GroupsAndEnterpriseBannerVariant) {
+function BannerContent({
+  variant,
+}: {
+  variant: GroupsAndEnterpriseBannerVariant
+}) {
   switch (variant) {
-    case 'did-you-know':
-      return <Trans i18nKey="did_you_know_that_overleaf_offers" />
     case 'on-premise':
-      return 'Overleaf On-Premises: Does your company want to keep its data within its firewall? Overleaf offers Server Pro, an on-premises solution for companies. Get in touch to learn more.'
-    case 'people':
-      return 'Other people at your company may already be using Overleaf. Save money with Overleaf group and company-wide subscriptions. Request more information.'
+      return (
+        <span>
+          Overleaf On-Premises: Does your company want to keep its data within
+          its firewall? Overleaf offers Server Pro, an on-premises solution for
+          companies. Get in touch to learn more.
+        </span>
+      )
     case 'FOMO':
-      return 'Why do Fortune 500 companies and top research institutions trust Overleaf to streamline their collaboration? Get in touch to learn more.'
+      return (
+        <span>
+          Why do Fortune 500 companies and top research institutions trust
+          Overleaf to streamline their collaboration? Get in touch to learn
+          more.
+        </span>
+      )
   }
 }
 

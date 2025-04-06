@@ -1,6 +1,6 @@
-const { promisify } = require('util')
-const os = require('os')
-const http = require('http')
+const { promisify } = require('node:util')
+const os = require('node:os')
+const http = require('node:http')
 const { expect } = require('chai')
 const Metrics = require('../..')
 
@@ -10,7 +10,8 @@ const sleep = promisify(setTimeout)
 
 describe('Metrics module', function () {
   before(function () {
-    Metrics.initialize(APP_NAME)
+    process.env.METRICS_APP_NAME = 'test-app'
+    require('../../initialize')
   })
 
   describe('at startup', function () {
@@ -93,11 +94,16 @@ describe('Metrics module', function () {
     beforeEach('collect timings', async function () {
       const buckets = [10, 100, 1000]
       for (const duration of [1, 1, 1, 15, 15, 15, 105, 105, 105]) {
-        const withBuckets = new Metrics.Timer('height', 1, {}, buckets)
-        const withOutBuckets = new Metrics.Timer('depth', 1, {})
+        const withBuckets = new Metrics.Timer(
+          'height',
+          1,
+          { label_1: 'a' },
+          buckets
+        )
+        const withOutBuckets = new Metrics.Timer('depth', 1, { label_2: 'b' })
         await sleep(duration)
         withBuckets.done()
-        withOutBuckets.done()
+        withOutBuckets.done({ label_3: 'c' })
       }
     })
 
@@ -108,6 +114,8 @@ describe('Metrics module', function () {
         1000: 9,
         '+Inf': 9,
       })
+      const labelNames = await getMetric('histogram_height').labelNames
+      expect(labelNames).to.deep.equal(['label_1'])
     })
 
     it('without buckets', async function () {
@@ -120,6 +128,8 @@ describe('Metrics module', function () {
         0.99: 105,
         0.999: 105,
       })
+      const labelNames = await getMetric('timer_depth').labelNames
+      expect(labelNames).to.deep.equal(['label_2', 'label_3'])
     })
   })
 
@@ -189,7 +199,7 @@ describe('Metrics module', function () {
     })
     describe('gaugeOpenSockets()', function () {
       beforeEach(function runGaugeOpenSockets() {
-        Metrics.open_sockets.gaugeOpenSockets()
+        Metrics.open_sockets.gaugeOpenSockets(true)
       })
 
       describe('without pending connections', function () {
@@ -306,7 +316,7 @@ async function checkSummaryValues(key, values) {
   for (const quantile of Object.keys(values)) {
     expect(found[quantile]).to.be.within(
       values[quantile] - 5,
-      values[quantile] + 5,
+      values[quantile] + 15,
       `quantile: ${quantile}`
     )
   }

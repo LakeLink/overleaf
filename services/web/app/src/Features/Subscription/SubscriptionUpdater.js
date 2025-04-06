@@ -1,5 +1,5 @@
 const { db, ObjectId } = require('../../infrastructure/mongodb')
-const { callbackify } = require('../../util/promises')
+const { callbackify } = require('@overleaf/promise-utils')
 const { Subscription } = require('../../models/Subscription')
 const SubscriptionLocator = require('./SubscriptionLocator')
 const PlansLocator = require('./PlansLocator')
@@ -8,6 +8,10 @@ const FeaturesHelper = require('./FeaturesHelper')
 const AnalyticsManager = require('../Analytics/AnalyticsManager')
 const { DeletedSubscription } = require('../../models/DeletedSubscription')
 const logger = require('@overleaf/logger')
+const Features = require('../../infrastructure/Features')
+const UserAuditLogHandler = require('../User/UserAuditLogHandler')
+const AccountMappingHelper = require('../Analytics/AccountMappingHelper')
+const { SSOConfig } = require('../../models/SSOConfig')
 
 /**
  * Change the admin of the given subscription.
@@ -25,16 +29,16 @@ const logger = require('@overleaf/logger')
  */
 async function updateAdmin(subscription, adminId) {
   const query = {
-    _id: ObjectId(subscription._id),
+    _id: new ObjectId(subscription._id),
     customAccount: true,
   }
   const update = {
-    $set: { admin_id: ObjectId(adminId) },
+    $set: { admin_id: new ObjectId(adminId) },
   }
   if (subscription.groupPlan) {
-    update.$addToSet = { manager_ids: ObjectId(adminId) }
+    update.$addToSet = { manager_ids: new ObjectId(adminId) }
   } else {
-    update.$set.manager_ids = [ObjectId(adminId)]
+    update.$set.manager_ids = [new ObjectId(adminId)]
   }
   await Subscription.updateOne(query, update).exec()
 }
@@ -44,9 +48,8 @@ async function syncSubscription(
   adminUserId,
   requesterData = {}
 ) {
-  let subscription = await SubscriptionLocator.promises.getUsersSubscription(
-    adminUserId
-  )
+  let subscription =
+    await SubscriptionLocator.promises.getUsersSubscription(adminUserId)
   if (subscription == null) {
     subscription = await _createNewSubscription(adminUserId)
   }
@@ -58,6 +61,13 @@ async function syncSubscription(
 }
 
 async function addUserToGroup(subscriptionId, userId) {
+  await UserAuditLogHandler.promises.addEntry(
+    userId,
+    'join-group-subscription',
+    undefined,
+    undefined,
+    { subscriptionId }
+  )
   await Subscription.updateOne(
     { _id: subscriptionId },
     { $addToSet: { member_ids: userId } }
@@ -72,6 +82,13 @@ async function addUserToGroup(subscriptionId, userId) {
 }
 
 async function removeUserFromGroup(subscriptionId, userId) {
+  await UserAuditLogHandler.promises.addEntry(
+    userId,
+    'leave-group-subscription',
+    undefined,
+    undefined,
+    { subscriptionId }
+  )
   await Subscription.updateOne(
     { _id: subscriptionId },
     { $pull: { member_ids: userId } }
@@ -96,6 +113,17 @@ async function removeUserFromAllGroups(userId) {
   }
   const subscriptionIds = subscriptions.map(sub => sub._id)
   const removeOperation = { $pull: { member_ids: userId } }
+
+  for (const subscriptionId of subscriptionIds) {
+    await UserAuditLogHandler.promises.addEntry(
+      userId,
+      'leave-group-subscription',
+      undefined,
+      undefined,
+      { subscriptionId }
+    )
+  }
+
   await Subscription.updateMany(
     { _id: subscriptionIds },
     removeOperation
@@ -159,7 +187,7 @@ async function restoreSubscription(subscriptionId) {
   // 4. notify analytics that members rejoined the subscription
   await _sendSubscriptionEventForAllMembers(
     subscriptionId,
-    'group-subscription-left'
+    'group-subscription-joined'
   )
 }
 
@@ -228,7 +256,38 @@ async function updateSubscriptionFromRecurly(
   requesterData
 ) {
   if (recurlySubscription.state === 'expired') {
-    await deleteSubscription(subscription, requesterData)
+    const hasManagedUsersFeature =
+      Features.hasFeature('saas') && subscription?.managedUsersEnabled
+
+    // If a payment lapses and if the group is managed or has group SSO, as a temporary measure we need to
+    // make sure that the group continues as-is and no destructive actions are taken.
+    if (hasManagedUsersFeature) {
+      logger.warn(
+        { subscriptionId: subscription._id },
+        'expired subscription has managedUsers feature enabled, skipping deletion'
+      )
+    } else {
+      let hasGroupSSOEnabled = false
+      if (subscription?.ssoConfig) {
+        const ssoConfig = await SSOConfig.findOne({
+          _id: subscription.ssoConfig._id || subscription.ssoConfig,
+        })
+          .lean()
+          .exec()
+        if (ssoConfig.enabled) {
+          hasGroupSSOEnabled = true
+        }
+      }
+
+      if (hasGroupSSOEnabled) {
+        logger.warn(
+          { subscriptionId: subscription._id },
+          'expired subscription has groupSSO feature enabled, skipping deletion'
+        )
+      } else {
+        await deleteSubscription(subscription, requesterData)
+      }
+    }
     return
   }
   const updatedPlanCode = recurlySubscription.plan.plan_code
@@ -247,8 +306,17 @@ async function updateSubscriptionFromRecurly(
     return
   }
 
+  const addOns = recurlySubscription?.subscription_add_ons?.map(addOn => {
+    return {
+      addOnCode: addOn.add_on_code,
+      quantity: addOn.quantity,
+      unitAmountInCents: addOn.unit_amount_in_cents,
+    }
+  })
+
   subscription.recurlySubscription_id = recurlySubscription.uuid
   subscription.planCode = updatedPlanCode
+  subscription.addOns = addOns || []
   subscription.recurlyStatus = {
     state: recurlySubscription.state,
     trialStartedAt: recurlySubscription.trial_started_at,
@@ -278,6 +346,16 @@ async function updateSubscriptionFromRecurly(
     }
   }
   await subscription.save()
+
+  const accountMapping =
+    AccountMappingHelper.generateSubscriptionToRecurlyMapping(
+      subscription._id,
+      subscription.recurlySubscription_id
+    )
+  if (accountMapping) {
+    AnalyticsManager.registerAccountMapping(accountMapping)
+  }
+
   await _scheduleRefreshFeatures(subscription)
 }
 
@@ -297,7 +375,7 @@ async function _sendUserGroupPlanCodeUserProperty(userId) {
         bestFeatures = plan.features
       }
     }
-    AnalyticsManager.setUserPropertyForUser(
+    AnalyticsManager.setUserPropertyForUserInBackground(
       userId,
       'group-subscription-plan-code',
       bestPlanCode
@@ -318,7 +396,7 @@ async function _sendSubscriptionEvent(userId, subscriptionId, event) {
   if (!subscription || !subscription.groupPlan) {
     return
   }
-  AnalyticsManager.recordEventForUser(userId, event, {
+  AnalyticsManager.recordEventForUserInBackground(userId, event, {
     groupId: subscription._id.toString(),
     subscriptionId: subscription.recurlySubscription_id,
   })
@@ -339,7 +417,7 @@ async function _sendSubscriptionEventForAllMembers(subscriptionId, event) {
   const userIds = (subscription.member_ids || []).filter(Boolean)
   for (const userId of userIds) {
     if (userId) {
-      AnalyticsManager.recordEventForUser(userId, event, {
+      AnalyticsManager.recordEventForUserInBackground(userId, event, {
         groupId: subscription._id.toString(),
         subscriptionId: subscription.recurlySubscription_id,
       })

@@ -5,6 +5,7 @@ const fixtures = require('./support/fixtures')
 const { expect } = require('chai')
 const sinon = require('sinon')
 const { ObjectId } = require('mongodb')
+const { projects } = require('../../../../storage/lib/mongodb')
 
 const {
   Chunk,
@@ -27,20 +28,27 @@ describe('chunkStore', function () {
     {
       description: 'Postgres backend',
       createProject: chunkStore.initializeProject,
+      idMapping: id => parseInt(id, 10),
     },
     {
       description: 'Mongo backend',
       createProject: () =>
         chunkStore.initializeProject(new ObjectId().toString()),
+      idMapping: id => id,
     },
   ]
 
   for (const scenario of scenarios) {
     describe(scenario.description, function () {
       let projectId
+      let projectRecord
 
       beforeEach(async function () {
         projectId = await scenario.createProject()
+        // create a record in the mongo projects collection
+        projectRecord = await projects.insertOne({
+          overleaf: { history: { id: scenario.idMapping(projectId) } },
+        })
       })
 
       it('loads empty latest chunk for a new project', async function () {
@@ -50,10 +58,42 @@ describe('chunkStore', function () {
         expect(chunk.getEndTimestamp()).not.to.exist
       })
 
+      describe('creating a chunk', async function () {
+        const pendingChangeTimestamp = new Date('2014-01-01T00:00:00')
+        const lastChangeTimestamp = new Date('2015-01-01T00:00:00')
+        beforeEach(async function () {
+          const chunk = makeChunk(
+            [
+              makeChange(
+                Operation.addFile('main.tex', File.fromString('abc')),
+                lastChangeTimestamp
+              ),
+            ],
+            1
+          )
+          await chunkStore.create(projectId, chunk, pendingChangeTimestamp)
+        })
+        it('creates a chunk and inserts the pending change timestamp', async function () {
+          const project = await projects.findOne({
+            _id: new ObjectId(projectRecord.insertedId),
+          })
+          expect(project.overleaf.history.currentEndVersion).to.equal(2)
+          expect(project.overleaf.history.currentEndTimestamp).to.deep.equal(
+            lastChangeTimestamp
+          )
+          expect(project.overleaf.backup.pendingChangeAt).to.deep.equal(
+            pendingChangeTimestamp
+          )
+        })
+      })
+
       describe('adding and editing a blank file', function () {
         const testPathname = 'foo.txt'
-        const testTextOperation = TextOperation.fromJSON(['a']) // insert an a
+        const testTextOperation = TextOperation.fromJSON({
+          textOperation: ['a'],
+        }) // insert an a
         let lastChangeTimestamp
+        const pendingChangeTimestamp = new Date()
 
         beforeEach(async function () {
           const chunk = await chunkStore.loadLatest(projectId)
@@ -64,7 +104,32 @@ describe('chunkStore', function () {
           ]
           lastChangeTimestamp = changes[1].getTimestamp()
           chunk.pushChanges(changes)
-          await chunkStore.update(projectId, oldEndVersion, chunk)
+          await chunkStore.update(
+            projectId,
+            oldEndVersion,
+            chunk,
+            pendingChangeTimestamp
+          )
+        })
+
+        it('records the correct metadata in db readOnly=false', async function () {
+          const raw = await chunkStore.loadLatestRaw(projectId)
+          expect(raw).to.deep.include({
+            startVersion: 0,
+            endVersion: 2,
+            endTimestamp: lastChangeTimestamp,
+          })
+        })
+
+        it('records the correct metadata in db readOnly=true', async function () {
+          const raw = await chunkStore.loadLatestRaw(projectId, {
+            readOnly: true,
+          })
+          expect(raw).to.deep.include({
+            startVersion: 0,
+            endVersion: 2,
+            endTimestamp: lastChangeTimestamp,
+          })
         })
 
         it('records the correct timestamp', async function () {
@@ -92,10 +157,24 @@ describe('chunkStore', function () {
           expect(editFile).to.be.an.instanceof(EditFileOperation)
           expect(editFile.getPathname()).to.equal(testPathname)
         })
+
+        it('updates the project record with the current version and timestamps', async function () {
+          const project = await projects.findOne({
+            _id: new ObjectId(projectRecord.insertedId),
+          })
+          expect(project.overleaf.history.currentEndVersion).to.equal(2)
+          expect(project.overleaf.history.currentEndTimestamp).to.deep.equal(
+            lastChangeTimestamp
+          )
+          expect(project.overleaf.backup.pendingChangeAt).to.deep.equal(
+            pendingChangeTimestamp
+          )
+        })
       })
 
       describe('multiple chunks', async function () {
         // Two chunks are 1 year apart
+        const pendingChangeTimestamp = new Date('2014-01-01T00:00:00')
         const firstChunkTimestamp = new Date('2015-01-01T00:00:00')
         const secondChunkTimestamp = new Date('2016-01-01T00:00:00')
         const thirdChunkTimestamp = new Date('2017-01-01T00:00:00')
@@ -115,7 +194,12 @@ describe('chunkStore', function () {
             ],
             0
           )
-          await chunkStore.update(projectId, 0, firstChunk)
+          await chunkStore.update(
+            projectId,
+            0,
+            firstChunk,
+            pendingChangeTimestamp
+          )
           firstChunk = await chunkStore.loadLatest(projectId)
 
           secondChunk = makeChunk(
@@ -210,6 +294,25 @@ describe('chunkStore', function () {
           expect(chunk).to.deep.equal(thirdChunk)
         })
 
+        it('updates the project record to match the last chunk', async function () {
+          const project = await projects.findOne({
+            _id: new ObjectId(projectRecord.insertedId),
+          })
+          expect(project.overleaf.history.currentEndVersion).to.equal(5)
+          expect(project.overleaf.history.currentEndTimestamp).to.deep.equal(
+            thirdChunkTimestamp
+          )
+        })
+
+        it('updates the pending change timestamp to match the first chunk', async function () {
+          const project = await projects.findOne({
+            _id: new ObjectId(projectRecord.insertedId),
+          })
+          expect(project.overleaf.backup.pendingChangeAt).to.deep.equal(
+            pendingChangeTimestamp
+          )
+        })
+
         describe('after updating the last chunk', function () {
           let newChunk
 
@@ -244,6 +347,107 @@ describe('chunkStore', function () {
             )
             expect(chunk).to.deep.equal(newChunk)
           })
+
+          it('updates the project record to match the latest version and timestamp', async function () {
+            const project = await projects.findOne({
+              _id: new ObjectId(projectRecord.insertedId),
+            })
+            expect(project.overleaf.history.currentEndVersion).to.equal(6)
+            expect(project.overleaf.history.currentEndTimestamp).to.deep.equal(
+              thirdChunkTimestamp
+            )
+          })
+
+          it('does not modify the existing pending change timestamp in the project record', async function () {
+            const project = await projects.findOne({
+              _id: new ObjectId(projectRecord.insertedId),
+            })
+            expect(project.overleaf.backup.pendingChangeAt).to.deep.equal(
+              pendingChangeTimestamp
+            )
+          })
+        })
+
+        describe('when iterating the chunks with getProjectChunksFromVersion', function () {
+          // The first chunk has startVersion:0 and endVersion:2
+          for (let startVersion = 0; startVersion <= 2; startVersion++) {
+            it(`returns all chunk records when starting from version ${startVersion}`, async function () {
+              const chunkRecords = []
+              for await (const chunk of chunkStore.getProjectChunksFromVersion(
+                projectId,
+                startVersion
+              )) {
+                chunkRecords.push(chunk)
+              }
+              const expectedChunks = [firstChunk, secondChunk, thirdChunk]
+              expect(chunkRecords).to.have.length(expectedChunks.length)
+              chunkRecords.forEach((chunkRecord, index) => {
+                expect(chunkRecord.startVersion).to.deep.equal(
+                  expectedChunks[index].getStartVersion()
+                )
+                expect(chunkRecord.endVersion).to.deep.equal(
+                  expectedChunks[index].getEndVersion()
+                )
+              })
+            })
+          }
+
+          // The second chunk has startVersion:2 and endVersion:4
+          for (let startVersion = 3; startVersion <= 4; startVersion++) {
+            it(`returns two chunk records when starting from version ${startVersion}`, async function () {
+              const chunkRecords = []
+              for await (const chunk of chunkStore.getProjectChunksFromVersion(
+                projectId,
+                startVersion
+              )) {
+                chunkRecords.push(chunk)
+              }
+              const expectedChunks = [secondChunk, thirdChunk]
+              expect(chunkRecords).to.have.length(expectedChunks.length)
+              chunkRecords.forEach((chunkRecord, index) => {
+                expect(chunkRecord.startVersion).to.deep.equal(
+                  expectedChunks[index].getStartVersion()
+                )
+                expect(chunkRecord.endVersion).to.deep.equal(
+                  expectedChunks[index].getEndVersion()
+                )
+              })
+            })
+          }
+
+          // The third chunk has startVersion:4 and endVersion:5
+          for (let startVersion = 5; startVersion <= 5; startVersion++) {
+            it(`returns one chunk record when starting from version ${startVersion}`, async function () {
+              const chunkRecords = []
+              for await (const chunk of chunkStore.getProjectChunksFromVersion(
+                projectId,
+                startVersion
+              )) {
+                chunkRecords.push(chunk)
+              }
+              const expectedChunks = [thirdChunk]
+              expect(chunkRecords).to.have.length(expectedChunks.length)
+              chunkRecords.forEach((chunkRecord, index) => {
+                expect(chunkRecord.startVersion).to.deep.equal(
+                  expectedChunks[index].getStartVersion()
+                )
+                expect(chunkRecord.endVersion).to.deep.equal(
+                  expectedChunks[index].getEndVersion()
+                )
+              })
+            })
+          }
+
+          it('returns no chunk records when starting from a version after the last chunk', async function () {
+            const chunkRecords = []
+            for await (const chunk of chunkStore.getProjectChunksFromVersion(
+              projectId,
+              6
+            )) {
+              chunkRecords.push(chunk)
+            }
+            expect(chunkRecords).to.have.length(0)
+          })
         })
       })
 
@@ -259,7 +463,9 @@ describe('chunkStore', function () {
         it('does not create chunks', async function () {
           const oldEndVersion = 0
           const testPathname = 'foo.txt'
-          const testTextOperation = TextOperation.fromJSON(['a']) // insert an a
+          const testTextOperation = TextOperation.fromJSON({
+            textOperation: ['a'],
+          }) // insert an a
 
           let chunk = await chunkStore.loadLatest(projectId)
           expect(chunk.getEndVersion()).to.equal(oldEndVersion)
@@ -287,13 +493,13 @@ describe('chunkStore', function () {
               makeChange(
                 Operation.editFile(
                   'main.tex',
-                  TextOperation.fromJSON([3, 'def'])
+                  TextOperation.fromJSON({ textOperation: [3, 'def'] })
                 )
               ),
               makeChange(
                 Operation.editFile(
                   'main.tex',
-                  TextOperation.fromJSON([6, 'ghi'])
+                  TextOperation.fromJSON({ textOperation: [6, 'ghi'] })
                 )
               ),
             ],

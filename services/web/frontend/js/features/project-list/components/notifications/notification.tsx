@@ -1,53 +1,21 @@
-import { useState } from 'react'
-import { Alert, AlertProps } from 'react-bootstrap'
-import Body from './body'
-import Action from './action'
-import Close from './close'
 import classnames from 'classnames'
+import NewNotification from '@/shared/components/notification'
 
-type NotificationProps = {
-  bsStyle: AlertProps['bsStyle']
-  children: React.ReactNode
-  onDismiss?: AlertProps['onDismiss']
-  className?: string
-}
+type NotificationProps = Pick<
+  React.ComponentProps<typeof NewNotification>,
+  'type' | 'action' | 'content' | 'onDismiss' | 'className' | 'title'
+>
 
-function Notification({
-  bsStyle,
-  children,
-  onDismiss,
-  className,
-  ...props
-}: NotificationProps) {
-  const [show, setShow] = useState(true)
-
-  const handleDismiss = () => {
-    if (onDismiss) {
-      onDismiss()
-    }
-
-    setShow(false)
-  }
-
-  if (!show) {
-    return null
-  }
-
-  return (
-    <li className={classnames('notification-entry', className)} {...props}>
-      <Alert bsStyle={bsStyle}>
-        {children}
-        {onDismiss ? (
-          <div className="notification-close">
-            <Close onDismiss={handleDismiss} />
-          </div>
-        ) : null}
-      </Alert>
-    </li>
+function Notification({ className, ...props }: NotificationProps) {
+  const notificationComponent = (
+    <NewNotification isDismissible={props.onDismiss != null} {...props} />
   )
-}
 
-Notification.Body = Body
-Notification.Action = Action
+  return notificationComponent ? (
+    <li className={classnames('notification-entry', className)}>
+      {notificationComponent}
+    </li>
+  ) : null
+}
 
 export default Notification

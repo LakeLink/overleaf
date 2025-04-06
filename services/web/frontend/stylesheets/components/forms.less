@@ -42,6 +42,8 @@ label {
   font-size: @font-size-base;
   color: @text-color;
   border: 0;
+  margin-bottom: 0;
+  line-height: @line-height-01;
 }
 
 // Normalize form controls
@@ -118,51 +120,7 @@ output {
 // input[type="tel"]
 // input[type="color"]
 
-.form-control when (@is-new-css = false) {
-  display: block;
-  width: 100%;
-  height: @input-height-base; // Make inputs at least the height of their button counterpart (base line-height + padding + border)
-  padding: @padding-base-vertical @padding-base-horizontal;
-  font-size: @font-size-base;
-  line-height: @line-height-base;
-  color: @input-color;
-  background-color: @input-bg;
-  background-image: none; // Reset unusual Firefox-on-Android default style; see https://github.com/necolas/normalize.css/issues/214
-  border: @input-border-size solid @input-border;
-  border-radius: @input-border-radius;
-  .box-shadow(inset 0 1px 1px rgba(0, 0, 0, 0.075));
-  .transition(~'border-color ease-in-out .15s, box-shadow ease-in-out .15s');
-
-  // Customize the `:focus` state to imitate native WebKit styles.
-  .form-control-focus();
-
-  // Placeholder
-  .placeholder();
-
-  // Disabled and read-only inputs
-  //
-  // HTML5 says that controls under a fieldset > legend:first-child won't be
-  // disabled if the fieldset is disabled. Due to implementation difficulty, we
-  // don't honor that edge case; we style them as disabled anyway.
-  &[disabled],
-  &[readonly],
-  fieldset[disabled] & {
-    cursor: not-allowed;
-    background-color: @input-bg-disabled;
-    opacity: 1; // iOS fix for unreadable disabled content
-  }
-
-  // Reset height for `textarea`s, and smaller border-radius
-  textarea& {
-    height: auto;
-    border-radius: @border-radius-base;
-  }
-  // Smaller border-radius for `select` inputs
-  select& {
-    border-radius: @border-radius-base;
-  }
-}
-.form-control when (@is-new-css = true) {
+.form-control {
   display: block;
   width: 100%;
   height: @input-height-base;
@@ -201,6 +159,7 @@ output {
     height: auto;
     border-radius: @border-radius-base;
   }
+
   // Smaller border-radius for `select` inputs
   select& {
     border-radius: @border-radius-base;
@@ -231,9 +190,9 @@ input[type='date'] {
 //
 // Designed to help with the organization and spacing of vertical forms. For
 // horizontal forms, use the predefined grid classes.
-
+@form-group-margin-bottom: 15px;
 .form-group {
-  margin-bottom: 15px;
+  margin-bottom: @form-group-margin-bottom;
 }
 
 // Checkboxes and radios
@@ -326,11 +285,6 @@ input[type='checkbox'],
   // Enable absolute positioning
   position: relative;
 
-  // Ensure icons don't overlap text
-  .form-control {
-    padding-right: (@input-height-base * 1.25);
-  }
-
   // Feedback icon (requires .glyphicon classes)
   .form-control-feedback {
     position: absolute;
@@ -341,6 +295,11 @@ input[type='checkbox'],
     height: @input-height-base;
     line-height: @input-height-base;
     text-align: center;
+  }
+
+  // Position the feedback inside the input element when there's no label
+  &.hidden-label .form-control-feedback {
+    margin-top: -(@line-height-computed + 5);
   }
 }
 
@@ -362,30 +321,13 @@ input[type='checkbox'],
 }
 
 // Feedback states
-.has-success when(@is-new-css = false) {
-  .form-control-validation(
-    @state-success-text; @state-success-text; @state-success-bg
-  );
-}
-.has-warning when(@is-new-css = false) {
-  .form-control-validation(
-    @state-warning-text; @state-warning-text; @state-warning-bg
-  );
-}
-.has-error when(@is-new-css = false) {
-  .form-control-validation(
-    @state-danger-text; @state-danger-text; @state-danger-bg
-  );
-
-  color: @red;
-}
-.has-success when(@is-new-css = true) {
+.has-success {
   .form-control-validation(@brand-success);
 }
-.has-warning when(@is-new-css = true) {
+.has-warning {
   .form-control-validation(@brand-warning);
 }
-.has-error when(@is-new-css = true) {
+.has-error {
   .form-control-validation(@brand-danger);
 }
 
@@ -397,7 +339,8 @@ input[type='checkbox'],
   ); // Redeclare so transitions work
   &:focus {
     border-color: darken(@state-danger-text, 10%);
-    @shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075),
+    @shadow:
+      inset 0 1px 1px rgba(0, 0, 0, 0.075),
       0 0 6px lighten(@state-danger-text, 20%);
     .box-shadow(@shadow);
   }
@@ -422,6 +365,15 @@ input[type='checkbox'],
   margin-top: 5px;
   margin-bottom: 10px;
   color: lighten(@text-color, 25%); // lighten the text some for contrast
+
+  // Hide help blocks used as validation messages by default
+  &.invalid-only {
+    display: none;
+
+    .has-error & {
+      display: block;
+    }
+  }
 }
 
 // Inline forms

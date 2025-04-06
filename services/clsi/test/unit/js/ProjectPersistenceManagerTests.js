@@ -13,7 +13,7 @@
 const SandboxedModule = require('sandboxed-module')
 const sinon = require('sinon')
 const assert = require('chai').assert
-const modulePath = require('path').join(
+const modulePath = require('node:path').join(
   __dirname,
   '../../../app/js/ProjectPersistenceManager'
 )
@@ -23,6 +23,7 @@ describe('ProjectPersistenceManager', function () {
   beforeEach(function () {
     this.ProjectPersistenceManager = SandboxedModule.require(modulePath, {
       requires: {
+        '@overleaf/metrics': (this.Metrics = { gauge: sinon.stub() }),
         './UrlCache': (this.UrlCache = {}),
         './CompileManager': (this.CompileManager = {}),
         diskusage: (this.diskusage = { check: sinon.stub() }),
@@ -49,6 +50,10 @@ describe('ProjectPersistenceManager', function () {
       })
 
       this.ProjectPersistenceManager.refreshExpiryTimeout(() => {
+        this.Metrics.gauge.should.have.been.calledWith(
+          'disk_available_percent',
+          40
+        )
         this.ProjectPersistenceManager.EXPIRY_TIMEOUT.should.equal(
           this.settings.project_cache_length_ms
         )
@@ -63,6 +68,10 @@ describe('ProjectPersistenceManager', function () {
       })
 
       this.ProjectPersistenceManager.refreshExpiryTimeout(() => {
+        this.Metrics.gauge.should.have.been.calledWith(
+          'disk_available_percent',
+          5
+        )
         this.ProjectPersistenceManager.EXPIRY_TIMEOUT.should.equal(900)
         done()
       })
@@ -75,6 +84,10 @@ describe('ProjectPersistenceManager', function () {
       })
       this.ProjectPersistenceManager.EXPIRY_TIMEOUT = 500
       this.ProjectPersistenceManager.refreshExpiryTimeout(() => {
+        this.Metrics.gauge.should.have.been.calledWith(
+          'disk_available_percent',
+          5
+        )
         this.ProjectPersistenceManager.EXPIRY_TIMEOUT.should.equal(500)
         done()
       })
@@ -97,7 +110,7 @@ describe('ProjectPersistenceManager', function () {
         .callsArgWith(0, null, this.project_ids)
       this.ProjectPersistenceManager.clearProjectFromCache = sinon
         .stub()
-        .callsArg(1)
+        .callsArg(2)
       this.CompileManager.clearExpiredProjects = sinon.stub().callsArg(1)
       return this.ProjectPersistenceManager.clearExpiredProjects(this.callback)
     })
@@ -120,7 +133,7 @@ describe('ProjectPersistenceManager', function () {
       this.ProjectPersistenceManager._clearProjectFromDatabase = sinon
         .stub()
         .callsArg(1)
-      this.UrlCache.clearProject = sinon.stub().callsArg(1)
+      this.UrlCache.clearProject = sinon.stub().callsArg(2)
       this.CompileManager.clearProject = sinon.stub().callsArg(2)
       return this.ProjectPersistenceManager.clearProject(
         this.project_id,

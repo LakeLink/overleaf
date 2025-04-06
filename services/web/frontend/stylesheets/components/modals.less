@@ -47,21 +47,6 @@
   margin: 10px;
 }
 
-.modal-dialog-centered {
-  display: flex;
-  align-items: center;
-  min-height: calc(100% - (30px * 2));
-
-  .modal-content {
-    width: 100%;
-  }
-
-  &.modal-dialog {
-    margin-top: 30px;
-    margin-bottom: 30px;
-  }
-}
-
 // Actual modal
 .modal-content {
   position: relative;
@@ -179,5 +164,46 @@
 @media (min-width: @screen-md-min) {
   .modal-lg {
     width: @modal-lg;
+  }
+}
+
+.website-redesign-modal {
+  .modal-title {
+    font-size: var(--font-size-05);
+    line-height: var(--line-height-04);
+    margin-bottom: var(--spacing-02);
+  }
+  .modal-subtitle {
+    font-size: var(--font-size-03);
+    line-height: var(--line-height-03);
+    margin: 0;
+  }
+
+  .modal-body,
+  .modal-footer {
+    padding: var(--spacing-06);
+  }
+  .modal-header {
+    border-bottom: 1px solid var(--neutral-20);
+  }
+  .modal-footer {
+    border-top: 1px solid var(--neutral-20);
+    background-color: transparent;
+    p:last-child {
+      margin-bottom: 0;
+    }
+  }
+  .close {
+    color: var(--neutral-90);
+    font-size: var(--font-size-05);
+    line-height: var(--line-height-02);
+    opacity: 1;
+    height: 36px;
+    width: 36px;
+    padding: var(--spacing-04);
+    &:hover {
+      background-color: var(--neutral-10);
+      border-radius: 50%;
+    }
   }
 }

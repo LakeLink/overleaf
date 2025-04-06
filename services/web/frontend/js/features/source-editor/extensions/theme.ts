@@ -1,15 +1,18 @@
 import { EditorView } from '@codemirror/view'
 import { Annotation, Compartment, TransactionSpec } from '@codemirror/state'
-import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { syntaxHighlighting } from '@codemirror/language'
 import { classHighlighter } from './class-highlighter'
+import classNames from 'classnames'
+import {
+  FontFamily,
+  LineHeight,
+  OverallTheme,
+  userStyles,
+} from '@/shared/utils/styles'
 
 const optionsThemeConf = new Compartment()
 const selectedThemeConf = new Compartment()
 export const themeOptionsChange = Annotation.define<boolean>()
-
-export type FontFamily = 'monaco' | 'lucida'
-export type LineHeight = 'compact' | 'normal' | 'wide'
-export type OverallTheme = '' | 'light-'
 
 type Options = {
   fontSize: number
@@ -21,6 +24,9 @@ type Options = {
 export const theme = (options: Options) => [
   baseTheme,
   staticTheme,
+  /**
+   * Syntax highlighting, using a highlighter which maps tags to class names.
+   */
   syntaxHighlighting(classHighlighter),
   optionsThemeConf.of(createThemeFromOptions(options)),
   selectedThemeConf.of([]),
@@ -48,72 +54,75 @@ const svgUrl = (content: string) =>
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">${content}</svg>`
   )}')`
 
-export const lineHeights: Record<LineHeight, number> = {
-  compact: 1.33,
-  normal: 1.6,
-  wide: 2,
-}
-
-const fontFamilies: Record<FontFamily, string[]> = {
-  monaco: ['Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'monospace'],
-  lucida: ['Lucida Console', 'Source Code Pro', 'monospace'],
-}
-
 const createThemeFromOptions = ({
   fontSize = 12,
   fontFamily = 'monaco',
   lineHeight = 'normal',
   overallTheme = '',
 }: Options) => {
-  // theme styles that depend on settings
+  // Theme styles that depend on settings.
+  const styles = userStyles({ fontSize, fontFamily, lineHeight })
+
   return [
     EditorView.editorAttributes.of({
-      class: overallTheme === '' ? 'overall-theme-dark' : 'overall-theme-light',
+      class: classNames(
+        overallTheme === '' ? 'overall-theme-dark' : 'overall-theme-light'
+      ),
+      style: Object.entries({
+        '--font-size': styles.fontSize,
+        '--source-font-family': styles.fontFamily,
+        '--line-height': styles.lineHeight,
+      })
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(';'),
     }),
+    // set variables for tooltips, which are outside the editor
+    // TODO: set these on document.body, or a new container element for the tooltips, without using a style mod
     EditorView.theme({
-      '&.cm-editor': {
-        // set variables
-        '--font-size': `${fontSize}px`,
-        '--source-font-family': fontFamilies[fontFamily]?.join(', '),
-        '--line-height': lineHeights[lineHeight],
-      },
-      '.cm-content': {
-        fontSize: 'var(--font-size)',
-        fontFamily: 'var(--source-font-family)',
-        lineHeight: 'var(--line-height)',
-      },
-      '.cm-cursor-primary': {
-        fontSize: 'var(--font-size)',
-        fontFamily: 'var(--source-font-family)',
-        lineHeight: 'var(--line-height)',
-      },
-      '.cm-gutters': {
-        fontSize: 'var(--font-size)',
-        lineHeight: 'var(--line-height)',
-      },
       '.cm-tooltip': {
-        // set variables for tooltips, which are outside the editor
-        '--font-size': `${fontSize}px`,
-        '--source-font-family': fontFamilies[fontFamily]?.join(', '),
-        '--line-height': lineHeights[lineHeight],
-        // NOTE: fontFamily is not set here, as most tooltips use the UI font
-        fontSize: 'var(--font-size)',
-      },
-      '.cm-panel': {
-        fontSize: 'var(--font-size)',
-      },
-      '.cm-foldGutter .cm-gutterElement > span': {
-        height: 'calc(var(--font-size) * var(--line-height))',
-      },
-      '.cm-lineNumbers': {
-        fontFamily: 'var(--source-font-family)',
+        '--font-size': styles.fontSize,
+        '--source-font-family': styles.fontFamily,
+        '--line-height': styles.lineHeight,
       },
     }),
   ]
 }
 
-// base styles that can have &dark and &light variants
+/**
+ * Base styles that can have &dark and &light variants
+ */
 const baseTheme = EditorView.baseTheme({
+  '.cm-content': {
+    fontSize: 'var(--font-size)',
+    fontFamily: 'var(--source-font-family)',
+    lineHeight: 'var(--line-height)',
+  },
+  '.cm-cursor-primary': {
+    fontSize: 'var(--font-size)',
+    fontFamily: 'var(--source-font-family)',
+    lineHeight: 'var(--line-height)',
+  },
+  '.cm-gutters': {
+    fontSize: 'var(--font-size)',
+    lineHeight: 'var(--line-height)',
+  },
+  '.cm-tooltip': {
+    // NOTE: fontFamily is not set here, as most tooltips use the UI font
+    fontSize: 'var(--font-size)',
+  },
+  '.cm-panel': {
+    fontSize: 'var(--font-size)',
+  },
+  '.cm-foldGutter .cm-gutterElement > span': {
+    height: 'calc(var(--font-size) * var(--line-height))',
+  },
+  '.cm-lineNumbers': {
+    fontFamily: 'var(--source-font-family)',
+  },
+  // double the specificity to override the underline squiggle
+  '.cm-lintRange.cm-lintRange': {
+    backgroundImage: 'none',
+  },
   // use a background color for lint error ranges
   '.cm-lintRange-error': {
     padding: 'var(--half-leading, 0) 0',
@@ -122,6 +131,10 @@ const baseTheme = EditorView.baseTheme({
     '& .cm-lintRange-error': {
       background: 'none',
     },
+  },
+  '.cm-specialChar': {
+    color: 'red',
+    backgroundColor: 'rgba(255, 0, 0, 0.1)',
   },
   '.cm-widgetBuffer': {
     height: '1.3em',
@@ -140,15 +153,30 @@ const baseTheme = EditorView.baseTheme({
     boxShadow: '0 1px 1px rgba(255, 255, 255, 0.7)',
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
+  '.cm-diagnosticSource': {
+    display: 'none',
+  },
+  '.ol-cm-diagnostic-actions': {
+    marginTop: '4px',
+  },
+  '.cm-diagnostic:last-of-type .ol-cm-diagnostic-actions': {
+    marginBottom: '4px',
+  },
+  '.cm-vim-panel input': {
+    color: 'inherit',
+  },
 })
 
-// theme styles that don't depend on settings
+/**
+ * Theme styles that don't depend on settings.
+ */
 // TODO: move some/all of these into baseTheme?
 const staticTheme = EditorView.theme({
   // make the editor fill the available height
   '&': {
     height: '100%',
     textRendering: 'optimizeSpeed',
+    fontVariantNumeric: 'slashed-zero',
   },
   // remove the outline from the focused editor
   '&.cm-editor.cm-focused:not(:focus-visible)': {
@@ -185,7 +213,7 @@ const staticTheme = EditorView.theme({
     userSelect: 'none',
   },
   // make cursor visible with reduced opacity when the editor is not focused
-  '&:not(.cm-focused) .cm-cursor': {
+  '&:not(.cm-focused) > .cm-scroller > .cm-cursorLayer .cm-cursor': {
     display: 'block',
     opacity: 0.2,
   },
@@ -194,20 +222,6 @@ const staticTheme = EditorView.theme({
     borderWidth: '2px',
     marginLeft: '-1px', // half the border width
     borderLeftColor: 'inherit',
-  },
-  // set the default "selection match" style
-  '.cm-selectionMatch, .cm-searchMatch': {
-    backgroundColor: 'transparent',
-    outlineOffset: '-1px',
-  },
-  // make sure selectionMatch inside searchMatch doesn't have a background colour
-  '.cm-searchMatch .cm-selectionMatch': {
-    backgroundColor: 'transparent !important',
-  },
-  // Match the height of search matches to selection matches
-  '.cm-searchMatch': {
-    paddingTop: 'var(--half-leading)',
-    paddingBottom: 'var(--half-leading)',
   },
   // remove border from hover tooltips (e.g. cursor highlights)
   '.cm-tooltip-hover': {
@@ -256,15 +270,25 @@ const staticTheme = EditorView.theme({
   },
 })
 
-const loadSelectedTheme = async (editorTheme: string) => {
-  const { theme, highlightStyle, dark } = await import(
-    /* webpackChunkName: "cm6-theme" */ `../themes/cm6/${editorTheme}.json`
-  )
+const themeCache = new Map<string, any>()
 
-  return [
-    EditorView.theme(theme, { dark }),
-    highlightStyle
-      ? EditorView.theme(highlightStyle, { dark })
-      : syntaxHighlighting(defaultHighlightStyle, { fallback: true }), // use the default highlight style if none is provided
-  ]
+const loadSelectedTheme = async (editorTheme: string) => {
+  if (!editorTheme) {
+    editorTheme = 'textmate' // use the default theme if unset
+  }
+
+  if (!themeCache.has(editorTheme)) {
+    const { theme, highlightStyle, dark } = await import(
+      /* webpackChunkName: "cm6-theme" */ `../themes/cm6/${editorTheme}.json`
+    )
+
+    const extension = [
+      EditorView.theme(theme, { dark }),
+      EditorView.theme(highlightStyle, { dark }),
+    ]
+
+    themeCache.set(editorTheme, extension)
+  }
+
+  return themeCache.get(editorTheme)
 }

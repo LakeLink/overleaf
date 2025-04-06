@@ -1,8 +1,24 @@
-import { EditorSelection } from '@codemirror/state'
+import { EditorSelection, StateEffect } from '@codemirror/state'
 import { EditorView, WidgetType } from '@codemirror/view'
+import { SyntaxNode } from '@lezer/common'
+
+export type Preamble = {
+  from: number
+  to: number
+  title?: {
+    node: SyntaxNode
+    content: string
+  }
+  authors: {
+    node: SyntaxNode
+    content: string
+  }[]
+}
+
+export const collapsePreambleEffect = StateEffect.define<boolean>()
 
 export class PreambleWidget extends WidgetType {
-  constructor(public length: number, public expanded: boolean) {
+  constructor(public expanded: boolean) {
     super()
   }
 
@@ -26,7 +42,7 @@ export class PreambleWidget extends WidgetType {
     helpLink.target = '_blank'
     const icon = document.createElement('i')
     icon.classList.add('fa', 'fa-question-circle')
-    icon.title = view.state.phrase('Learn more')
+    icon.title = view.state.phrase('learn_more')
     helpLink.appendChild(icon)
     const textNode = document.createElement('span')
     textNode.classList.add('ol-cm-preamble-text')
@@ -46,14 +62,12 @@ export class PreambleWidget extends WidgetType {
       }
       event.preventDefault()
       if (this.expanded) {
-        const target = Math.min(this.length + 1, view.state.doc.length)
         view.dispatch({
-          selection: EditorSelection.single(target),
-          scrollIntoView: true,
+          effects: collapsePreambleEffect.of(true),
         })
       } else {
         view.dispatch({
-          selection: EditorSelection.single(0),
+          selection: EditorSelection.cursor(0),
           scrollIntoView: true,
         })
       }
@@ -70,10 +84,18 @@ export class PreambleWidget extends WidgetType {
     return this.expanded === other.expanded
   }
 
+  coordsAt(element: HTMLElement) {
+    return element.getBoundingClientRect()
+  }
+
+  get estimatedHeight() {
+    return this.expanded ? -1 : 54
+  }
+
   getToggleText(view: EditorView) {
     if (this.expanded) {
-      return view.state.phrase(`Hide document preamble`)
+      return view.state.phrase(`hide_document_preamble`)
     }
-    return view.state.phrase(`Show document preamble`)
+    return view.state.phrase(`show_document_preamble`)
   }
 }

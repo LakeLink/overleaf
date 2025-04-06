@@ -1,7 +1,6 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language'
 import { EditorSelection, EditorState, SelectionRange } from '@codemirror/state'
 import { SyntaxNode, Tree } from '@lezer/common'
-import { isUnknownCommandWithName } from './common'
 import { ListEnvironment } from '../../lezer-latex/latex.terms.mjs'
 
 const HUNDRED_MS = 100
@@ -64,6 +63,28 @@ export function getAncestorStack(
   return stack.reverse()
 }
 
+export const wrappedNodeOfType = (
+  state: EditorState,
+  range: SelectionRange,
+  type: string | number
+): SyntaxNode | null => {
+  if (range.empty) {
+    return null
+  }
+
+  const ancestorNode = ancestorNodeOfType(state, range.from, type, 1)
+
+  if (
+    ancestorNode &&
+    ancestorNode.from === range.from &&
+    ancestorNode.to === range.to
+  ) {
+    return ancestorNode
+  }
+
+  return null
+}
+
 export const ancestorNodeOfType = (
   state: EditorState,
   pos: number,
@@ -99,19 +120,34 @@ export const ancestorOfNodeWithType = (
   return null
 }
 
+export const lastAncestorAtEndPosition = (
+  node: SyntaxNode | null | undefined,
+  to: number
+): SyntaxNode | null => {
+  let lastAncestor: SyntaxNode | null = null
+  for (
+    let ancestor = node;
+    ancestor && ancestor.to === to;
+    ancestor = ancestor.parent
+  ) {
+    lastAncestor = ancestor
+  }
+  return lastAncestor
+}
+
 export const descendantsOfNodeWithType = (
   node: SyntaxNode,
   type: string | number,
-  nested = false
+  leaveType?: string | number
 ): SyntaxNode[] => {
   const children: SyntaxNode[] = []
 
   node.cursor().iterate(nodeRef => {
     if (nodeRef.type.is(type)) {
       children.push(nodeRef.node)
-      if (!nested) {
-        return false
-      }
+    }
+    if (leaveType && nodeRef.type.is(leaveType) && nodeRef.node !== node) {
+      return false
     }
   })
 
@@ -190,38 +226,7 @@ export const commonAncestor = (
   return null
 }
 
-export const withinFormattingCommand = (state: EditorState) => {
-  const tree = syntaxTree(state)
-
-  return (command: string): boolean => {
-    const isFormattedText = (range: SelectionRange): boolean => {
-      const nodeLeft = tree.resolveInner(range.from, -1)
-      const formattingCommandLeft = matchingAncestor(nodeLeft, node =>
-        isUnknownCommandWithName(node, command, state)
-      )
-      if (!formattingCommandLeft) {
-        return false
-      }
-
-      // We need to check the other end of the selection, and ensure that they
-      // share a common formatting command ancestor
-      const nodeRight = tree.resolveInner(range.to, 1)
-      const ancestor = commonAncestor(formattingCommandLeft, nodeRight)
-      if (!ancestor) {
-        return false
-      }
-
-      const formattingAncestor = matchingAncestor(ancestor, node =>
-        isUnknownCommandWithName(node, command, state)
-      )
-      return Boolean(formattingAncestor)
-    }
-
-    return state.selection.ranges.every(isFormattedText)
-  }
-}
-
-export type ListEnvironmentName = 'itemize' | 'enumerate'
+export type ListEnvironmentName = 'itemize' | 'enumerate' | 'description'
 
 export const listDepthForNode = (node: SyntaxNode) => {
   let depth = 0
@@ -241,4 +246,12 @@ export const minimumListDepthForSelection = (state: EditorState) => {
     depths.push(listDepthForNode(node))
   }
   return Math.min(...depths)
+}
+
+export const isDirectChildOfEnvironment = (
+  child?: SyntaxNode | null,
+  ancestor?: SyntaxNode | null
+) => {
+  const possiblyAncestor = child?.parent?.parent?.parent // Text → Content → Environment
+  return ancestor === possiblyAncestor
 }

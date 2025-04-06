@@ -435,13 +435,36 @@ describe('CodeMirror LaTeX-FileOutline', function () {
       view = makeView(content)
     })
 
-    it('should use the optional argument as title', function () {
+    it('should use the long argument as title', function () {
       const outline = getOutline(view)
       expect(outline).to.deep.equal([
         {
           from: 0,
           to: 30,
-          title: 'short title',
+          title: 'section',
+          line: 1,
+          level: SECTION_LEVEL,
+        },
+      ])
+    })
+  })
+
+  describe('for labels using texorpdfstring', function () {
+    let view: EditorView, content: string[]
+    beforeEach(function () {
+      content = [
+        '\\section{The \\texorpdfstring{function $f(x) = x^2$}{function f(x) = x^2}: Properties of \\texorpdfstring{$x$}{x}.}',
+      ]
+      view = makeView(content)
+    })
+
+    it('should use the text argument as title', function () {
+      const outline = getOutline(view)
+      expect(outline).to.deep.equal([
+        {
+          from: 0,
+          to: 113,
+          title: 'The function f(x) = x^2: Properties of x.',
           line: 1,
           level: SECTION_LEVEL,
         },

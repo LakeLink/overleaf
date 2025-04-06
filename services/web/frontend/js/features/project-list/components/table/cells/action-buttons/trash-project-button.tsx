@@ -1,12 +1,12 @@
 import { useTranslation } from 'react-i18next'
 import { memo, useCallback, useState } from 'react'
 import { Project } from '../../../../../../../../types/project/dashboard/api'
-import Icon from '../../../../../../shared/components/icon'
-import Tooltip from '../../../../../../shared/components/tooltip'
 import TrashProjectModal from '../../../modals/trash-project-modal'
 import useIsMounted from '../../../../../../shared/hooks/use-is-mounted'
 import { useProjectListContext } from '../../../../context/project-list-context'
 import { trashProject } from '../../../../util/api'
+import OLTooltip from '@/features/ui/components/ol/ol-tooltip'
+import OLIconButton from '@/features/ui/components/ol/ol-icon-button'
 
 type TrashProjectButtonProps = {
   project: Project
@@ -14,7 +14,8 @@ type TrashProjectButtonProps = {
 }
 
 function TrashProjectButton({ project, children }: TrashProjectButtonProps) {
-  const { updateProjectViewData } = useProjectListContext()
+  const { toggleSelectedProject, updateProjectViewData } =
+    useProjectListContext()
   const { t } = useTranslation()
   const text = t('trash')
   const [showModal, setShowModal] = useState(false)
@@ -32,13 +33,13 @@ function TrashProjectButton({ project, children }: TrashProjectButtonProps) {
 
   const handleTrashProject = useCallback(async () => {
     await trashProject(project.id)
+    toggleSelectedProject(project.id, false)
     updateProjectViewData({
       ...project,
       trashed: true,
       archived: false,
-      selected: false,
     })
-  }, [project, updateProjectViewData])
+  }, [project, toggleSelectedProject, updateProjectViewData])
 
   if (project.trashed) return null
 
@@ -61,20 +62,22 @@ const TrashProjectButtonTooltip = memo(function TrashProjectButtonTooltip({
   return (
     <TrashProjectButton project={project}>
       {(text, handleOpenModal) => (
-        <Tooltip
+        <OLTooltip
           key={`tooltip-trash-project-${project.id}`}
           id={`trash-project-${project.id}`}
           description={text}
           overlayProps={{ placement: 'top', trigger: ['hover', 'focus'] }}
         >
-          <button
-            className="btn btn-link action-btn"
-            aria-label={text}
-            onClick={handleOpenModal}
-          >
-            <Icon type="trash" />
-          </button>
-        </Tooltip>
+          <span>
+            <OLIconButton
+              onClick={handleOpenModal}
+              variant="link"
+              accessibilityLabel={text}
+              className="action-btn"
+              icon="delete"
+            />
+          </span>
+        </OLTooltip>
       )}
     </TrashProjectButton>
   )

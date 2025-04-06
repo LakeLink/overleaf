@@ -1,9 +1,16 @@
 import { useState, Dispatch, SetStateAction } from 'react'
-import { Modal, Button } from 'react-bootstrap'
 import { useTranslation, Trans } from 'react-i18next'
 import getMeta from '../../../../utils/meta'
 import LeaveModalForm, { LeaveModalFormProps } from './modal-form'
-import { ExposedSettings } from '../../../../../../types/exposed-settings'
+import OLButton from '@/features/ui/components/ol/ol-button'
+import {
+  OLModalBody,
+  OLModalFooter,
+  OLModalHeader,
+  OLModalTitle,
+} from '@/features/ui/components/ol/ol-modal'
+
+const WRITEFULL_SUPPORT_EMAIL = 'support@writefull.com'
 
 type LeaveModalContentProps = {
   handleHide: () => void
@@ -17,8 +24,8 @@ function LeaveModalContentBlock({
   setIsFormValid,
 }: LeaveModalFormProps) {
   const { t } = useTranslation()
-  const { isOverleaf } = getMeta('ol-ExposedSettings') as ExposedSettings
-  const hasPassword = getMeta('ol-hasPassword') as boolean
+  const { isOverleaf } = getMeta('ol-ExposedSettings')
+  const hasPassword = getMeta('ol-hasPassword')
 
   if (isOverleaf && !hasPassword) {
     return (
@@ -31,11 +38,25 @@ function LeaveModalContentBlock({
   }
 
   return (
-    <LeaveModalForm
-      setInFlight={setInFlight}
-      isFormValid={isFormValid}
-      setIsFormValid={setIsFormValid}
-    />
+    <>
+      <LeaveModalForm
+        setInFlight={setInFlight}
+        isFormValid={isFormValid}
+        setIsFormValid={setIsFormValid}
+      />
+      <p>
+        <Trans
+          i18nKey="to_delete_your_writefull_account"
+          values={{ email: WRITEFULL_SUPPORT_EMAIL }}
+          shouldUnescape
+          tOptions={{ interpolation: { escapeValue: true } }}
+          components={{
+            // eslint-disable-next-line jsx-a11y/anchor-has-content
+            a: <a href={`mailto:${WRITEFULL_SUPPORT_EMAIL}`} />,
+          }}
+        />
+      </p>
+    </>
   )
 }
 
@@ -49,15 +70,15 @@ function LeaveModalContent({
 
   return (
     <>
-      <Modal.Header closeButton>
-        <Modal.Title>{t('delete_account')}</Modal.Title>
-      </Modal.Header>
+      <OLModalHeader closeButton>
+        <OLModalTitle>{t('delete_account')}</OLModalTitle>
+      </OLModalHeader>
 
-      <Modal.Body>
+      <OLModalBody>
         <p>
           <Trans
             i18nKey="delete_account_warning_message_3"
-            components={[<strong />]} // eslint-disable-line react/jsx-key
+            components={{ strong: <strong /> }}
           />
         </p>
         <LeaveModalContentBlock
@@ -65,28 +86,22 @@ function LeaveModalContent({
           isFormValid={isFormValid}
           setIsFormValid={setIsFormValid}
         />
-      </Modal.Body>
+      </OLModalBody>
 
-      <Modal.Footer>
-        <Button
-          type="button"
-          disabled={inFlight}
-          onClick={handleHide}
-          bsStyle={null}
-          className="btn-secondary"
-        >
+      <OLModalFooter>
+        <OLButton disabled={inFlight} onClick={handleHide} variant="secondary">
           {t('cancel')}
-        </Button>
+        </OLButton>
 
-        <Button
+        <OLButton
           form="leave-form"
           type="submit"
-          bsStyle="danger"
+          variant="danger"
           disabled={inFlight || !isFormValid}
         >
           {inFlight ? <>{t('deleting')}…</> : t('delete')}
-        </Button>
-      </Modal.Footer>
+        </OLButton>
+      </OLModalFooter>
     </>
   )
 }

@@ -1,8 +1,10 @@
-import { Prec, Transaction, Annotation } from '@codemirror/state'
+import { Prec, Transaction, Annotation, ChangeSpec } from '@codemirror/state'
 import { EditorView, ViewPlugin } from '@codemirror/view'
 import { EventEmitter } from 'events'
-import { CurrentDoc } from '../../../../../types/current-doc'
+import RangesTracker from '@overleaf/ranges-tracker'
 import { ShareDoc } from '../../../../../types/share-doc'
+import { debugConsole } from '@/utils/debugging'
+import { DocumentContainer } from '@/features/ide-react/editor/document-container'
 
 /*
  * Integrate CodeMirror 6 with the real-time system, via ShareJS.
@@ -18,10 +20,22 @@ import { ShareDoc } from '../../../../../types/share-doc'
  *   - frontend/js/ide/editor/Document.js
  *   - frontend/js/ide/editor/ShareJsDoc.js
  *   - frontend/js/ide/connection/EditorWatchdogManager.js
+ *   - frontend/js/features/ide-react/editor/document.ts
+ *   - frontend/js/features/ide-react/editor/share-js-doc.ts
+ *   - frontend/js/features/ide-react/connection/editor-watchdog-manager.js
  */
 
+export type ChangeDescription = {
+  origin: 'remote' | 'undo' | 'reject' | undefined
+  inserted: boolean
+  removed: boolean
+}
+
+/**
+ * A custom extension that connects the CodeMirror 6 editor to the currently open ShareJS document.
+ */
 export const realtime = (
-  { currentDoc }: { currentDoc: CurrentDoc },
+  { currentDoc }: { currentDoc: DocumentContainer },
   handleError: (error: Error) => void
 ) => {
   const realtimePlugin = ViewPlugin.define(view => {
@@ -32,7 +46,7 @@ export const realtime = (
     return {
       update(update) {
         if (update.docChanged) {
-          editor.handleUpdateFromCM(update.transactions)
+          editor.handleUpdateFromCM(update.transactions, currentDoc.ranges)
         }
       },
       destroy() {
@@ -48,7 +62,7 @@ export const realtime = (
   const ensureRealtimePlugin = EditorView.updateListener.of(update => {
     if (!update.view.plugin(realtimePlugin)) {
       const message = 'The realtime extension has been destroyed!!'
-      console.log(message)
+      debugConsole.warn(message)
       if (currentDoc.doc) {
         // display the "out of sync" modal
         currentDoc.doc.emit('error', message)
@@ -79,31 +93,36 @@ export class EditorFacade extends EventEmitter {
   }
 
   // Dispatch changes to CodeMirror view
-  cmInsert(position: number, text: string, origin?: string) {
+  cmChange(changes: ChangeSpec, origin?: string) {
+    const isRemote = origin === 'remote'
+
     this.view.dispatch({
-      changes: { from: position, insert: text },
+      changes,
       annotations: [
-        Transaction.remote.of(origin === 'remote'),
-        Transaction.addToHistory.of(origin !== 'remote'),
+        Transaction.remote.of(isRemote),
+        Transaction.addToHistory.of(!isRemote),
       ],
+      effects:
+        // if this is a remote change, restore a snapshot of the current scroll position after the change has been applied
+        isRemote
+          ? this.view.scrollSnapshot().map(this.view.state.changes(changes))
+          : undefined,
     })
   }
 
+  cmInsert(position: number, text: string, origin?: string) {
+    this.cmChange({ from: position, insert: text }, origin)
+  }
+
   cmDelete(position: number, text: string, origin?: string) {
-    this.view.dispatch({
-      changes: { from: position, to: position + text.length },
-      annotations: [
-        Transaction.remote.of(origin === 'remote'),
-        Transaction.addToHistory.of(origin !== 'remote'),
-      ],
-    })
+    this.cmChange({ from: position, to: position + text.length }, origin)
   }
 
   // Connect to ShareJS, passing changes to the CodeMirror view
   // as new transactions.
   // This is a broad immitation of helper functions supplied in
   // the sharejs library. (See vendor/libs/sharejs, in particular
-  // the 'attach_cm' and 'attach_ace' helpers)
+  // the 'attach_ace' helper)
   attachShareJs(shareDoc: ShareDoc, maxDocLength?: number) {
     this.shareDoc = shareDoc
     this.maxDocLength = maxDocLength
@@ -116,9 +135,9 @@ export class EditorFacade extends EventEmitter {
 
         if (editorText !== otText) {
           shareDoc.emit('error', 'Text does not match in CodeMirror 6')
-          console.error('Text does not match!')
-          console.error('editor: ' + editorText)
-          return console.error('ot:     ' + otText)
+          debugConsole.error('Text does not match!')
+          debugConsole.error('editor: ' + editorText)
+          debugConsole.error('ot:     ' + otText)
         }
       }, 0)
     }
@@ -148,8 +167,13 @@ export class EditorFacade extends EventEmitter {
 
   // Process an update from CodeMirror, applying changes to the
   // ShareJs doc if appropriate
-  handleUpdateFromCM(transactions: readonly Transaction[]) {
+  handleUpdateFromCM(
+    transactions: readonly Transaction[],
+    ranges?: RangesTracker
+  ) {
     const shareDoc = this.shareDoc
+    const trackedDeletesLength =
+      ranges != null ? ranges.getTrackedDeletesLength() : 0
 
     if (!shareDoc) {
       throw new Error('Trying to process updates with no shareDoc')
@@ -163,10 +187,15 @@ export class EditorFacade extends EventEmitter {
           return
         }
 
-        if (
-          this.maxDocLength &&
-          transaction.changes.desc.newLength >= this.maxDocLength
-        ) {
+        // This is an approximation. Some deletes could have generated new
+        // tracked deletes since we measured trackedDeletesLength at the top of
+        // the function. Unfortunately, the ranges tracker is only updated
+        // after all transactions are processed, so it's not easy to get an
+        // exact number.
+        const fullDocLength =
+          transaction.changes.desc.newLength + trackedDeletesLength
+
+        if (this.maxDocLength && fullDocLength >= this.maxDocLength) {
           shareDoc.emit(
             'error',
             new Error('document length is greater than maxDocLength')
@@ -199,7 +228,13 @@ export class EditorFacade extends EventEmitter {
             // TODO: mapPos instead?
             positionShift = positionShift - removedLength + insertedLength
 
-            this.emit('change', this, { origin, inserted, removed })
+            const changeDescription: ChangeDescription = {
+              origin,
+              inserted,
+              removed,
+            }
+
+            this.emit('change', this, changeDescription)
           }
         )
       }

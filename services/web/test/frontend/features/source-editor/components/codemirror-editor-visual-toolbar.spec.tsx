@@ -1,9 +1,8 @@
-import { FC } from 'react'
 import { EditorProviders } from '../../../helpers/editor-providers'
 import CodemirrorEditor from '../../../../../frontend/js/features/source-editor/components/codemirror-editor'
 import { mockScope } from '../helpers/mock-scope'
-
-const isMac = /Mac/.test(window.navigator?.platform)
+import { TestContainer } from '../helpers/test-container'
+import { isMac } from '@/shared/utils/os'
 
 const selectAll = () => {
   cy.get('.cm-content').trigger(
@@ -12,25 +11,21 @@ const selectAll = () => {
   )
 }
 
-const clickToolbarButton = (text: string) => {
-  cy.findByLabelText(text).click()
-  cy.findByLabelText(text).trigger('mouseout')
+const clickToolbarButton = (name: string) => {
+  cy.findByRole('button', { name }).click()
+  cy.findByRole('button', { name }).trigger('mouseout')
 }
-
-const Container: FC = ({ children }) => (
-  <div style={{ width: 785, height: 785 }}>{children}</div>
-)
 
 const mountEditor = (content: string) => {
   const scope = mockScope(content)
   scope.editor.showVisual = true
 
   cy.mount(
-    <Container>
+    <TestContainer>
       <EditorProviders scope={scope}>
         <CodemirrorEditor />
       </EditorProviders>
-    </Container>
+    </TestContainer>
   )
 
   // wait for the content to be parsed and revealed
@@ -41,7 +36,7 @@ describe('<CodeMirrorEditor/> toolbar in Rich Text mode', function () {
   beforeEach(function () {
     window.metaAttributesCache.set('ol-preventCompileOnLoad', true)
     cy.interceptEvents()
-    cy.interceptSpelling()
+    cy.interceptMetadata()
   })
 
   it('should handle Undo and Redo', function () {
@@ -62,13 +57,15 @@ describe('<CodeMirrorEditor/> toolbar in Rich Text mode', function () {
     cy.findByRole('menu').within(() => {
       cy.findByText('Subsection').click()
     })
-    cy.get('.cm-content').should('have.text', '{hi}')
+    cy.get('.cm-content').should('have.text', 'hi')
+    cy.get('.ol-cm-command-subsection').should('have.length', 1)
 
     clickToolbarButton('Choose section heading level')
     cy.findByRole('menu').within(() => {
       cy.findByText('Normal text').click()
     })
     cy.get('.cm-content').should('have.text', 'hi')
+    cy.get('.ol-cm-command-subsection').should('have.length', 0)
   })
 
   it('should toggle Bold and Italic', function () {
@@ -97,7 +94,8 @@ describe('<CodeMirrorEditor/> toolbar in Rich Text mode', function () {
     mountEditor('2+3=5')
     selectAll()
 
-    clickToolbarButton('Insert Inline Math')
+    clickToolbarButton('Insert Math')
+    cy.findByRole('button', { name: 'Insert Inline Math' }).click()
     cy.get('.cm-content').should('have.text', '\\(2+3=5\\)')
   })
 
@@ -105,7 +103,8 @@ describe('<CodeMirrorEditor/> toolbar in Rich Text mode', function () {
     mountEditor('2+3=5')
     selectAll()
 
-    clickToolbarButton('Insert Display Math')
+    clickToolbarButton('Insert Math')
+    cy.findByRole('button', { name: 'Insert Display Math' }).click()
     cy.get('.cm-content').should('have.text', '\\[2+3=5\\]')
   })
 
@@ -114,41 +113,55 @@ describe('<CodeMirrorEditor/> toolbar in Rich Text mode', function () {
     selectAll()
 
     clickToolbarButton('Insert Link')
-    cy.get('.cm-content').should('have.text', '\\href{}{test}')
-
-    cy.get('.cm-line')
-      .eq(0)
-      .type('http://example.com')
-      .should('have.text', '\\href{http://example.com}{test}')
-  })
-
-  it('should insert a figure', function () {
-    mountEditor('test')
-
-    clickToolbarButton('Insert Figure')
-
-    cy.get('.cm-content').should(
-      'have.text',
-      [
-        'test',
-        '\\begin{figure}',
-        '    \\centering',
-        '    \\includegraphics{}',
-        '    Caption',
-        '    🏷fig:my_label',
-        '\\end{figure}',
-      ].join('')
-    )
-
-    cy.get('.cm-line')
-      .eq(3)
-      .type('test.png')
-      .should('have.text', '    \\includegraphics{test.png}')
+    cy.get('.cm-content').should('have.text', '{test}')
+    cy.findByLabelText('URL') // tooltip form
   })
 
   it('should insert a bullet list', function () {
     mountEditor('test')
     selectAll()
+
+    clickToolbarButton('More')
+    clickToolbarButton('Bullet List')
+
+    cy.get('.cm-content').should('have.text', ' test')
+
+    cy.get('.cm-line').eq(0).type('ing')
+    cy.get('.cm-line').eq(0).should('have.text', ' testing')
+  })
+
+  it('should insert a numbered list', function () {
+    mountEditor('test')
+    selectAll()
+
+    clickToolbarButton('More')
+    clickToolbarButton('Numbered List')
+
+    cy.get('.cm-content').should('have.text', ' test')
+
+    cy.get('.cm-line').eq(0).type('ing')
+    cy.get('.cm-line').eq(0).should('have.text', ' testing')
+  })
+
+  it('should toggle between list types', function () {
+    mountEditor('test')
+    selectAll()
+
+    clickToolbarButton('More')
+    clickToolbarButton('Numbered List')
+
+    // expose the markup
+    cy.get('.cm-line').eq(0).type('{rightArrow}')
+
+    cy.get('.cm-content').should(
+      'have.text',
+      [
+        //
+        '\\begin{enumerate}',
+        ' test',
+        '\\end{enumerate}',
+      ].join('')
+    )
 
     clickToolbarButton('Bullet List')
 
@@ -161,15 +174,17 @@ describe('<CodeMirrorEditor/> toolbar in Rich Text mode', function () {
         '\\end{itemize}',
       ].join('')
     )
-
-    cy.get('.cm-line').eq(1).type('ing').should('have.text', ' testing')
   })
 
-  it('should insert a numbered list', function () {
+  it('should remove a list', function () {
     mountEditor('test')
     selectAll()
 
+    clickToolbarButton('More')
     clickToolbarButton('Numbered List')
+
+    // expose the markup
+    cy.get('.cm-line').eq(0).type('{rightArrow}')
 
     cy.get('.cm-content').should(
       'have.text',
@@ -181,6 +196,137 @@ describe('<CodeMirrorEditor/> toolbar in Rich Text mode', function () {
       ].join('')
     )
 
-    cy.get('.cm-line').eq(1).type('ing').should('have.text', ' testing')
+    clickToolbarButton('Numbered List')
+
+    cy.get('.cm-content').should('have.text', 'test')
+  })
+
+  it('should not remove a parent list', function () {
+    mountEditor('test\ntest')
+    selectAll()
+
+    clickToolbarButton('More')
+    clickToolbarButton('Numbered List')
+
+    // expose the markup
+    cy.get('.cm-line').eq(1).type('{rightArrow}')
+
+    cy.get('.cm-content').should(
+      'have.text',
+      [
+        //
+        '\\begin{enumerate}',
+        ' test',
+        ' test',
+        '\\end{enumerate}',
+      ].join('')
+    )
+
+    cy.get('.cm-line').eq(2).click()
+
+    cy.findByRole('button', { name: 'Increase Indent' }).click()
+
+    // expose the markup
+    cy.get('.cm-line').eq(1).type('{rightArrow}')
+
+    cy.get('.cm-content').should(
+      'have.text',
+      [
+        //
+        ' test',
+        '    \\begin{enumerate}',
+        ' test',
+        '    \\end{enumerate}',
+      ].join('')
+    )
+
+    cy.get('.cm-line').eq(1).click()
+
+    clickToolbarButton('More')
+    clickToolbarButton('Numbered List')
+
+    cy.get('.cm-line').eq(0).type('{upArrow}')
+
+    cy.get('.cm-content').should(
+      'have.text',
+      [
+        //
+        '\\begin{enumerate}',
+        ' test',
+        '    test',
+        '\\end{enumerate}',
+      ].join('')
+    )
+  })
+
+  it('should not remove a nested list', function () {
+    mountEditor('test\ntest')
+    selectAll()
+
+    clickToolbarButton('More')
+    clickToolbarButton('Numbered List')
+
+    // expose the markup
+    cy.get('.cm-line').eq(1).type('{rightArrow}')
+
+    cy.get('.cm-content').should(
+      'have.text',
+      [
+        //
+        '\\begin{enumerate}',
+        ' test',
+        ' test',
+        '\\end{enumerate}',
+      ].join('')
+    )
+
+    cy.get('.cm-line').eq(2).click()
+
+    cy.findByRole('button', { name: 'Increase Indent' }).click()
+
+    // expose the markup
+    cy.get('.cm-line').eq(1).type('{rightArrow}')
+
+    cy.get('.cm-content').should(
+      'have.text',
+      [
+        //
+        ' test',
+        '    \\begin{enumerate}',
+        ' test',
+        '    \\end{enumerate}',
+      ].join('')
+    )
+
+    cy.get('.cm-line').eq(0).click()
+
+    clickToolbarButton('More')
+    clickToolbarButton('Numbered List')
+
+    // expose the markup
+    cy.get('.cm-line').eq(1).type('{rightArrow}')
+
+    cy.get('.cm-content').should(
+      'have.text',
+      [
+        //
+        'test',
+        '    \\begin{enumerate}',
+        ' test',
+        '    \\end{enumerate}',
+      ].join('')
+    )
+  })
+
+  it('should display the Toggle Symbol Palette button when available', function () {
+    window.metaAttributesCache.set('ol-symbolPaletteAvailable', true)
+    mountEditor('')
+    clickToolbarButton('Toggle Symbol Palette')
+  })
+
+  it('should not display the Toggle Symbol Palette button when not available', function () {
+    window.metaAttributesCache.set('ol-symbolPaletteAvailable', false)
+    mountEditor('')
+    cy.findByLabelText('Toggle Symbol Palette').should('not.exist')
   })
 })

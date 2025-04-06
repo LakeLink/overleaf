@@ -1,5 +1,8 @@
 extends ../layout-marketing
 
+block vars
+	- bootstrap5PageStatus = 'disabled'
+
 block content
 	main.content.content-alt#main-content
 		.container
@@ -7,10 +10,19 @@ block content
 				.col-md-6.col-md-offset-3.col-lg-4.col-lg-offset-4
 					.card
 						.page-header
-							h1 #{translate("log_in")}
+							if login_support_title
+								h1 !{login_support_title}
+							else
+								h1 #{translate("log_in")}					
 						form(data-ol-async-form, name="loginForm", action='/login', method="POST")
 							input(name='_csrf', type='hidden', value=csrfToken)
 							+formMessages()
+							+customFormMessage('invalid-password-retry-or-reset', 'danger')
+								| !{translate('email_or_password_wrong_try_again_or_reset', {}, [{ name: 'a', attrs: { href: '/user/password/reset', 'aria-describedby': 'resetPasswordDescription' } }])}
+								span.sr-only(id='resetPasswordDescription')
+									| #{translate('reset_password_link')}
+							+customValidationMessage('password-compromised')
+								| !{translate('password_compromised_try_again_or_use_known_device_or_reset', {}, [{name: 'a', attrs: {href: 'https://haveibeenpwned.com/passwords', rel: 'noopener noreferrer', target: '_blank'}}, {name: 'a', attrs: {href: '/user/password/reset', target: '_blank'}}])}.
 							.form-group
 								input.form-control(
 									type='email',
@@ -38,3 +50,7 @@ block content
 								a.btn-block.login-btn(href="/oauth/redirect" style='padding-left: 0px')
 									| Log in via LakeHub
 
+							if login_support_text
+								hr
+								p.text-center !{login_support_text}	
+	

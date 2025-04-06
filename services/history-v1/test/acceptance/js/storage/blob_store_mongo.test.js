@@ -6,7 +6,7 @@ const mongoBackend = require('../../../../storage/lib/blob_store/mongo')
 const mongodb = require('../../../../storage/lib/mongodb')
 
 describe('BlobStore Mongo backend', function () {
-  const projectId = ObjectId().toString()
+  const projectId = new ObjectId().toString()
   const hashes = {
     abcd: [
       'abcd000000000000000000000000000000000000',
@@ -22,6 +22,7 @@ describe('BlobStore Mongo backend', function () {
       'abcdaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     ],
     1234: ['1234000000000000000000000000000000000000'],
+    1337: ['1337000000000000000000000000000000000000'],
   }
 
   beforeEach('clean up', cleanup.everything)
@@ -38,7 +39,7 @@ describe('BlobStore Mongo backend', function () {
         const blob = new Blob(hash, 123, 99)
         await mongoBackend.insertBlob(projectId, blob)
       }
-      const record = await mongodb.blobs.findOne(ObjectId(projectId), {
+      const record = await mongodb.blobs.findOne(new ObjectId(projectId), {
         promoteBuffers: true,
       })
       expect(record.blobs).to.deep.equal({
@@ -56,7 +57,7 @@ describe('BlobStore Mongo backend', function () {
         const blob = new Blob(hash, 123, 99)
         await mongoBackend.insertBlob(projectId, blob)
       }
-      const record = await mongodb.blobs.findOne(ObjectId(projectId), {
+      const record = await mongodb.blobs.findOne(new ObjectId(projectId), {
         promoteBuffers: true,
       })
       expect(record.blobs).to.deep.equal({
@@ -73,6 +74,42 @@ describe('BlobStore Mongo backend', function () {
         bcd: hashes.abcd
           .slice(8)
           .map(hash => ({ h: Buffer.from(hash, 'hex'), b: 123, s: 99 })),
+      })
+    })
+  })
+
+  describe('getProjectBlobsBatch', function () {
+    it('finds all the blobs', async function () {
+      const projectId0 = new ObjectId().toString()
+      const hashesProject0 = hashes[1234].concat(hashes.abcd)
+      const projectId1 = new ObjectId().toString()
+      const hashesProject1 = hashes[1337].concat(hashes.abcd)
+      const projectId2 = new ObjectId().toString()
+      const hashesProject2 = [] // no hashes
+      const projectId3 = new ObjectId().toString()
+      const hashesProject3 = hashes[1337]
+      const projectBlobs = {
+        [projectId0]: hashesProject0,
+        [projectId1]: hashesProject1,
+        [projectId2]: hashesProject2,
+        [projectId3]: hashesProject3,
+      }
+      for (const [projectId, hashes] of Object.entries(projectBlobs)) {
+        for (const hash of hashes) {
+          const blob = new Blob(hash, 123, 99)
+          await mongoBackend.insertBlob(projectId, blob)
+        }
+      }
+      const projects = [projectId0, projectId1, projectId2, projectId3]
+      const { nBlobs, blobs } =
+        await mongoBackend.getProjectBlobsBatch(projects)
+      expect(nBlobs).to.equal(
+        hashesProject0.length + hashesProject1.length + hashesProject3.length
+      )
+      expect(Object.fromEntries(blobs.entries())).to.deep.equal({
+        [projectId0]: hashesProject0.map(hash => new Blob(hash, 123, 99)),
+        [projectId1]: hashesProject1.map(hash => new Blob(hash, 123, 99)),
+        [projectId3]: hashesProject3.map(hash => new Blob(hash, 123, 99)),
       })
     })
   })
@@ -110,6 +147,15 @@ describe('BlobStore Mongo backend', function () {
         const blobs = await mongoBackend.findBlobs(projectId, requestedHashes)
         const obtainedHashes = blobs.map(blob => blob.getHash())
         expect(obtainedHashes).to.have.members(requestedHashes)
+      })
+    })
+
+    describe('getProjectBlobs', function () {
+      it('returns all blobs for a given project', async function () {
+        const blobs = await mongoBackend.getProjectBlobs(projectId)
+        const obtainedHashes = blobs.map(blob => blob.getHash())
+        const expectedHashes = hashes.abcd.concat(hashes[1234])
+        expect(obtainedHashes).to.have.members(expectedHashes)
       })
     })
 

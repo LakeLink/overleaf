@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import withErrorBoundary from '../../../../infrastructure/error-boundary'
-import { ErrorBoundaryFallback } from '../../../../shared/components/error-boundary-fallback'
-import { EditorState, Extension } from '@codemirror/state'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  EditorSelection,
+  EditorState,
+  Extension,
+  StateEffect,
+} from '@codemirror/state'
 import { EditorView, lineNumbers } from '@codemirror/view'
 import { indentationMarkers } from '@replit/codemirror-indentation-markers'
 import { highlights, setHighlightsEffect } from '../../extensions/highlights'
-import useScopeValue from '../../../../shared/hooks/use-scope-value'
-import { theme, Options } from '../../extensions/theme'
+import { useUserSettingsContext } from '@/shared/context/user-settings-context'
+import { theme, Options, setOptionsTheme } from '../../extensions/theme'
 import { indentUnit } from '@codemirror/language'
 import { Highlight } from '../../services/types/doc'
 import useIsMounted from '../../../../shared/hooks/use-is-mounted'
@@ -15,16 +18,15 @@ import {
   highlightLocationsField,
   scrollToHighlight,
 } from '../../extensions/highlight-locations'
-import Icon from '../../../../shared/components/icon'
 import { useTranslation } from 'react-i18next'
-
-type FontFamily = 'monaco' | 'lucida'
-type LineHeight = 'compact' | 'normal' | 'wide'
-type OverallTheme = '' | 'light-'
+import { inlineBackground } from '../../../source-editor/extensions/inline-background'
+import OLButton from '@/features/ui/components/ol/ol-button'
 
 function extensions(themeOptions: Options): Extension[] {
   return [
     EditorView.editable.of(false),
+    EditorState.readOnly.of(true),
+    EditorView.contentAttributes.of({ tabindex: '0' }),
     lineNumbers(),
     EditorView.lineWrapping,
     indentUnit.of('    '), // TODO: Vary this by file type
@@ -32,6 +34,7 @@ function extensions(themeOptions: Options): Extension[] {
     highlights(),
     highlightLocations(),
     theme(themeOptions),
+    inlineBackground(false),
   ]
 }
 
@@ -42,10 +45,8 @@ function DocumentDiffViewer({
   doc: string
   highlights: Highlight[]
 }) {
-  const [fontFamily] = useScopeValue<FontFamily>('settings.fontFamily')
-  const [fontSize] = useScopeValue<number>('settings.fontSize')
-  const [lineHeight] = useScopeValue<LineHeight>('settings.lineHeight')
-  const [overallTheme] = useScopeValue<OverallTheme>('settings.overallTheme')
+  const { userSettings } = useUserSettingsContext()
+  const { fontFamily, fontSize, lineHeight } = userSettings
   const isMounted = useIsMounted()
   const { t } = useTranslation()
 
@@ -53,16 +54,15 @@ function DocumentDiffViewer({
     return EditorState.create({
       doc,
       extensions: extensions({
-        fontFamily,
         fontSize,
+        fontFamily,
         lineHeight,
-        overallTheme,
       }),
     })
   })
 
-  const view = useRef(
-    new EditorView({
+  const [view] = useState<EditorView>(() => {
+    return new EditorView({
       state,
       dispatch: tr => {
         view.update([tr])
@@ -71,7 +71,7 @@ function DocumentDiffViewer({
         }
       },
     })
-  ).current
+  })
 
   const highlightLocations = state.field(highlightLocationsField)
 
@@ -100,37 +100,58 @@ function DocumentDiffViewer({
   const { before, after } = highlightLocations
 
   useEffect(() => {
+    const effects: StateEffect<unknown>[] = [setHighlightsEffect.of(highlights)]
+    if (highlights.length > 0) {
+      const { from, to } = highlights[0].range
+      effects.push(
+        EditorView.scrollIntoView(EditorSelection.range(from, to), {
+          y: 'center',
+        })
+      )
+    }
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: doc },
-      effects: setHighlightsEffect.of(highlights),
+      effects,
     })
   }, [doc, highlights, view])
+
+  // Update the document diff viewer theme whenever the font size, font family
+  // or line height user setting changes
+  useEffect(() => {
+    view.dispatch(
+      setOptionsTheme({
+        fontSize,
+        fontFamily,
+        lineHeight,
+      })
+    )
+  }, [view, fontSize, fontFamily, lineHeight])
 
   return (
     <div className="document-diff-container">
       <div ref={containerRef} className="cm-viewer-container" />
       {before > 0 ? (
-        <button
-          className="btn btn-secondary previous-highlight-button"
+        <OLButton
+          variant="secondary"
+          leadingIcon="arrow_upward"
           onClick={scrollToPrevious}
+          className="previous-highlight-button"
         >
-          <Icon type="arrow-up" />
-          &nbsp;
           {t('n_more_updates_above', { count: before })}
-        </button>
+        </OLButton>
       ) : null}
       {after > 0 ? (
-        <button
-          className="btn btn-secondary next-highlight-button"
+        <OLButton
+          variant="secondary"
+          leadingIcon="arrow_downward"
           onClick={scrollToNext}
+          className="next-highlight-button"
         >
-          <Icon type="arrow-down" />
-          &nbsp;
           {t('n_more_updates_below', { count: after })}
-        </button>
+        </OLButton>
       ) : null}
     </div>
   )
 }
 
-export default withErrorBoundary(DocumentDiffViewer, ErrorBoundaryFallback)
+export default DocumentDiffViewer

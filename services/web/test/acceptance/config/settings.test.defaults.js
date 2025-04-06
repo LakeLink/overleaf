@@ -2,7 +2,7 @@ const { merge } = require('@overleaf/settings/merge')
 
 let features
 
-const httpAuthUser = 'sharelatex'
+const httpAuthUser = 'overleaf'
 const httpAuthPass = 'password'
 const httpAuthUsers = {}
 httpAuthUsers[httpAuthUser] = httpAuthPass
@@ -17,6 +17,8 @@ module.exports = {
   secureCookie: false,
   security: {
     sessionSecret: 'static-secret-for-tests',
+    sessionSecretUpcoming: 'static-secret-upcoming-for-tests',
+    sessionSecretFallback: 'static-secret-fallback-for-tests',
   },
   adminDomains: process.env.ADMIN_DOMAINS
     ? JSON.parse(process.env.ADMIN_DOMAINS)
@@ -29,74 +31,73 @@ module.exports = {
     },
   },
 
+  mongo: {
+    options: {
+      family: 4,
+    },
+  },
+
   apis: {
     linkedUrlProxy: {
       url: process.env.LINKED_URL_PROXY,
     },
 
     web: {
-      url: 'http://localhost:23000',
+      url: 'http://127.0.0.1:23000',
       user: httpAuthUser,
       pass: httpAuthPass,
     },
 
     haveIBeenPwned: {
       enabled: false,
-      url: 'http://localhost:1337',
+      url: 'http://127.0.0.1:1337',
     },
     documentupdater: {
-      url: 'http://localhost:23003',
-    },
-    spelling: {
-      url: 'http://localhost:23005',
-      host: 'localhost',
-    },
-    trackchanges: {
-      url: 'http://localhost:23015',
+      url: 'http://127.0.0.1:23003',
     },
     docstore: {
-      url: 'http://localhost:23016',
-      pubUrl: 'http://localhost:23016',
+      url: 'http://127.0.0.1:23016',
+      pubUrl: 'http://127.0.0.1:23016',
     },
     chat: {
-      internal_url: 'http://localhost:23010',
+      internal_url: 'http://127.0.0.1:23010',
     },
     filestore: {
-      url: 'http://localhost:23009',
+      url: 'http://127.0.0.1:23009',
     },
     clsi: {
-      url: 'http://localhost:23013',
+      url: 'http://127.0.0.1:23013',
     },
     realTime: {
-      url: 'http://localhost:23026',
+      url: 'http://127.0.0.1:23026',
     },
     contacts: {
-      url: 'http://localhost:23036',
+      url: 'http://127.0.0.1:23036',
     },
     notifications: {
-      url: 'http://localhost:23042',
+      url: 'http://127.0.0.1:23042',
     },
     project_history: {
       sendProjectStructureOps: true,
-      initializeHistoryForNewProjects: true,
-      displayHistoryForNewProjects: true,
-      url: `http://localhost:23054`,
+      url: `http://127.0.0.1:23054`,
     },
     v1_history: {
-      url: `http://localhost:23100/api`,
+      url: `http://127.0.0.1:23100/api`,
+      user: 'overleaf',
+      pass: 'password',
+    },
+    historyBackupDeletion: {
+      url: `http://127.0.0.1:23101`,
       user: 'overleaf',
       pass: 'password',
     },
     webpack: {
-      url: 'http://localhost:23808',
+      url: 'http://127.0.0.1:23808',
+    },
+    gitBridge: {
+      url: 'http://127.0.0.1:28000',
     },
   },
-
-  // for registration via SL, set enableLegacyRegistration to true
-  // for registration via Overleaf v1, set enableLegacyLogin to true
-
-  // Currently, acceptance tests require enableLegacyRegistration.
-  enableLegacyRegistration: true,
 
   features: (features = {
     v1_free: {
@@ -105,15 +106,16 @@ module.exports = {
       versioning: false,
       github: true,
       gitBridge: true,
-      templates: false,
       references: false,
       referencesSearch: false,
       mendeley: true,
+      papers: true,
       zotero: true,
       compileTimeout: 60,
       compileGroup: 'standard',
       trackChanges: false,
       symbolPalette: false,
+      aiErrorAssistant: false,
     },
     personal: {
       collaborators: 1,
@@ -121,15 +123,16 @@ module.exports = {
       versioning: false,
       github: false,
       gitBridge: false,
-      templates: false,
       references: false,
       referencesSearch: false,
       mendeley: false,
+      papers: false,
       zotero: false,
       compileTimeout: 60,
       compileGroup: 'standard',
       trackChanges: false,
       symbolPalette: false,
+      aiErrorAssistant: false,
     },
     collaborator: {
       collaborators: 10,
@@ -137,15 +140,16 @@ module.exports = {
       versioning: true,
       github: true,
       gitBridge: true,
-      templates: true,
       references: true,
       referencesSearch: true,
       mendeley: true,
+      papers: true,
       zotero: true,
       compileTimeout: 180,
       compileGroup: 'priority',
       trackChanges: true,
       symbolPalette: true,
+      aiErrorAssistant: false,
     },
     professional: {
       collaborators: -1,
@@ -153,15 +157,16 @@ module.exports = {
       versioning: true,
       github: true,
       gitBridge: true,
-      templates: true,
       references: true,
       referencesSearch: true,
       mendeley: true,
+      papers: true,
       zotero: true,
       compileTimeout: 180,
       compileGroup: 'priority',
       trackChanges: true,
       symbolPalette: true,
+      aiErrorAssistant: false,
     },
   }),
 
@@ -242,10 +247,6 @@ module.exports = {
 
   reconfirmNotificationDays: 14,
 
-  unsupportedBrowsers: {
-    ie: '<=11',
-  },
-
   recaptcha: {
     siteKey: 'siteKey',
     disabled: {
@@ -253,6 +254,7 @@ module.exports = {
       login: false,
       passwordReset: true,
       register: true,
+      addEmail: true,
     },
   },
 
@@ -261,6 +263,10 @@ module.exports = {
 
   test: {
     counterInit: 0,
+  },
+
+  devToolbar: {
+    enabled: false,
   },
 }
 

@@ -1,11 +1,10 @@
 import { memo, useCallback } from 'react'
 import { EditorView } from '@codemirror/view'
-import { useCodeMirrorViewContext } from '../codemirror-editor'
-import { Button } from 'react-bootstrap'
+import { useCodeMirrorViewContext } from '../codemirror-context'
 import classnames from 'classnames'
-import Tooltip from '../../../../shared/components/tooltip'
-import { emitCommandEvent } from '../../extensions/toolbar/utils/analytics'
-import Icon from '../../../../shared/components/icon'
+import { emitToolbarEvent } from '../../extensions/toolbar/utils/analytics'
+import MaterialIcon from '@/shared/components/material-icon'
+import OLTooltip from '@/features/ui/components/ol/ol-tooltip'
 
 export const ToolbarButton = memo<{
   id: string
@@ -38,7 +37,7 @@ export const ToolbarButton = memo<{
 
   const handleClick = useCallback(
     event => {
-      emitCommandEvent(view, id)
+      emitToolbarEvent(view, id)
       if (command) {
         event.preventDefault()
         command(view)
@@ -49,18 +48,23 @@ export const ToolbarButton = memo<{
   )
 
   const button = (
-    <Button
-      className={classnames('ol-cm-toolbar-button', className, { hidden })}
+    <button
+      className={classnames('ol-cm-toolbar-button', className, {
+        active,
+        hidden,
+      })}
       aria-label={label}
       onMouseDown={handleMouseDown}
-      onClick={handleClick}
-      bsStyle={null}
-      active={active}
-      disabled={disabled}
+      onClick={!disabled ? handleClick : undefined}
+      aria-disabled={disabled}
       type="button"
     >
-      {textIcon ? icon : <Icon type={icon} fw accessibilityLabel={label} />}
-    </Button>
+      {textIcon ? (
+        icon
+      ) : (
+        <MaterialIcon type={icon} accessibilityLabel={label} />
+      )}
+    </button>
   )
 
   if (!label) {
@@ -75,12 +79,12 @@ export const ToolbarButton = memo<{
   )
 
   return (
-    <Tooltip
+    <OLTooltip
       id={id}
       description={description}
       overlayProps={{ placement: 'bottom' }}
     >
       {button}
-    </Tooltip>
+    </OLTooltip>
   )
 })

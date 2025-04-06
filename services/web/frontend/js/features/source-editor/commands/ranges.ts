@@ -7,17 +7,20 @@ import {
   syntaxTree,
 } from '@codemirror/language'
 import { SyntaxNode } from '@lezer/common'
+import { ancestorOfNodeWithType } from '../utils/tree-query'
+import { lastAncestorAtEndPosition } from '../utils/tree-operations/ancestors'
 import {
-  ancestorOfNodeWithType,
-  isUnknownCommandWithName,
-} from '../utils/tree-query'
+  formattingCommandMap,
+  type FormattingCommand,
+  type FormattingNodeType,
+} from '@/features/source-editor/utils/tree-operations/formatting'
 
 export const wrapRanges =
   (
     prefix: string,
     suffix: string,
     wrapWholeLine = false,
-    selection?: (range: SelectionRange) => SelectionRange
+    selection?: (range: SelectionRange, view: EditorView) => SelectionRange
   ) =>
   (view: EditorView): boolean => {
     if (view.state.readOnly) {
@@ -57,7 +60,7 @@ export const wrapRanges =
         )
 
         return {
-          range: selection ? selection(changedRange) : changedRange,
+          range: selection ? selection(changedRange, view) : changedRange,
           // create a single change, including the content
           changes: [
             {
@@ -207,40 +210,35 @@ export const duplicateSelection = (view: EditorView) => {
   return true
 }
 
+const skipParentNodeTypes = [
+  'LongArg',
+  'TextArgument',
+  'OpenBrace',
+  'CloseBrace',
+]
+
 function getParentNode(
   position: number | SyntaxNode,
   state: EditorState,
   assoc: 0 | 1 | -1 = 1
 ): SyntaxNode | undefined {
   const tree = ensureSyntaxTree(state, 1000)
-  let node: SyntaxNode | undefined | null = null
+  let node: SyntaxNode | undefined | null
   if (typeof position === 'number') {
     node = tree?.resolveInner(position, assoc)?.parent
-    // HACK: Spaces after UnknownCommands (and other commands without arguments)
-    // are included in the Command node. So we have to adjust for that here.
-    const preceedingCharacter = state.sliceDoc(
-      Math.max(0, position - 1),
-      position
-    )
-    if (
-      preceedingCharacter === ' ' &&
-      ['UnknownCommand', 'Item', 'Left', 'Right'].some(name =>
-        node?.type.is(name)
-      )
-    ) {
-      node = ancestorOfNodeWithType(node, 'Command')?.parent
+
+    const ancestorAtEndPos = lastAncestorAtEndPosition(node, position)
+    if (ancestorAtEndPos?.parent) {
+      node = ancestorAtEndPos.parent
     }
   } else {
     node = position?.parent
   }
 
-  while (
-    ['LongArg', 'TextArgument', 'OpenBrace', 'CloseBrace'].includes(
-      node?.type.name || ''
-    )
-  ) {
-    node = node!.parent
+  while (node && skipParentNodeTypes.includes(node.type.name)) {
+    node = node.parent
   }
+
   return node || undefined
 }
 
@@ -276,26 +274,23 @@ function moveRange(range: SelectionRange, newFrom: number, newTo: number) {
 
 function validateReplacement(expected: string, actual: string) {
   if (expected !== actual) {
-    throw new Error(
-      `Replacement in toggleRange failed validation. Expected ${expected} got ${actual}`
-    )
+    throw new Error('Replacement in toggleRange failed validation.')
   }
 }
 
 function getWrappingAncestor(
   node: SyntaxNode,
-  command: string,
-  state: EditorState
+  nodeType: FormattingNodeType
 ): SyntaxNode | null {
   for (
     let ancestor: SyntaxNode | null = node;
     ancestor;
     ancestor = ancestor.parent
   ) {
-    if (isUnknownCommandWithName(ancestor, command, state)) {
+    if (ancestor.type.is(nodeType)) {
       return ancestor
     }
-    if (ancestor.type.is('UnknownCommand')) {
+    if (formattingCommandMap[ancestor.type.name as FormattingCommand]) {
       // We could multiple levels deep in bold/non-bold. So bail out in this case
       return null
     }
@@ -304,7 +299,7 @@ function getWrappingAncestor(
 }
 
 function adjustRangeIfNeeded(
-  command: string,
+  nodeType: FormattingNodeType,
   range: SelectionRange,
   state: EditorState
 ) {
@@ -321,50 +316,51 @@ function adjustRangeIfNeeded(
 
   const nodeLeft = tree.resolveInner(range.from, 1)
   const nodeRight = tree.resolveInner(range.to, -1)
-  const parentLeft = getWrappingAncestor(nodeLeft, command, state)
-  const parentRight = getWrappingAncestor(nodeRight, command, state)
+  const parentLeft = getWrappingAncestor(nodeLeft, nodeType)
+  const parentRight = getWrappingAncestor(nodeRight, nodeType)
 
   const parent = getParentNode(nodeLeft, state)
-  if (parent?.type.is('UnknownCommand') && spansWholeArgument(parent, range)) {
+  if (
+    parent?.type.is('$ToggleTextFormattingCommand') &&
+    spansWholeArgument(parent, range)
+  ) {
     return bubbleUpRange(
-      command,
-      ancestorOfNodeWithType(nodeLeft, 'UnknownCommand'),
-      range,
-      state
+      nodeType,
+      ancestorOfNodeWithType(nodeLeft, '$ToggleTextFormattingCommand'),
+      range
     )
   }
 
   if (!parentLeft) {
     // We're not trying to unbold, so don't bother adjusting range
     return bubbleUpRange(
-      command,
-      ancestorOfNodeWithType(nodeLeft, 'UnknownCommand'),
-      range,
-      state
+      nodeType,
+      ancestorOfNodeWithType(nodeLeft, '$ToggleTextFormattingCommand'),
+      range
     )
   }
-  if (nodeLeft.type.is('CtrlSeq') && range.from === range.to) {
-    const command = nodeLeft.parent?.parent
-    if (!command) {
+  if (nodeLeft.type.is('$CtrlSeq') && range.from === range.to) {
+    const commandNode = nodeLeft.parent?.parent?.parent
+    if (!commandNode) {
       return range
     }
-    return EditorSelection.cursor(command.from)
+    return EditorSelection.cursor(commandNode.from)
   }
 
   let { from, to } = range
-  if (nodeLeft.type.is('CtrlSeq')) {
+  if (nodeLeft.type.is('$CtrlSeq')) {
     from = nodeLeft.to + 1
   }
   if (nodeLeft.type.is('OpenBrace')) {
     from = nodeLeft.to
   }
-  // We know that parentLeft is the UnknownCommand, so now we check if we're
+  // We know that parentLeft is the $ToggleTextFormattingCommand, so now we check if we're
   // to the right of the closing brace. (parent is TextArgument, grandparent is
-  // UnknownCommand)
+  // $ToggleTextFormattingCommand)
   if (parentLeft === parentRight && nodeRight.type.is('CloseBrace')) {
     to = nodeRight.from
   }
-  return bubbleUpRange(command, parentLeft, moveRange(range, from, to), state)
+  return bubbleUpRange(nodeType, parentLeft, moveRange(range, from, to))
 }
 
 function spansWholeArgument(
@@ -372,28 +368,26 @@ function spansWholeArgument(
   range: SelectionRange
 ): boolean {
   const argument = commandNode?.getChild('TextArgument')?.getChild('LongArg')
-  const res = Boolean(
+  return Boolean(
     argument && argument.from === range.from && argument.to === range.to
   )
-  return res
 }
 
 function bubbleUpRange(
-  command: string,
+  nodeType: string | number,
   node: SyntaxNode | null,
-  range: SelectionRange,
-  state: EditorState
+  range: SelectionRange
 ) {
   let currentRange = range
   for (
     let ancestorCommand: SyntaxNode | null = ancestorOfNodeWithType(
       node,
-      'UnknownCommand'
+      '$ToggleTextFormattingCommand'
     );
     spansWholeArgument(ancestorCommand, currentRange);
     ancestorCommand = ancestorOfNodeWithType(
       ancestorCommand.parent,
-      'UnknownCommand'
+      '$ToggleTextFormattingCommand'
     )
   ) {
     if (!ancestorCommand) {
@@ -404,7 +398,7 @@ function bubbleUpRange(
       ancestorCommand.from,
       ancestorCommand.to
     )
-    if (isUnknownCommandWithName(ancestorCommand, command, state)) {
+    if (ancestorCommand.type.is(nodeType)) {
       const argumentNode = ancestorCommand
         .getChild('TextArgument')
         ?.getChild('LongArg')
@@ -418,7 +412,9 @@ function bubbleUpRange(
   return range
 }
 
-export function toggleRanges(command: string) {
+export function toggleRanges(command: FormattingCommand) {
+  const nodeType: FormattingNodeType = formattingCommandMap[command]
+
   /* There are a number of situations we need to handle in this function.
    * In the following examples, the selection range is marked within <>
 
@@ -453,7 +449,7 @@ export function toggleRanges(command: string) {
     }
     view.dispatch(
       view.state.changeByRange(initialRange => {
-        const range = adjustRangeIfNeeded(command, initialRange, view.state)
+        const range = adjustRangeIfNeeded(nodeType, initialRange, view.state)
         const content = view.state.sliceDoc(range.from, range.to)
 
         const ancestorAtStartOfRange = getParentNode(
@@ -469,28 +465,33 @@ export function toggleRanges(command: string) {
               range.to === view.state.doc.length ? -1 : 1
             )
 
-        if (ancestorAtStartOfRange !== ancestorAtEndOfRange) {
+        const tree = ensureSyntaxTree(view.state, 1000)
+        const nodeAtFrom = tree?.resolveInner(range.from, 1)
+        const nodeAtTo = tree?.resolveInner(range.to, -1)
+        const isSingleNodeSelected = nodeAtFrom === nodeAtTo
+
+        if (
+          !isSingleNodeSelected &&
+          ancestorAtStartOfRange !== ancestorAtEndOfRange
+        ) {
           // But handle the exception of case 8
           const ancestorAtStartIsWrappingCommand =
-            ancestorAtStartOfRange &&
-            isUnknownCommandWithName(
-              ancestorAtStartOfRange,
-              command,
-              view.state
-            )
+            ancestorAtStartOfRange?.type.is(nodeType)
+
           const ancestorAtEndIsWrappingCommand =
-            ancestorAtEndOfRange &&
-            isUnknownCommandWithName(ancestorAtEndOfRange, command, view.state)
+            ancestorAtEndOfRange && ancestorAtEndOfRange.type.is(nodeType)
+
           if (
             ancestorAtStartIsWrappingCommand &&
             ancestorAtEndIsWrappingCommand &&
-            ancestorAtStartOfRange?.parent?.parent &&
-            ancestorAtEndOfRange?.parent?.parent
+            ancestorAtStartOfRange?.parent?.parent?.parent &&
+            ancestorAtEndOfRange?.parent?.parent?.parent
           ) {
             // Test for case 8
             const nextAncestorAtStartOfRange =
-              ancestorAtStartOfRange.parent.parent
-            const nextAncestorAtEndOfRange = ancestorAtEndOfRange.parent.parent
+              ancestorAtStartOfRange.parent.parent.parent
+            const nextAncestorAtEndOfRange =
+              ancestorAtEndOfRange.parent.parent.parent
 
             if (nextAncestorAtStartOfRange === nextAncestorAtEndOfRange) {
               // Join the two ranges
@@ -541,7 +542,8 @@ export function toggleRanges(command: string) {
 
           if (
             ancestorAtEndIsWrappingCommand &&
-            ancestorAtEndOfRange.parent?.parent === ancestorAtStartOfRange
+            ancestorAtEndOfRange.parent?.parent?.parent ===
+              ancestorAtStartOfRange
           ) {
             // Extend to the left. Case 10
             const contentUpToCommand = view.state.sliceDoc(
@@ -584,7 +586,9 @@ export function toggleRanges(command: string) {
 
           if (
             ancestorAtStartIsWrappingCommand &&
-            ancestorAtStartOfRange.parent?.parent === ancestorAtEndOfRange
+            ancestorAtStartOfRange &&
+            ancestorAtStartOfRange.parent?.parent?.parent ===
+              ancestorAtEndOfRange
           ) {
             // Extend to the right. Case 9
             const contentAfterCommand = view.state.sliceDoc(
@@ -637,15 +641,11 @@ export function toggleRanges(command: string) {
           range.empty &&
           ancestor &&
           range.from === ancestor.from &&
-          isUnknownCommandWithName(ancestor, command, view.state)
+          ancestor.type.is(nodeType)
 
         // If we can't find an ancestor node, or if the parent is not an exsting
         // \textbf, then we just wrap it in a range. Case 3.
-        if (
-          isCursorBeforeAncestor ||
-          !ancestor ||
-          !isUnknownCommandWithName(ancestor, command, view.state)
-        ) {
+        if (isCursorBeforeAncestor || !ancestor?.type.is(nodeType)) {
           return wrapRangeInCommand(view.state, range, command)
         }
 

@@ -31,6 +31,14 @@ if (!availableLanguageCodes.includes(fallbackLanguageCode)) {
   availableLanguageCodes.push(fallbackLanguageCode)
 }
 
+// The "node --watch" flag is not easy to detect.
+if (process.argv.includes('--watch-locales')) {
+  // Dummy imports for setting up watching of locales files.
+  for (const lngCode of availableLanguageCodes) {
+    require(`../../../locales/${lngCode}.json`)
+  }
+}
+
 i18n
   .use(fsBackend)
   .use(middleware.LanguageDetector)
@@ -38,6 +46,9 @@ i18n
     backend: {
       loadPath: path.join(__dirname, '../../../locales/__lng__.json'),
     },
+
+    // still using the v3 plural suffixes
+    compatibilityJSON: 'v3',
 
     // Load translation files synchronously: https://www.i18next.com/overview/configuration-options#initimmediate
     initImmediate: false,
@@ -64,6 +75,9 @@ i18n
     preload: availableLanguageCodes,
     supportedLngs: availableLanguageCodes,
     fallbackLng: fallbackLanguageCode,
+  })
+  .catch(err => {
+    logger.error({ err }, 'failed to initialize i18next library')
   })
 
 // Make custom language detector for Accept-Language header

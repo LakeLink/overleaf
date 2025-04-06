@@ -2,8 +2,8 @@
 
 const BPromise = require('bluebird')
 const config = require('config')
-const fs = require('fs')
-const path = require('path')
+const fs = require('node:fs')
+const path = require('node:path')
 
 const OError = require('@overleaf/o-error')
 const objectPersistor = require('@overleaf/object-persistor')
@@ -34,7 +34,7 @@ class ZipStore {
   /**
    * Generate signed link to access the zip file.
    *
-   * @param {number} projectId
+   * @param {number | string} projectId
    * @param {number} version
    * @return {string}
    */
@@ -49,7 +49,7 @@ class ZipStore {
   /**
    * Generate a zip of the given snapshot.
    *
-   * @param {number} projectId
+   * @param {number | string} projectId
    * @param {number} version
    * @param {Snapshot} snapshot
    */

@@ -1,60 +1,32 @@
-import { useHistoryContext } from '../../context/history-context'
-import { diffDoc } from '../../services/api'
-import { useEffect } from 'react'
-import { DocDiffResponse, Highlight } from '../../services/types/doc'
-import { highlightsFromDiffResponse } from '../../utils/highlights-from-diff-response'
+import { Nullable } from '../../../../../../types/utils'
+import { Diff } from '../../services/types/doc'
 import DocumentDiffViewer from './document-diff-viewer'
-import useAsync from '../../../../shared/hooks/use-async'
+import LoadingSpinner from '../../../../shared/components/loading-spinner'
 import { useTranslation } from 'react-i18next'
+import OLNotification from '@/features/ui/components/ol/ol-notification'
 
-type Diff = {
-  binary: boolean
-  docDiff?: {
-    doc: string
-    highlights: Highlight[]
-  }
+type MainProps = {
+  diff: Nullable<Diff>
+  isLoading: boolean
 }
 
-function Main() {
+function Main({ diff, isLoading }: MainProps) {
   const { t } = useTranslation()
-  const { projectId, updateSelection, fileSelection } = useHistoryContext()
-  const { isLoading, runAsync, data } = useAsync<DocDiffResponse>()
-  let diff: Diff | undefined
-  if (data?.diff) {
-    if ('binary' in data.diff) {
-      diff = { binary: true }
-    } else {
-      diff = { binary: false, docDiff: highlightsFromDiffResponse(data.diff) }
-    }
-  }
-
-  useEffect(() => {
-    if (!updateSelection || !fileSelection || !fileSelection.pathname) {
-      return
-    }
-
-    const { fromV, toV } = updateSelection.update
-
-    // TODO: Error handling
-    runAsync(diffDoc(projectId, fromV, toV, fileSelection.pathname))
-  }, [fileSelection, projectId, runAsync, updateSelection])
 
   if (isLoading) {
-    return (
-      <div className="history-loading-panel">
-        <i className="fa fa-spin fa-refresh" />
-        &nbsp;&nbsp;
-        {t('loading')}…
-      </div>
-    )
+    return <LoadingSpinner />
   }
 
   if (!diff) {
-    return <div>No document</div>
+    return <div className="history-content">No document</div>
   }
 
   if (diff.binary) {
-    return <div>Binary file</div>
+    return (
+      <div className="history-content">
+        <OLNotification content={t('binary_history_error')} type="info" />
+      </div>
+    )
   }
 
   if (diff.docDiff) {
@@ -62,7 +34,7 @@ function Main() {
     return <DocumentDiffViewer doc={doc} highlights={highlights} />
   }
 
-  return <div>No document</div>
+  return null
 }
 
 export default Main

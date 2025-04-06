@@ -27,16 +27,11 @@ export const getMockIde = () => {
           zotero: false,
         },
         publicAccessLevel: '',
-        tokens: {
-          readOnly: '',
-          readAndWrite: '',
-        },
         owner: {
           _id: '',
           email: '',
         },
       },
-      state: { loading: false },
       permissionsLevel: 'readOnly',
       editor: {
         sharejs_doc: null,
@@ -56,10 +51,6 @@ export const getMockIde = () => {
       },
       settings: { syntaxValidation: false, pdfViewer: 'pdfjs' },
       hasLintingError: false,
-    },
-    editorManager: {
-      openDoc: () => {},
-      getCurrentDocId: () => {},
     },
   }
 }

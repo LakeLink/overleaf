@@ -5,8 +5,19 @@ import {
   StateField,
   TransactionSpec,
 } from '@codemirror/state'
-import { EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view'
+import {
+  Decoration,
+  EditorView,
+  ViewPlugin,
+  ViewUpdate,
+  WidgetType,
+} from '@codemirror/view'
 
+/**
+ * A custom extension which stores values for padding needed
+ * a) at the top and bottom of the editor, to match the height of the review panel, and
+ * b) at the bottom of the editor content, so the last line of the document can be scrolled to the top of the editor.
+ */
 export function verticalOverflow(): Extension {
   return [
     overflowPaddingState,
@@ -14,6 +25,7 @@ export function verticalOverflow(): Extension {
     bottomPadding,
     topPadding,
     contentAttributes,
+    topPaddingDecoration,
     bottomPaddingPlugin,
     topPaddingPlugin,
   ]
@@ -135,14 +147,18 @@ const bottomPaddingPlugin = ViewPlugin.define(view => {
   }
 })
 
-const topPaddingFacet = Facet.define<number>()
-const topPadding = topPaddingFacet.compute([overflowPaddingState], state => {
-  return state.field(overflowPaddingState).top
+const topPaddingFacet = Facet.define<number, number>({
+  combine(values) {
+    return Math.max(0, ...values)
+  },
+})
+const topPadding = topPaddingFacet.from(overflowPaddingState, state => {
+  return state.top
 })
 
-const bottomPaddingFacet = Facet.define<number>({
+const bottomPaddingFacet = Facet.define<number, number>({
   combine(values) {
-    return [Math.max(...values)]
+    return Math.max(0, ...values)
   },
 })
 const bottomPadding = bottomPaddingFacet.computeN(
@@ -155,16 +171,55 @@ const bottomPadding = bottomPaddingFacet.computeN(
   }
 )
 
-// Set a style attribute on the contentDOM containing the calculated top and bottom padding.
+// Set a style attribute on the contentDOM containing the calculated bottom padding.
 // This value will be concatenated with style values from any other extensions.
-// TODO: use elements instead?
 const contentAttributes = EditorView.contentAttributes.compute(
-  [topPaddingFacet, bottomPaddingFacet],
+  [bottomPaddingFacet],
   state => {
-    const [top] = state.facet(topPaddingFacet)
-    const [bottom] = state.facet(bottomPaddingFacet)
-    const style = `padding-top: ${top}px; padding-bottom: ${bottom}px;`
+    const bottom = state.facet(bottomPaddingFacet)
+    const style = `padding-bottom: ${bottom}px;`
     return { style }
+  }
+)
+
+class TopPaddingWidget extends WidgetType {
+  constructor(private readonly height: number) {
+    super()
+    this.height = height
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const element = document.createElement('div')
+    element.style.height = this.height + 'px'
+    return element
+  }
+
+  get estimatedHeight() {
+    return this.height
+  }
+
+  eq(widget: TopPaddingWidget) {
+    return this.height === widget.height
+  }
+
+  updateDOM(element: HTMLElement, view: EditorView): boolean {
+    element.style.height = this.height + 'px'
+    view.requestMeasure()
+    return true
+  }
+}
+
+const topPaddingDecoration = EditorView.decorations.compute(
+  [topPaddingFacet],
+  state => {
+    const top = state.facet(topPaddingFacet)
+
+    return Decoration.set([
+      Decoration.widget({
+        widget: new TopPaddingWidget(top),
+        block: true,
+      }).range(0),
+    ])
   }
 )
 
@@ -180,6 +235,17 @@ export function updateSetsVerticalOverflow(update: ViewUpdate): boolean {
   })
 }
 
+export function updateChangesTopPadding(update: ViewUpdate): boolean {
+  return (
+    update.state.field(overflowPaddingState).top !==
+    update.startState.field(overflowPaddingState).top
+  )
+}
+
 export function editorVerticalTopPadding(view: EditorView): number {
-  return view.state.field(overflowPaddingState).top
+  return view.state.field(overflowPaddingState, false)?.top ?? 0
+}
+
+export function editorOverflowPadding(view: EditorView) {
+  return view.state.field(overflowPaddingState, false)
 }

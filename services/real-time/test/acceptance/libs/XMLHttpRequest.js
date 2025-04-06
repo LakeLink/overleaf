@@ -11,17 +11,17 @@
  * @license MIT
  */
 
-const { URL } = require('url')
-const spawn = require('child_process').spawn
-const fs = require('fs')
+const { URL } = require('node:url')
+const spawn = require('node:child_process').spawn
+const fs = require('node:fs')
 
 exports.XMLHttpRequest = function () {
   /**
    * Private variables
    */
   const self = this
-  const http = require('http')
-  const https = require('https')
+  const http = require('node:http')
+  const https = require('node:https')
 
   // Holds http.js objects
   let request
@@ -273,7 +273,7 @@ exports.XMLHttpRequest = function () {
 
       case undefined:
       case '':
-        host = 'localhost'
+        host = '127.0.0.1'
         break
 
       default:
@@ -309,8 +309,8 @@ exports.XMLHttpRequest = function () {
       return
     }
 
-    // Default to port 80. If accessing localhost on another port be sure
-    // to use http://localhost:port/path
+    // Default to port 80. If accessing 127.0.0.1 on another port be sure
+    // to use http://127.0.0.1:port/path
     const port = url.port || (ssl ? 443 : 80)
     // Add query string if one is used
     const uri = url.pathname + (url.search ? url.search : '')

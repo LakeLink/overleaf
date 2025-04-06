@@ -1,23 +1,36 @@
+// @ts-check
 'use strict'
 
 const assert = require('check-types').assert
-const BPromise = require('bluebird')
 const OError = require('@overleaf/o-error')
 
 const FileMap = require('./file_map')
 const V2DocVersions = require('./v2_doc_versions')
 
-/**
- * @typedef {import("./types").BlobStore} BlobStore
- * @typedef {import("./change")} Change
- * @typedef {import("./operation/text_operation")} TextOperation
- */
+const FILE_LOAD_CONCURRENCY = 50
 
 /**
- * @classdesc A Snapshot represents the state of a {@link Project} at a
- *     particular version.
+ * @import { BlobStore, RawSnapshot, ReadonlyBlobStore } from "./types"
+ * @import Change from "./change"
+ * @import TextOperation from "./operation/text_operation"
+ * @import File from "./file"
+ */
+
+class EditMissingFileError extends OError {}
+
+/**
+ * A Snapshot represents the state of a {@link Project} at a
+ * particular version.
  */
 class Snapshot {
+  static PROJECT_VERSION_RX_STRING = '^[0-9]+\\.[0-9]+$'
+  static PROJECT_VERSION_RX = new RegExp(Snapshot.PROJECT_VERSION_RX_STRING)
+  static EditMissingFileError = EditMissingFileError
+
+  /**
+   * @param {RawSnapshot} raw
+   * @return {Snapshot}
+   */
   static fromRaw(raw) {
     assert.object(raw.files, 'bad raw.files')
     return new Snapshot(
@@ -28,6 +41,7 @@ class Snapshot {
   }
 
   toRaw() {
+    /** @type RawSnapshot */
     const raw = {
       files: this.fileMap.toRaw(),
     }
@@ -37,7 +51,6 @@ class Snapshot {
   }
 
   /**
-   * @constructor
    * @param {FileMap} [fileMap]
    * @param {string} [projectVersion]
    * @param {V2DocVersions} [v2DocVersions]
@@ -57,6 +70,9 @@ class Snapshot {
     return this.projectVersion
   }
 
+  /**
+   * @param {string} projectVersion
+   */
   setProjectVersion(projectVersion) {
     assert.maybe.match(
       projectVersion,
@@ -73,6 +89,9 @@ class Snapshot {
     return this.v2DocVersions
   }
 
+  /**
+   * @param {V2DocVersions} v2DocVersions
+   */
   setV2DocVersions(v2DocVersions) {
     assert.maybe.instance(
       v2DocVersions,
@@ -82,6 +101,9 @@ class Snapshot {
     this.v2DocVersions = v2DocVersions
   }
 
+  /**
+   * @param {V2DocVersions} v2DocVersions
+   */
   updateV2DocVersions(v2DocVersions) {
     // merge new v2DocVersions into this.v2DocVersions
     v2DocVersions.applyTo(this)
@@ -107,6 +129,7 @@ class Snapshot {
   /**
    * Get a File by its pathname.
    * @see FileMap#getFile
+   * @param {string} pathname
    */
   getFile(pathname) {
     return this.fileMap.getFile(pathname)
@@ -115,6 +138,8 @@ class Snapshot {
   /**
    * Add the given file to the snapshot.
    * @see FileMap#addFile
+   * @param {string} pathname
+   * @param {File} file
    */
   addFile(pathname, file) {
     this.fileMap.addFile(pathname, file)
@@ -123,9 +148,12 @@ class Snapshot {
   /**
    * Move or remove a file.
    * @see FileMap#moveFile
+   * @param {string} pathname
+   * @param {string} newPathname
    */
   moveFile(pathname, newPathname) {
     this.fileMap.moveFile(pathname, newPathname)
+    if (this.v2DocVersions) this.v2DocVersions.moveFile(pathname, newPathname)
   }
 
   /**
@@ -161,7 +189,7 @@ class Snapshot {
    * Ignore recoverable errors (caused by historical bad data) unless opts.strict is true
    *
    * @param {Change[]} changes
-   * @param {object} opts
+   * @param {object} [opts]
    * @param {boolean} opts.strict - do not ignore recoverable errors
    */
   applyAll(changes, opts) {
@@ -177,22 +205,38 @@ class Snapshot {
    * @param  {Set.<String>} blobHashes
    */
   findBlobHashes(blobHashes) {
-    // eslint-disable-next-line array-callback-return
-    this.fileMap.map(file => {
+    /**
+     * @param {File} file
+     */
+    function find(file) {
       const hash = file.getHash()
+      const rangeHash = file.getRangesHash()
       if (hash) blobHashes.add(hash)
-    })
+      if (rangeHash) blobHashes.add(rangeHash)
+    }
+    // TODO(das7pad): refine types to enforce no nulls in FileMapData
+    // @ts-ignore
+    this.fileMap.map(find)
   }
 
   /**
    * Load all of the files in this snapshot.
    *
    * @param {string} kind see {File#load}
-   * @param {BlobStore} blobStore
-   * @return {Promise}
+   * @param {ReadonlyBlobStore} blobStore
+   * @return {Promise<Record<string, File>>} an object where keys are the pathnames and
+   * values are the files in the snapshot
    */
-  loadFiles(kind, blobStore) {
-    return BPromise.props(this.fileMap.map(file => file.load(kind, blobStore)))
+  async loadFiles(kind, blobStore) {
+    /**
+     * @param {File} file
+     */
+    function load(file) {
+      return file.load(kind, blobStore)
+    }
+    // TODO(das7pad): refine types to enforce no nulls in FileMapData
+    // @ts-ignore
+    return await this.fileMap.mapAsync(load, FILE_LOAD_CONCURRENCY)
   }
 
   /**
@@ -203,22 +247,28 @@ class Snapshot {
    * @param {number} [concurrency]
    * @return {Promise.<Object>}
    */
-  store(blobStore, concurrency) {
+  async store(blobStore, concurrency) {
     assert.maybe.number(concurrency, 'bad concurrency')
 
     const projectVersion = this.projectVersion
     const rawV2DocVersions = this.v2DocVersions
       ? this.v2DocVersions.toRaw()
       : undefined
-    return this.fileMap
-      .mapAsync(file => file.store(blobStore), concurrency)
-      .then(rawFiles => {
-        return {
-          files: rawFiles,
-          projectVersion,
-          v2DocVersions: rawV2DocVersions,
-        }
-      })
+
+    /**
+     * @param {File} file
+     */
+    function store(file) {
+      return file.store(blobStore)
+    }
+    // TODO(das7pad): refine types to enforce no nulls in FileMapData
+    // @ts-ignore
+    const rawFiles = await this.fileMap.mapAsync(store, concurrency)
+    return {
+      files: rawFiles,
+      projectVersion,
+      v2DocVersions: rawV2DocVersions,
+    }
   }
 
   /**
@@ -230,11 +280,5 @@ class Snapshot {
     return Snapshot.fromRaw(this.toRaw())
   }
 }
-
-class EditMissingFileError extends OError {}
-Snapshot.EditMissingFileError = EditMissingFileError
-
-Snapshot.PROJECT_VERSION_RX_STRING = '^[0-9]+\\.[0-9]+$'
-Snapshot.PROJECT_VERSION_RX = new RegExp(Snapshot.PROJECT_VERSION_RX_STRING)
 
 module.exports = Snapshot

@@ -1,23 +1,36 @@
 import {
-  searchKeymap,
-  search as searchExtension,
+  search as _search,
   setSearchQuery,
   getSearchQuery,
   openSearchPanel,
   SearchQuery,
   searchPanelOpen,
+  searchKeymap,
+  highlightSelectionMatches,
+  togglePanel,
 } from '@codemirror/search'
-import { EditorView, keymap, ViewPlugin } from '@codemirror/view'
-import { Annotation, EditorState, TransactionSpec } from '@codemirror/state'
-import { highlightSelectionMatches } from './highlight-selection-matches'
+import {
+  Decoration,
+  EditorView,
+  KeyBinding,
+  keymap,
+  ViewPlugin,
+} from '@codemirror/view'
+import {
+  Annotation,
+  Compartment,
+  EditorSelection,
+  EditorState,
+  Prec,
+  SelectionRange,
+  StateEffect,
+  StateField,
+  TransactionSpec,
+} from '@codemirror/state'
+import { sendSearchEvent } from '@/features/event-tracking/search-events'
+import { isVisual } from '@/features/source-editor/extensions/visual/visual'
 
 const restoreSearchQueryAnnotation = Annotation.define<boolean>()
-
-const ignoredSearchKeybindings = new Set([
-  // This keybinding causes issues with entering @ on certain keyboard layouts
-  // https://github.com/overleaf/internal/issues/12119
-  'Alt-g',
-])
 
 const selectNextMatch = (query: SearchQuery, state: EditorState) => {
   if (!query.valid) {
@@ -36,25 +49,134 @@ const selectNextMatch = (query: SearchQuery, state: EditorState) => {
   return result.done ? null : result.value
 }
 
+const storedSelectionEffect = StateEffect.define<EditorSelection | null>()
+
+const storedSelectionState = StateField.define<EditorSelection | null>({
+  create() {
+    return null
+  },
+  update(value, tr) {
+    if (value) {
+      value = value.map(tr.changes)
+    }
+
+    for (const effect of tr.effects) {
+      if (effect.is(storedSelectionEffect)) {
+        value = effect.value
+      } else if (effect.is(togglePanel) && effect.value === false) {
+        value = null // clear the stored selection when closing the search panel
+      }
+    }
+
+    return value
+  },
+  provide(f) {
+    return [
+      EditorView.decorations.from(f, selection => {
+        if (!selection) {
+          return Decoration.none
+        }
+        const decorations = selection.ranges
+          .filter(range => !range.empty)
+          .map(range =>
+            Decoration.mark({
+              class: 'ol-cm-stored-selection',
+            }).range(range.from, range.to)
+          )
+        return Decoration.set(decorations)
+      }),
+    ]
+  },
+})
+
+export const getStoredSelection = (state: EditorState) =>
+  state.field(storedSelectionState)
+
+export const setStoredSelection = (selection: EditorSelection | null) => {
+  return {
+    effects: [
+      storedSelectionEffect.of(selection),
+      // TODO: only disable selection highlighting if the current selection is a search match
+      highlightSelectionMatchesConf.reconfigure(
+        selection ? [] : highlightSelectionMatchesExtension
+      ),
+    ],
+  }
+}
+
+const highlightSelectionMatchesConf = new Compartment()
+
+const highlightSelectionMatchesExtension = highlightSelectionMatches({
+  wholeWords: true,
+})
+
+// store the search query for use when switching between files
+// TODO: move this into EditorContext?
 let searchQuery: SearchQuery | null
 
+const scrollToMatch = (range: SelectionRange, view: EditorView) => {
+  const coords = {
+    from: view.coordsAtPos(range.from),
+    to: view.coordsAtPos(range.to),
+  }
+  const scrollRect = view.scrollDOM.getBoundingClientRect()
+  const strategy =
+    (coords.from && coords.from.top < scrollRect.top) ||
+    (coords.to && coords.to.bottom > scrollRect.bottom)
+      ? 'center'
+      : 'nearest'
+
+  return EditorView.scrollIntoView(range, {
+    y: strategy,
+  })
+}
+
+const searchEventKeymap: KeyBinding[] = [
+  // record an event when the search panel is opened using the keyboard shortcut
+  {
+    key: 'Mod-f',
+    preventDefault: true,
+    scope: 'editor search-panel',
+    run(view) {
+      if (!searchPanelOpen(view.state)) {
+        sendSearchEvent('search-open', {
+          searchType: 'document',
+          method: 'keyboard',
+          mode: isVisual(view) ? 'visual' : 'source',
+        })
+      }
+      return false // continue with the regular search shortcut
+    },
+  },
+]
+
+/**
+ * A collection of extensions related to the search feature.
+ */
 export const search = () => {
   let open = false
 
   return [
+    // keymap for search events
+    Prec.high(keymap.of(searchEventKeymap)),
+
     // keymap for search
-    keymap.of(
-      searchKeymap.filter(
-        item => !item.key || !ignoredSearchKeybindings.has(item.key)
-      )
-    ),
+    keymap.of(searchKeymap),
 
     // highlight text which matches the current selection
-    highlightSelectionMatches(),
+    highlightSelectionMatchesConf.of(highlightSelectionMatchesExtension),
 
-    // a wrapper round `search`, which creates a custom panel element and passes it to React by dispatching an event
-    searchExtension({
+    // a stored selection for use in "within selection" searches
+    storedSelectionState,
+
+    /**
+     * The CodeMirror `search` extension, configured to create a custom panel element
+     * and to scroll the search match into the centre of the viewport when needed.
+     */
+    _search({
       literal: true,
+      // centre the search match if it was outside the visible area
+      scrollToMatch,
       createPanel: () => {
         const dom = document.createElement('div')
         dom.className = 'ol-cm-search'
@@ -104,6 +226,11 @@ export const search = () => {
 
     // select a match while searching
     EditorView.updateListener.of(update => {
+      // if the search panel wasn't open, don't select a match
+      if (!searchPanelOpen(update.startState)) {
+        return
+      }
+
       for (const tr of update.transactions) {
         // avoid changing the selection and viewport when switching between files
         if (tr.annotation(restoreSearchQueryAnnotation)) {
@@ -132,9 +259,10 @@ export const search = () => {
 
               // scroll into view if not opening the panel
               if (searchPanelOpen(tr.startState)) {
-                spec.effects = EditorView.scrollIntoView(next.from, {
-                  y: 'center',
-                })
+                spec.effects = scrollToMatch(
+                  EditorSelection.range(next.from, next.to),
+                  update.view
+                )
               }
 
               update.view.dispatch(spec)
@@ -154,102 +282,148 @@ export const search = () => {
         }
       }
     }),
-
-    // search form theme
-    EditorView.theme({
-      '.ol-cm-search-form': {
-        padding: '10px',
-        display: 'flex',
-        gap: '10px',
-        background: 'var(--ol-blue-gray-1)',
-        '--ol-cm-search-form-focus-shadow':
-          'inset 0 1px 1px rgb(0 0 0 / 8%), 0 0 8px rgb(102 175 233 / 60%)',
-      },
-      '.ol-cm-search-controls': {
-        display: 'grid',
-        gridTemplateColumns: 'auto auto',
-        gridTemplateRows: 'auto auto',
-        gap: '10px',
-      },
-      '.ol-cm-search-form-row': {
-        display: 'flex',
-        gap: '10px',
-        justifyContent: 'space-between',
-      },
-      '.ol-cm-search-form-group': {
-        display: 'flex',
-        gap: '10px',
-        alignItems: 'center',
-      },
-      '.ol-cm-search-input-group': {
-        border: '1px solid var(--input-border)',
-        borderRadius: '20px',
-        background: 'white',
-        width: '100%',
-        maxWidth: '25em',
-        '& input[type="text"]': {
-          background: 'none',
-          boxShadow: 'none',
-        },
-        '& input[type="text"]:focus': {
-          outline: 'none',
-          boxShadow: 'none',
-        },
-        '& .btn.btn': {
-          background: 'var(--ol-blue-gray-0)',
-          color: 'var(--ol-blue-gray-3)',
-          borderRadius: '50%',
-          height: '2em',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '2em',
-          marginRight: '3px',
-          '&.checked': {
-            color: '#fff',
-            backgroundColor: 'var(--ol-blue)',
-          },
-          '&:active': {
-            boxShadow: 'none',
-          },
-        },
-        '&:focus-within': {
-          borderColor: 'var(--input-border-focus)',
-          boxShadow: 'var(--ol-cm-search-form-focus-shadow)',
-        },
-      },
-      '.input-group .ol-cm-search-form-input': {
-        border: 'none',
-      },
-      '.ol-cm-search-input-button': {
-        background: '#fff',
-        color: 'inherit',
-        border: 'none',
-      },
-      '.ol-cm-search-input-button.focused': {
-        borderColor: 'var(--input-border-focus)',
-        boxShadow: 'var(--ol-cm-search-form-focus-shadow)',
-      },
-      '.ol-cm-search-form-button-group': {
-        flexShrink: 0,
-      },
-      '.ol-cm-search-form-position': {
-        flexShrink: 0,
-        color: 'var(--ol-blue-gray-4)',
-      },
-      '.ol-cm-search-hidden-inputs': {
-        position: 'absolute',
-        left: '-10000px',
-      },
-      '.ol-cm-search-form-close': {
-        flex: 1,
-      },
-      '.ol-cm-search-replace-input': {
-        order: 3,
-      },
-      '.ol-cm-search-replace-buttons': {
-        order: 4,
-      },
-    }),
+    searchFormTheme,
   ]
 }
+
+const searchFormTheme = EditorView.theme({
+  '.ol-cm-search-form': {
+    '--ol-cm-search-form-gap': '10px',
+    '--ol-cm-search-form-button-margin': '3px',
+    padding: 'var(--ol-cm-search-form-gap)',
+    display: 'flex',
+    gap: 'var(--ol-cm-search-form-gap)',
+    background: 'var(--neutral-20)',
+    '--ol-cm-search-form-focus-shadow':
+      'inset 0 1px 1px rgb(0 0 0 / 8%), 0 0 8px rgb(102 175 233 / 60%)',
+    '--ol-cm-search-form-error-shadow':
+      'inset 0 1px 1px rgb(0 0 0 / 8%), 0 0 8px var(--red-50)',
+    containerType: 'inline-size',
+    '& .form-control-sm, & .btn-sm': {
+      padding: 'var(--spacing-03) var(--spacing-05)',
+    },
+  },
+  '&.ol-cm-search-form': {
+    '--ol-cm-search-form-gap': 'var(--spacing-05)',
+    '--ol-cm-search-form-button-margin': 'var(--spacing-02)',
+    '--input-border': 'var(--border-primary)',
+    '--input-border-focus': 'var(--border-active)',
+  },
+  '.ol-cm-search-controls': {
+    display: 'grid',
+    gridTemplateColumns: 'auto auto',
+    gridTemplateRows: 'auto auto',
+    gap: 'var(--ol-cm-search-form-gap)',
+    flex: 1,
+  },
+  '@container (max-width: 450px)': {
+    '.ol-cm-search-controls': {
+      gridTemplateColumns: 'auto',
+    },
+  },
+  '.ol-cm-search-form-row': {
+    display: 'flex',
+    gap: 'var(--ol-cm-search-form-gap)',
+    justifyContent: 'space-between',
+  },
+  '.ol-cm-search-form-group': {
+    display: 'flex',
+    gap: 'var(--ol-cm-search-form-gap)',
+    alignItems: 'center',
+  },
+  '.ol-cm-search-input-group': {
+    border: '1px solid var(--input-border)',
+    borderRadius: '20px',
+    background: 'white',
+    width: '100%',
+    maxWidth: '50em',
+    display: 'inline-flex',
+    alignItems: 'center',
+    '& input[type="text"]': {
+      background: 'none',
+      boxShadow: 'none',
+    },
+    '& input[type="text"]:focus': {
+      outline: 'none',
+      boxShadow: 'none',
+    },
+    '& .btn.btn': {
+      background: 'var(--neutral-10)',
+      color: 'var(--neutral-60)',
+      borderRadius: '50%',
+      height: '2em',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '2em',
+      marginRight: 'var(--ol-cm-search-form-button-margin)',
+      '&.checked': {
+        color: 'var(--white)',
+        backgroundColor: 'var(--blue-50)',
+      },
+      '&:active': {
+        boxShadow: 'none',
+      },
+    },
+    '&:focus-within': {
+      borderColor: 'var(--input-border-focus)',
+      boxShadow: 'var(--ol-cm-search-form-focus-shadow)',
+    },
+  },
+  '.ol-cm-search-input-group.ol-cm-search-input-error': {
+    '&:focus-within': {
+      borderColor: 'var(--input-border-danger)',
+      boxShadow: 'var(--ol-cm-search-form-error-shadow)',
+    },
+  },
+  '.ol-cm-search-form-input': {
+    border: 'none',
+  },
+  '.ol-cm-search-input-button': {
+    background: '#fff',
+    color: 'inherit',
+    border: 'none',
+  },
+  '.ol-cm-search-input-button.focused': {
+    borderColor: 'var(--input-border-focus)',
+    boxShadow: 'var(--ol-cm-search-form-focus-shadow)',
+  },
+  '.ol-cm-search-form-button-group': {
+    flexShrink: 0,
+  },
+  '.ol-cm-search-form-position': {
+    flexShrink: 0,
+    color: 'var(--content-secondary)',
+  },
+  '.ol-cm-search-hidden-inputs': {
+    position: 'absolute',
+    left: '-10000px',
+  },
+  '.ol-cm-search-form-close': {
+    marginLeft: 'auto',
+    display: 'flex',
+    alignItems: 'start',
+  },
+  '.ol-cm-search-replace-input': {
+    order: 3,
+  },
+  '.ol-cm-search-replace-buttons': {
+    order: 4,
+  },
+  '.ol-cm-stored-selection': {
+    background: 'rgba(125, 125, 125, 0.1)',
+    paddingTop: 'var(--half-leading)',
+    paddingBottom: 'var(--half-leading)',
+  },
+  // set the default "match" style
+  '.cm-selectionMatch, .cm-searchMatch': {
+    backgroundColor: 'transparent',
+    outlineOffset: '-1px',
+    paddingTop: 'var(--half-leading)',
+    paddingBottom: 'var(--half-leading)',
+  },
+  // make sure selectionMatch inside searchMatch doesn't have a background colour
+  '.cm-searchMatch .cm-selectionMatch': {
+    backgroundColor: 'transparent !important',
+  },
+})

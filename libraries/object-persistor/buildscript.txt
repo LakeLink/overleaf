@@ -3,7 +3,8 @@ object-persistor
 --docker-repos=gcr.io/overleaf-ops
 --env-add=
 --env-pass-through=
+--esmock-loader=False
 --is-library=True
---node-version=16.17.1
+--node-version=20.18.2
 --public-repo=False
---script-version=4.1.0
+--script-version=4.5.0

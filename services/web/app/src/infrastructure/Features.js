@@ -1,10 +1,10 @@
 const _ = require('lodash')
 const Settings = require('@overleaf/settings')
 
-const publicRegistrationModuleAvailable =
-  Settings.moduleImportSequence.includes('public-registration')
-
 const supportModuleAvailable = Settings.moduleImportSequence.includes('support')
+
+const symbolPaletteModuleAvailable =
+  Settings.moduleImportSequence.includes('symbol-palette')
 
 const trackChangesModuleAvailable =
   Settings.moduleImportSequence.includes('track-changes')
@@ -19,6 +19,8 @@ const trackChangesModuleAvailable =
  * @property {boolean | undefined} enableGithubSync
  * @property {boolean | undefined} enableGitBridge
  * @property {boolean | undefined} enableHomepage
+ * @property {boolean | undefined} enableProjectHistoryBlobs
+ * @property {boolean | undefined} disableFilestore
  * @property {boolean | undefined} enableSaml
  * @property {boolean | undefined} ldap
  * @property {boolean | undefined} oauth
@@ -35,7 +37,7 @@ const Features = {
     return (
       (Boolean(Settings.ldap) && Boolean(Settings.ldap.enable)) ||
       (Boolean(Settings.saml) && Boolean(Settings.saml.enable)) ||
-      Boolean(_.get(Settings, ['overleaf', 'oauth']))
+      Boolean(Settings.overleaf)
     )
   },
 
@@ -57,22 +59,20 @@ const Features = {
           Boolean(Settings.overleaf)
         )
       case 'registration':
-        return publicRegistrationModuleAvailable || Boolean(Settings.overleaf)
+        return Boolean(Settings.overleaf)
+      case 'chat':
+        return Boolean(Settings.disableChat) === false
       case 'github-sync':
         return Boolean(Settings.enableGithubSync)
       case 'git-bridge':
         return Boolean(Settings.enableGitBridge)
-      case 'custom-togglers':
-        return Boolean(Settings.overleaf)
       case 'oauth':
         return Boolean(Settings.oauth)
       case 'templates-server-pro':
-        return !Settings.overleaf
+        return Boolean(Settings.templates?.user_id)
       case 'affiliations':
       case 'analytics':
         return Boolean(_.get(Settings, ['apis', 'v1', 'url']))
-      case 'overleaf-integration':
-        return Boolean(Settings.overleaf)
       case 'references':
         return Boolean(_.get(Settings, ['apis', 'references', 'url']))
       case 'saml':
@@ -88,10 +88,14 @@ const Features = {
           _.get(Settings, ['apis', 'linkedUrlProxy', 'url']) &&
             Settings.enabledLinkedFileTypes.includes('url')
         )
-      case 'public-registration':
-        return publicRegistrationModuleAvailable
+      case 'project-history-blobs':
+        return Boolean(Settings.enableProjectHistoryBlobs)
+      case 'filestore':
+        return Boolean(Settings.disableFilestore) === false
       case 'support':
         return supportModuleAvailable
+      case 'symbol-palette':
+        return symbolPaletteModuleAvailable
       case 'track-changes':
         return trackChangesModuleAvailable
       default:

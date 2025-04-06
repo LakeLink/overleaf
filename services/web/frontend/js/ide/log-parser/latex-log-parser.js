@@ -9,10 +9,6 @@ const LINES_REGEX = /lines? ([0-9]+)/
 const PACKAGE_REGEX = /^(?:Package|Class|Module) (\b.+\b) Warning/
 const FILE_LINE_ERROR_REGEX = /^([./].*):(\d+): (.*)/
 
-const LATEX_WARNING_REGEX_OLD = /^LaTeX Warning: (.*)$/
-const PACKAGE_WARNING_REGEX_OLD = /^(Package \b.+\b Warning:.*)$/
-const PACKAGE_REGEX_OLD = /^Package (\b.+\b) Warning/
-
 const STATE = {
   NORMAL: 0,
   ERROR: 1,
@@ -27,16 +23,9 @@ export default class LatexParser {
     this.fileStack = []
     this.currentFileList = this.rootFileList = []
     this.openParens = 0
-    // TODO: Needed only for beta release; remove when over. 20220530
-    if (options.oldRegexes) {
-      this.latexWarningRegex = LATEX_WARNING_REGEX_OLD
-      this.packageWarningRegex = PACKAGE_WARNING_REGEX_OLD
-      this.packageRegex = PACKAGE_REGEX_OLD
-    } else {
-      this.latexWarningRegex = LATEX_WARNING_REGEX
-      this.packageWarningRegex = PACKAGE_WARNING_REGEX
-      this.packageRegex = PACKAGE_REGEX
-    }
+    this.latexWarningRegex = LATEX_WARNING_REGEX
+    this.packageWarningRegex = PACKAGE_WARNING_REGEX
+    this.packageRegex = PACKAGE_REGEX
     this.log = new LogText(text)
   }
 
@@ -74,11 +63,11 @@ export default class LatexParser {
           .join('\n')
         this.currentError.content += '\n'
         this.currentError.content += this.log
-          .linesUpToNextWhitespaceLine()
+          .linesUpToNextWhitespaceLine(true)
           .join('\n')
         this.currentError.content += '\n'
         this.currentError.content += this.log
-          .linesUpToNextWhitespaceLine()
+          .linesUpToNextWhitespaceLine(true)
           .join('\n')
         this.currentError.raw += this.currentError.content
         const lineNo = this.currentError.raw.match(/l\.([0-9]+)/)
@@ -222,7 +211,7 @@ export default class LatexParser {
   // Check if we're entering or leaving a new file in this line
 
   parseParensForFilenames() {
-    const pos = this.currentLine.search(/\(|\)/)
+    const pos = this.currentLine.search(/[()]/)
     if (pos !== -1) {
       const token = this.currentLine[pos]
       this.currentLine = this.currentLine.slice(pos + 1)
@@ -262,12 +251,14 @@ export default class LatexParser {
 
   consumeFilePath() {
     // Our heuristic for detecting file names are rather crude
-    // A file may not contain a ')' in it
-    // To be a file path it must have at least one /
-    if (!this.currentLine.match(/^\/?([^ )]+\/)+/)) {
+
+    // To contain a file path this line must have at least one / before any '(', ')' or '\'
+    if (!this.currentLine.match(/^\/?([^ ()\\]+\/)+/)) {
       return false
     }
-    let endOfFilePath = this.currentLine.search(/ |\)/)
+
+    // A file may not contain a '(', ')' or '\'
+    let endOfFilePath = this.currentLine.search(/[ ()\\]/)
 
     // handle the case where there is a space in a filename
     while (endOfFilePath !== -1 && this.currentLine[endOfFilePath] === ' ') {
@@ -346,16 +337,21 @@ class LogText {
       // append this line to it.
       // Some lines end with ... when LaTeX knows it's hit the limit
       // These shouldn't be wrapped.
+      // If the next line looks like it could be an error (i.e. start with a !),
+      // do not unwrap the line.
       const prevLine = wrappedLines[i - 1]
       const currentLine = wrappedLines[i]
 
-      if (prevLine.length === LOG_WRAP_LIMIT && prevLine.slice(-3) !== '...') {
+      if (
+        prevLine.length === LOG_WRAP_LIMIT &&
+        prevLine.slice(-3) !== '...' &&
+        currentLine.charAt(0) !== '!'
+      ) {
         this.lines[this.lines.length - 1] += currentLine
       } else {
         this.lines.push(currentLine)
       }
     }
-
     this.row = 0
   }
 
@@ -372,17 +368,22 @@ class LogText {
     this.row--
   }
 
-  linesUpToNextWhitespaceLine() {
-    return this.linesUpToNextMatchingLine(/^ *$/)
+  linesUpToNextWhitespaceLine(stopAtError) {
+    return this.linesUpToNextMatchingLine(/^ *$/, stopAtError)
   }
 
-  linesUpToNextMatchingLine(match) {
+  linesUpToNextMatchingLine(match, stopAtError) {
     const lines = []
 
     while (true) {
       const nextLine = this.nextLine()
 
       if (nextLine === false) {
+        break
+      }
+
+      if (stopAtError && nextLine.match(/^! /)) {
+        this.rewindLine()
         break
       }
 

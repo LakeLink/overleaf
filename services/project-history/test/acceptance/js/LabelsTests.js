@@ -1,48 +1,34 @@
-/* eslint-disable
-    no-undef,
-    no-unused-vars,
-*/
-// TODO: This file was created by bulk-decaffeinate.
-// Fix any style issues and re-enable lint.
-/*
- * decaffeinate suggestions:
- * DS102: Remove unnecessary code created because of implicit returns
- * DS207: Consider shorter variations of null checks
- * Full docs: https://github.com/decaffeinate/decaffeinate/blob/master/docs/suggestions.md
- */
-import sinon from 'sinon'
 import { expect } from 'chai'
-import Settings from '@overleaf/settings'
-import { ObjectId } from 'mongodb'
+import mongodb from 'mongodb-legacy'
 import nock from 'nock'
 import * as ProjectHistoryClient from './helpers/ProjectHistoryClient.js'
 import * as ProjectHistoryApp from './helpers/ProjectHistoryApp.js'
+const { ObjectId } = mongodb
 
-const MockHistoryStore = () => nock('http://localhost:3100')
-const MockFileStore = () => nock('http://localhost:3009')
-const MockWeb = () => nock('http://localhost:3000')
+const MockHistoryStore = () => nock('http://127.0.0.1:3100')
+const MockWeb = () => nock('http://127.0.0.1:3000')
 
 const fixture = path => new URL(`../fixtures/${path}`, import.meta.url)
 
 describe('Labels', function () {
   beforeEach(function (done) {
-    return ProjectHistoryApp.ensureRunning(error => {
+    ProjectHistoryApp.ensureRunning(error => {
       if (error != null) {
         throw error
       }
 
-      this.historyId = ObjectId().toString()
+      this.historyId = new ObjectId().toString()
       MockHistoryStore().post('/api/projects').reply(200, {
         projectId: this.historyId,
       })
 
-      return ProjectHistoryClient.initializeProject(
+      ProjectHistoryClient.initializeProject(
         this.historyId,
         (error, olProject) => {
           if (error != null) {
             throw error
           }
-          this.project_id = ObjectId().toString()
+          this.project_id = new ObjectId().toString()
           MockWeb()
             .get(`/project/${this.project_id}/details`)
             .reply(200, {
@@ -65,20 +51,20 @@ describe('Labels', function () {
 
           this.comment = 'a saved version comment'
           this.comment2 = 'another saved version comment'
-          this.user_id = ObjectId().toString()
+          this.user_id = new ObjectId().toString()
           this.created_at = new Date(1)
-          return done()
+          done()
         }
       )
     })
   })
 
   afterEach(function () {
-    return nock.cleanAll()
+    nock.cleanAll()
   })
 
   it('can create and get labels', function (done) {
-    return ProjectHistoryClient.createLabel(
+    ProjectHistoryClient.createLabel(
       this.project_id,
       this.user_id,
       7,
@@ -88,22 +74,42 @@ describe('Labels', function () {
         if (error != null) {
           throw error
         }
-        return ProjectHistoryClient.getLabels(
-          this.project_id,
-          (error, labels) => {
-            if (error != null) {
-              throw error
-            }
-            expect(labels).to.deep.equal([label])
-            return done()
+        ProjectHistoryClient.getLabels(this.project_id, (error, labels) => {
+          if (error != null) {
+            throw error
           }
-        )
+          expect(labels).to.deep.equal([label])
+          done()
+        })
+      }
+    )
+  })
+
+  it('can create and get labels with no user id', function (done) {
+    const userId = undefined
+    ProjectHistoryClient.createLabel(
+      this.project_id,
+      userId,
+      7,
+      this.comment,
+      this.created_at,
+      (error, label) => {
+        if (error != null) {
+          throw error
+        }
+        ProjectHistoryClient.getLabels(this.project_id, (error, labels) => {
+          if (error != null) {
+            throw error
+          }
+          expect(labels).to.deep.equal([label])
+          done()
+        })
       }
     )
   })
 
   it('can delete labels', function (done) {
-    return ProjectHistoryClient.createLabel(
+    ProjectHistoryClient.createLabel(
       this.project_id,
       this.user_id,
       7,
@@ -113,7 +119,34 @@ describe('Labels', function () {
         if (error != null) {
           throw error
         }
-        return ProjectHistoryClient.deleteLabel(
+        ProjectHistoryClient.deleteLabel(this.project_id, label.id, error => {
+          if (error != null) {
+            throw error
+          }
+          ProjectHistoryClient.getLabels(this.project_id, (error, labels) => {
+            if (error != null) {
+              throw error
+            }
+            expect(labels).to.deep.equal([])
+            done()
+          })
+        })
+      }
+    )
+  })
+
+  it('can delete labels for the current user', function (done) {
+    ProjectHistoryClient.createLabel(
+      this.project_id,
+      this.user_id,
+      7,
+      this.comment,
+      this.created_at,
+      (error, label) => {
+        if (error != null) {
+          throw error
+        }
+        ProjectHistoryClient.deleteLabelForUser(
           this.project_id,
           this.user_id,
           label.id,
@@ -121,16 +154,13 @@ describe('Labels', function () {
             if (error != null) {
               throw error
             }
-            return ProjectHistoryClient.getLabels(
-              this.project_id,
-              (error, labels) => {
-                if (error != null) {
-                  throw error
-                }
-                expect(labels).to.deep.equal([])
-                return done()
+            ProjectHistoryClient.getLabels(this.project_id, (error, labels) => {
+              if (error != null) {
+                throw error
               }
-            )
+              expect(labels).to.deep.equal([])
+              done()
+            })
           }
         )
       }
@@ -138,9 +168,9 @@ describe('Labels', function () {
   })
 
   it('can transfer ownership of labels', function (done) {
-    const fromUser = ObjectId().toString()
-    const toUser = ObjectId().toString()
-    return ProjectHistoryClient.createLabel(
+    const fromUser = new ObjectId().toString()
+    const toUser = new ObjectId().toString()
+    ProjectHistoryClient.createLabel(
       this.project_id,
       fromUser,
       7,
@@ -150,7 +180,7 @@ describe('Labels', function () {
         if (error != null) {
           throw error
         }
-        return ProjectHistoryClient.createLabel(
+        ProjectHistoryClient.createLabel(
           this.project_id,
           fromUser,
           7,
@@ -160,14 +190,14 @@ describe('Labels', function () {
             if (error != null) {
               throw error
             }
-            return ProjectHistoryClient.transferLabelOwnership(
+            ProjectHistoryClient.transferLabelOwnership(
               fromUser,
               toUser,
               error => {
                 if (error != null) {
                   throw error
                 }
-                return ProjectHistoryClient.getLabels(
+                ProjectHistoryClient.getLabels(
                   this.project_id,
                   (error, labels) => {
                     if (error != null) {
@@ -189,7 +219,7 @@ describe('Labels', function () {
                         user_id: toUser,
                       },
                     ])
-                    return done()
+                    done()
                   }
                 )
               }
@@ -200,8 +230,8 @@ describe('Labels', function () {
     )
   })
 
-  return it('should return labels with summarized updates', function (done) {
-    return ProjectHistoryClient.createLabel(
+  it('should return labels with summarized updates', function (done) {
+    ProjectHistoryClient.createLabel(
       this.project_id,
       this.user_id,
       8,
@@ -211,7 +241,7 @@ describe('Labels', function () {
         if (error != null) {
           throw error
         }
-        return ProjectHistoryClient.getSummarizedUpdates(
+        ProjectHistoryClient.getSummarizedUpdates(
           this.project_id,
           { min_count: 1 },
           (error, updates) => {
@@ -243,7 +273,7 @@ describe('Labels', function () {
                 },
               ],
             })
-            return done()
+            done()
           }
         )
       }

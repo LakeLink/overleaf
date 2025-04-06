@@ -1,7 +1,11 @@
 import { EditorView } from '@codemirror/view'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
+import { Annotation, Compartment, Extension, Facet } from '@codemirror/state'
 
+/**
+ * A syntax highlighter for content types that are only styled in the visual editor.
+ */
 export const visualHighlightStyle = syntaxHighlighting(
   HighlightStyle.define([
     { tag: tags.link, class: 'ol-cm-link-text' },
@@ -12,6 +16,7 @@ export const visualHighlightStyle = syntaxHighlighting(
     { tag: tags.string, class: 'ol-cm-monospace' },
     { tag: tags.punctuation, class: 'ol-cm-punctuation' },
     { tag: tags.literal, class: 'ol-cm-monospace' },
+    { tag: tags.strong, class: 'ol-cm-strong' },
     {
       tag: tags.monospace,
       fontFamily: 'var(--source-font-family)',
@@ -21,7 +26,7 @@ export const visualHighlightStyle = syntaxHighlighting(
   ])
 )
 
-export const visualTheme = EditorView.theme({
+const mainVisualTheme = EditorView.theme({
   '&.cm-editor': {
     '--visual-font-family':
       "'Noto Serif', 'Palatino Linotype', 'Book Antiqua', Palatino, serif !important",
@@ -36,7 +41,8 @@ export const visualTheme = EditorView.theme({
   },
   '.cm-content.cm-content': {
     overflowX: 'hidden', // needed so the callout elements don't overflow (requires line wrapping to be on)
-    padding: '0 max(calc((100% - 100ch) / 2), 8%)', // max 100 characters per line
+    padding:
+      '0 max(calc((var(--content-width) - 95ch) / 2), calc(var(--content-width) * 0.08))', // max 95 characters per line
     fontFamily: 'var(--visual-font-family)',
     fontSize: 'var(--visual-font-size)',
   },
@@ -56,6 +62,7 @@ export const visualTheme = EditorView.theme({
   '.ol-cm-link-text': {
     textDecoration: 'underline',
     fontFamily: 'inherit',
+    textUnderlineOffset: '2px',
   },
   '.ol-cm-monospace': {
     fontFamily: 'var(--source-font-family)',
@@ -64,6 +71,9 @@ export const visualTheme = EditorView.theme({
     fontStyle: 'normal',
     fontVariant: 'normal',
     textDecoration: 'none',
+  },
+  '.ol-cm-strong': {
+    fontWeight: 700,
   },
   '.ol-cm-punctuation': {
     fontFamily: 'var(--source-font-family)',
@@ -84,22 +94,25 @@ export const visualTheme = EditorView.theme({
     cursor: 'pointer',
     padding: '0.5em',
     lineHeight: 'calc(var(--line-height) * 5/6)',
+    textWrap: 'balance',
+  },
+  '.ol-cm-authors': {
+    display: 'flex',
+    justifyContent: 'space-evenly',
+    gap: '0.5em',
+    flexWrap: 'wrap',
   },
   '.ol-cm-author': {
-    display: 'inline-block',
-    maxWidth: '45%',
-    minWidth: '200px',
-    verticalAlign: 'top',
     cursor: 'pointer',
-  },
-  '.ol-cm-author:not(:first-child)': {
     display: 'inline-block',
-    marginLeft: '5%',
-    maxWidth: '45%',
+    minWidth: '150px',
   },
   '.ol-cm-icon-brace': {
     filter: 'grayscale(1)',
     marginRight: '2px',
+  },
+  '.ol-cm-indicator': {
+    color: 'rgba(125, 125, 125, 0.5)',
   },
   '.ol-cm-begin': {
     fontFamily: 'var(--source-font-family)',
@@ -111,7 +124,7 @@ export const visualTheme = EditorView.theme({
   },
   '.ol-cm-end': {
     fontFamily: 'var(--source-font-family)',
-    padding: '0.5em 0 1.5em',
+    paddingBottom: '1.5em',
     minHeight: '1em',
     textAlign: 'center',
     justifyContent: 'center',
@@ -142,6 +155,17 @@ export const visualTheme = EditorView.theme({
     {
       boxShadow: '0 2px 5px -3px rgb(125, 125, 125, 0.5)',
     },
+  '.ol-cm-environment-theorem-plain': {
+    fontStyle: 'italic',
+  },
+  '.ol-cm-begin-proof > .ol-cm-environment-name': {
+    fontStyle: 'italic',
+  },
+  '.ol-cm-environment-quote-block.ol-cm-environment-line': {
+    borderLeft: '4px solid rgba(125, 125, 125, 0.25)',
+    paddingLeft: '1em',
+    borderRadius: '0',
+  },
   '.ol-cm-environment-padding': {
     flex: 1,
     height: '1px',
@@ -150,15 +174,22 @@ export const visualTheme = EditorView.theme({
   '.ol-cm-environment-name': {
     padding: '0 1em',
   },
-  '.ol-cm-environment-name-abstract': {
+  '.ol-cm-begin-abstract > .ol-cm-environment-name': {
     fontFamily: 'var(--visual-font-family)',
     fontSize: '1.2em',
     fontWeight: 550,
+    textTransform: 'capitalize',
   },
-  '.ol-cm-environment-name-abstract:first-letter': {
-    textTransform: 'uppercase',
+  '.ol-cm-begin-theorem > .ol-cm-environment-name': {
+    fontFamily: 'var(--visual-font-family)',
+    fontWeight: 550,
+    padding: '0 6px',
+    textTransform: 'capitalize',
   },
-  '.ol-cm-item': {
+  '.ol-cm-begin-theorem > .ol-cm-environment-padding:first-of-type': {
+    flex: 0,
+  },
+  '.ol-cm-item, .ol-cm-description-item': {
     paddingInlineStart: 'calc(var(--list-depth) * 2ch)',
   },
   '.ol-cm-item::before': {
@@ -218,6 +249,22 @@ export const visualTheme = EditorView.theme({
   '.ol-cm-command-texttt': {
     fontFamily: 'monospace',
   },
+  '.ol-cm-command-textmd, .ol-cm-command-textmd > .ol-cm-command-textbf': {
+    fontWeight: 'normal',
+  },
+  '.ol-cm-command-textsf': {
+    fontFamily: 'var(--source-font-family)',
+  },
+  '.ol-cm-command-textsuperscript': {
+    verticalAlign: 'super',
+    fontSize: 'smaller',
+    lineHeight: 'calc(var(--line-height) / 2)',
+  },
+  '.ol-cm-command-textsubscript': {
+    verticalAlign: 'sub',
+    fontSize: 'smaller',
+    lineHeight: 'calc(var(--line-height) / 2)',
+  },
   '.ol-cm-command-underline': {
     textDecoration: 'underline',
   },
@@ -241,12 +288,25 @@ export const visualTheme = EditorView.theme({
     overflowWrap: 'break-word',
     hyphens: 'auto',
   },
-  '.ol-cm-environment-centered.ol-cm-caption-line': {
-    padding: '0 10%',
-    textAlign: 'center',
+  '.ol-cm-space': {
+    display: 'inline-block',
+  },
+  '.ol-cm-environment-centered': {
+    '&.ol-cm-label-line, &.ol-cm-caption-line': {
+      textAlign: 'center',
+    },
+    '&.ol-cm-caption-line': {
+      padding: '0 10%',
+    },
   },
   '.ol-cm-caption-line .ol-cm-label': {
     marginRight: '1ch',
+  },
+  '.ol-cm-environment-verbatim': {
+    fontFamily: 'var(--source-font-family)',
+  },
+  '.ol-cm-environment-lstlisting': {
+    fontFamily: 'var(--source-font-family)',
   },
   '.ol-cm-tex': {
     textTransform: 'uppercase',
@@ -275,6 +335,15 @@ export const visualTheme = EditorView.theme({
       display: 'inline',
     },
   },
+  '.ol-cm-graphics-inline-edit-wrapper': {
+    display: 'inline-block',
+    position: 'relative',
+    verticalAlign: 'middle',
+    '& .ol-cm-graphics': {
+      paddingTop: 0,
+      paddingBottom: 0,
+    },
+  },
   '.ol-cm-graphics-loading': {
     height: '300px', // guess that the height is the same as the max width
   },
@@ -297,7 +366,7 @@ export const visualTheme = EditorView.theme({
   '.ol-cm-preamble-widget, .ol-cm-end-document-widget': {
     padding: '0.25em 1em',
     borderRadius: '8px',
-    fontFamily: '"Lato", sans-serif',
+    fontFamily: 'var(--font-sans)',
     fontSize: '14px',
     '.ol-cm-preamble-expanded &': {
       borderBottomLeftRadius: '0',
@@ -336,4 +405,88 @@ export const visualTheme = EditorView.theme({
   '.ol-cm-end-document-widget': {
     textAlign: 'center',
   },
+  '.ol-cm-environment-figure': {
+    position: 'relative',
+  },
+  '.ol-cm-graphics-edit-button': {
+    position: 'absolute',
+    top: '18px',
+    right: '18px',
+  },
+  '.ol-cm-footnote': {
+    display: 'inline-flex',
+    padding: '0 0.1em',
+    background: 'rgba(125, 125, 125, 0.25)',
+    borderRadius: '2px',
+    height: '1em',
+    cursor: 'pointer',
+    verticalAlign: 'text-top',
+    '&:not(.ol-cm-footnote-view):hover': {
+      background: 'rgba(125, 125, 125, 0.5)',
+    },
+    '&.ol-cm-footnote-view': {
+      height: 'auto',
+      verticalAlign: 'unset',
+      display: 'inline',
+      padding: '0 0.5em',
+    },
+  },
 })
+
+const contentWidthThemeConf = new Compartment()
+const changeContentWidthAnnotation = Annotation.define<boolean>()
+const currentWidth = Facet.define<string, string>({
+  combine: values => {
+    if (values.length === 0) {
+      return ''
+    }
+    return values[0]
+  },
+})
+
+function createContentWidthTheme(contentWidth: string) {
+  return [
+    currentWidth.of(contentWidth),
+    EditorView.editorAttributes.of({
+      style: `--content-width: ${contentWidth}`,
+    }),
+  ]
+}
+
+const contentWidthSetter = EditorView.updateListener.of(update => {
+  if (update.geometryChanged && !update.docChanged) {
+    // Ignore any update triggered by this plugin
+    if (
+      update.transactions.some(tr =>
+        tr.annotation(changeContentWidthAnnotation)
+      )
+    ) {
+      return
+    }
+
+    const viewWidth = `${update.view.contentDOM.offsetWidth}px`
+
+    const currentConfiguredWidth = update.state.facet(currentWidth)
+    if (currentConfiguredWidth === viewWidth) {
+      // We already have the correct width stored
+      return
+    }
+
+    update.view.dispatch({
+      effects: contentWidthThemeConf.reconfigure(
+        createContentWidthTheme(viewWidth)
+      ),
+      // Set the selection explicitly to force the cursor to redraw if CM6
+      // fails to spot a change in geometry, which sometimes seems to happen
+      // (see #15145)
+      selection: update.view.state.selection,
+      annotations: changeContentWidthAnnotation.of(true),
+    })
+  }
+})
+
+export const visualTheme: Extension = [
+  contentWidthThemeConf.of(createContentWidthTheme('100%')),
+  mainVisualTheme,
+  contentWidthSetter,
+]

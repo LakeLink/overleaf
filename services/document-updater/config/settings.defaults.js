@@ -1,7 +1,13 @@
+const http = require('node:http')
+const https = require('node:https')
+
+http.globalAgent.keepAlive = false
+https.globalAgent.keepAlive = false
+
 module.exports = {
   internal: {
     documentupdater: {
-      host: process.env.LISTEN_ADDRESS || 'localhost',
+      host: process.env.LISTEN_ADDRESS || '127.0.0.1',
       port: 3003,
     },
   },
@@ -9,24 +15,20 @@ module.exports = {
   apis: {
     web: {
       url: `http://${
-        process.env.WEB_API_HOST || process.env.WEB_HOST || 'localhost'
+        process.env.WEB_API_HOST || process.env.WEB_HOST || '127.0.0.1'
       }:${process.env.WEB_API_PORT || process.env.WEB_PORT || 3000}`,
-      user: process.env.WEB_API_USER || 'sharelatex',
+      user: process.env.WEB_API_USER || 'overleaf',
       pass: process.env.WEB_API_PASSWORD || 'password',
     },
-    trackchanges: {
-      url: `http://${process.env.TRACK_CHANGES_HOST || 'localhost'}:3015`,
-    },
     project_history: {
-      enabled: true,
-      url: `http://${process.env.PROJECT_HISTORY_HOST || 'localhost'}:3054`,
+      url: `http://${process.env.PROJECT_HISTORY_HOST || '127.0.0.1'}:3054`,
     },
   },
 
   redis: {
     pubsub: {
       host:
-        process.env.PUBSUB_REDIS_HOST || process.env.REDIS_HOST || 'localhost',
+        process.env.PUBSUB_REDIS_HOST || process.env.REDIS_HOST || '127.0.0.1',
       port: process.env.PUBSUB_REDIS_PORT || process.env.REDIS_PORT || '6379',
       password:
         process.env.PUBSUB_REDIS_PASSWORD || process.env.REDIS_PASSWORD || '',
@@ -38,26 +40,18 @@ module.exports = {
     history: {
       port: process.env.HISTORY_REDIS_PORT || process.env.REDIS_PORT || '6379',
       host:
-        process.env.HISTORY_REDIS_HOST || process.env.REDIS_HOST || 'localhost',
+        process.env.HISTORY_REDIS_HOST || process.env.REDIS_HOST || '127.0.0.1',
       password:
         process.env.HISTORY_REDIS_PASSWORD || process.env.REDIS_PASSWORD || '',
       maxRetriesPerRequest: parseInt(
         process.env.REDIS_MAX_RETRIES_PER_REQUEST || '20'
       ),
-      key_schema: {
-        uncompressedHistoryOps({ doc_id: docId }) {
-          return `UncompressedHistoryOps:{${docId}}`
-        },
-        docsWithHistoryOps({ project_id: projectId }) {
-          return `DocsWithHistoryOps:{${projectId}}`
-        },
-      },
     },
 
     project_history: {
       port: process.env.HISTORY_REDIS_PORT || process.env.REDIS_PORT || '6379',
       host:
-        process.env.HISTORY_REDIS_HOST || process.env.REDIS_HOST || 'localhost',
+        process.env.HISTORY_REDIS_HOST || process.env.REDIS_HOST || '127.0.0.1',
       password:
         process.env.HISTORY_REDIS_PASSWORD || process.env.REDIS_PASSWORD || '',
       maxRetriesPerRequest: parseInt(
@@ -76,7 +70,7 @@ module.exports = {
     lock: {
       port: process.env.LOCK_REDIS_PORT || process.env.REDIS_PORT || '6379',
       host:
-        process.env.LOCK_REDIS_HOST || process.env.REDIS_HOST || 'localhost',
+        process.env.LOCK_REDIS_HOST || process.env.REDIS_HOST || '127.0.0.1',
       password:
         process.env.LOCK_REDIS_PASSWORD || process.env.REDIS_PASSWORD || '',
       maxRetriesPerRequest: parseInt(
@@ -95,7 +89,7 @@ module.exports = {
       host:
         process.env.DOC_UPDATER_REDIS_HOST ||
         process.env.REDIS_HOST ||
-        'localhost',
+        '127.0.0.1',
       password:
         process.env.DOC_UPDATER_REDIS_PASSWORD ||
         process.env.REDIS_PASSWORD ||
@@ -137,11 +131,11 @@ module.exports = {
         projectHistoryId({ doc_id: docId }) {
           return `ProjectHistoryId:{${docId}}`
         },
-        projectHistoryType({ doc_id: docId }) {
-          return `ProjectHistoryType:{${docId}}`
-        },
         projectState({ project_id: projectId }) {
           return `ProjectState:{${projectId}}`
+        },
+        projectBlock({ project_id: projectId }) {
+          return `ProjectBlock:{${projectId}}`
         },
         pendingUpdates({ doc_id: docId }) {
           return `PendingUpdates:{${docId}}`
@@ -152,8 +146,14 @@ module.exports = {
         lastUpdatedAt({ doc_id: docId }) {
           return `lastUpdatedAt:{${docId}}`
         },
+        resolvedCommentIds({ doc_id: docId }) {
+          return `ResolvedCommentIds:{${docId}}`
+        },
         flushAndDeleteQueue() {
           return 'DocUpdaterFlushAndDeleteQueue'
+        },
+        historyRangesSupport() {
+          return 'HistoryRangesSupport'
         },
       },
     },
@@ -165,14 +165,15 @@ module.exports = {
 
   dispatcherCount: parseInt(process.env.DISPATCHER_COUNT || 10, 10),
 
+  redisLockTTLSeconds: 30,
+
   mongo: {
     url:
       process.env.MONGO_CONNECTION_STRING ||
       `mongodb://${process.env.MONGO_HOST || '127.0.0.1'}/sharelatex`,
-  },
-
-  sentry: {
-    dsn: process.env.SENTRY_DSN,
+    options: {
+      monitorCommands: true,
+    },
   },
 
   publishOnIndividualChannels:
@@ -181,8 +182,6 @@ module.exports = {
   continuousBackgroundFlush: process.env.CONTINUOUS_BACKGROUND_FLUSH === 'true',
 
   smoothingOffset: process.env.SMOOTHING_OFFSET || 1000, // milliseconds
-
-  disableDoubleFlush: process.env.DISABLE_DOUBLE_FLUSH === 'true', // don't flush track-changes for projects using project-history
-
-  disableTrackChanges: process.env.DISABLE_TRACK_CHANGES === 'true', // stop sending any updates to track-changes
+  gracefulShutdownDelayInMs:
+    parseInt(process.env.GRACEFUL_SHUTDOWN_DELAY_SECONDS ?? '10', 10) * 1000,
 }

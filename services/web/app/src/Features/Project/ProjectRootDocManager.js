@@ -19,13 +19,34 @@ const ProjectGetter = require('./ProjectGetter')
 const DocumentHelper = require('../Documents/DocumentHelper')
 const Path = require('path')
 const fs = require('fs')
-const { promisify } = require('util')
 const async = require('async')
 const globby = require('globby')
-const _ = require('underscore')
-const { promisifyAll } = require('../../util/promises')
+const _ = require('lodash')
+const { promisifyAll } = require('@overleaf/promise-utils')
+const logger = require('@overleaf/logger')
+const {
+  BackgroundTaskTracker,
+} = require('../../infrastructure/GracefulShutdown')
+
+const rootDocResets = new BackgroundTaskTracker('root doc resets')
 
 module.exports = ProjectRootDocManager = {
+  setRootDocAutomaticallyInBackground(projectId) {
+    rootDocResets.add()
+    setTimeout(async () => {
+      try {
+        await ProjectRootDocManager.promises.setRootDocAutomatically(projectId)
+      } catch (err) {
+        logger.warn(
+          { err },
+          'failed to set root doc automatically in background'
+        )
+      } finally {
+        rootDocResets.done()
+      }
+    }, 30 * 1000)
+  },
+
   setRootDocAutomatically(projectId, callback) {
     if (callback == null) {
       callback = function () {}
@@ -72,7 +93,7 @@ module.exports = ProjectRootDocManager = {
     if (callback == null) {
       callback = function () {}
     }
-    const filePathsPromise = globby(['**/*.{tex,Rtex}'], {
+    const filePathsPromise = globby(['**/*.{tex,Rtex,Rnw}'], {
       cwd: directoryPath,
       followSymlinkedDirectories: false,
       onlyFiles: true,
@@ -92,6 +113,7 @@ module.exports = ProjectRootDocManager = {
             if (err != null) {
               return callback(err)
             }
+            let firstFileInRootFolder
             let doc = null
 
             return async.until(
@@ -109,16 +131,26 @@ module.exports = ProjectRootDocManager = {
                     if (DocumentHelper.contentHasDocumentclass(content)) {
                       doc = { path: file, content }
                     }
-                    return cb(null)
+
+                    if (!firstFileInRootFolder && !file.includes('/')) {
+                      firstFileInRootFolder = { path: file, content }
+                    }
+                    cb(null)
                   }
                 )
               },
-              err =>
-                callback(
-                  err,
-                  doc != null ? doc.path : undefined,
-                  doc != null ? doc.content : undefined
-                )
+              err => {
+                if (err) {
+                  return callback(err)
+                }
+
+                // if no doc was found, use the first file in the root folder as the main doc
+                if (!doc && firstFileInRootFolder) {
+                  doc = firstFileInRootFolder
+                }
+
+                callback(null, doc?.path, doc?.content)
+              }
             )
           }
         ),
@@ -302,7 +334,7 @@ module.exports = ProjectRootDocManager = {
 
 module.exports = ProjectRootDocManager
 module.exports.promises = promisifyAll(module.exports, {
-  without: ['_rootDocSort'],
+  without: ['_rootDocSort', 'setRootDocAutomaticallyInBackground'],
   multiResult: {
     findRootDocFileFromDirectory: ['path', 'content'],
   },

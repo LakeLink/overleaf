@@ -1,6 +1,6 @@
 const _ = require('lodash')
 const { callbackify } = require('util')
-const { callbackifyMultiResult } = require('../../util/promises')
+const { callbackifyMultiResult } = require('@overleaf/promise-utils')
 const PlansLocator = require('./PlansLocator')
 const SubscriptionLocator = require('./SubscriptionLocator')
 const UserFeaturesUpdater = require('./UserFeaturesUpdater')
@@ -14,6 +14,7 @@ const UserGetter = require('../User/UserGetter')
 const AnalyticsManager = require('../Analytics/AnalyticsManager')
 const Queues = require('../../infrastructure/Queues')
 const Modules = require('../../infrastructure/Modules')
+const { AI_ADD_ON_CODE } = require('./RecurlyEntities')
 
 /**
  * Enqueue a job for refreshing features for the given user
@@ -43,7 +44,7 @@ async function refreshFeatures(userId, reason) {
   logger.debug({ userId, features }, 'updating user features')
 
   const matchedFeatureSet = FeaturesHelper.getMatchedFeatureSet(features)
-  AnalyticsManager.setUserPropertyForUser(
+  AnalyticsManager.setUserPropertyForUserInBackground(
     userId,
     'feature-set',
     matchedFeatureSet
@@ -56,9 +57,19 @@ async function refreshFeatures(userId, reason) {
     try {
       await Modules.promises.hooks.fire('removeDropbox', userId, reason)
     } catch (err) {
-      logger.error(err)
+      logger.error({ err, userId }, 'removeDropbox hook failed')
     }
   }
+
+  if (oldFeatures.github === true && features.github === false) {
+    logger.debug({ userId }, '[FeaturesUpdater] must unlink github')
+    try {
+      await Modules.promises.hooks.fire('removeGithub', userId, reason)
+    } catch (err) {
+      logger.error({ err, userId }, 'removeGithub hook failed')
+    }
+  }
+
   return { features: newFeatures, featuresChanged }
 }
 
@@ -104,16 +115,27 @@ async function computeFeatures(userId) {
 }
 
 async function _getIndividualFeatures(userId) {
-  const sub = await SubscriptionLocator.promises.getUserIndividualSubscription(
-    userId
-  )
-  return _subscriptionToFeatures(sub)
+  const subscription =
+    await SubscriptionLocator.promises.getUsersSubscription(userId)
+  if (subscription == null || subscription?.recurlyStatus?.state === 'paused') {
+    return {}
+  }
+
+  const featureSets = []
+
+  // The plan doesn't apply to the group admin when the subscription
+  // is a group subscription
+  if (!subscription.groupPlan) {
+    featureSets.push(_subscriptionToFeatures(subscription))
+  }
+
+  featureSets.push(_aiAddOnFeatures(subscription))
+  return _.reduce(featureSets, FeaturesHelper.mergeFeatures, {})
 }
 
 async function _getGroupFeatureSets(userId) {
-  const subs = await SubscriptionLocator.promises.getGroupSubscriptionsMemberOf(
-    userId
-  )
+  const subs =
+    await SubscriptionLocator.promises.getGroupSubscriptionsMemberOf(userId)
   return (subs || []).map(_subscriptionToFeatures)
 }
 
@@ -139,18 +161,22 @@ async function _getV1Features(user) {
 }
 
 function _subscriptionToFeatures(subscription) {
-  return _planCodeToFeatures(subscription && subscription.planCode)
-}
-
-function _planCodeToFeatures(planCode) {
-  if (!planCode) {
+  if (!subscription?.planCode) {
     return {}
   }
-  const plan = PlansLocator.findLocalPlanInSettings(planCode)
+  const plan = PlansLocator.findLocalPlanInSettings(subscription.planCode)
   if (!plan) {
     return {}
   } else {
     return plan.features
+  }
+}
+
+function _aiAddOnFeatures(subscription) {
+  if (subscription?.addOns?.some(addOn => addOn.addOnCode === AI_ADD_ON_CODE)) {
+    return { aiErrorAssistant: true }
+  } else {
+    return {}
   }
 }
 

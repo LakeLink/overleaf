@@ -1,7 +1,7 @@
 import { latexIndentService } from './latex-indent-service'
 import { shortcuts } from './shortcuts'
 import { linting } from './linting'
-import { LanguageSupport, indentUnit } from '@codemirror/language'
+import { LanguageSupport } from '@codemirror/language'
 import { CompletionSource } from '@codemirror/autocomplete'
 import { openAutocomplete } from './open-autocomplete'
 import { metadata } from './metadata'
@@ -9,28 +9,34 @@ import {
   argumentCompletionSources,
   explicitCommandCompletionSource,
   inCommandCompletionSource,
+  beginEnvironmentCompletionSource,
 } from './complete'
 import { documentCommands } from './document-commands'
 import importOverleafModules from '../../../../../macros/import-overleaf-module.macro'
 import { documentOutline } from './document-outline'
 import { LaTeXLanguage } from './latex-language'
-import { documentEnvironmentNames } from './document-environment-names'
+import { documentEnvironments } from './document-environments'
+import {
+  figureModal,
+  figureModalPasteHandler,
+} from '../../extensions/figure-modal'
 
-const completionSources = importOverleafModules('sourceEditorCompletionSources')
-  .map((item: any) => item.import.default)
-  .concat(
-    argumentCompletionSources,
-    inCommandCompletionSource,
-    explicitCommandCompletionSource
-  ) as CompletionSource[]
+const completionSources: CompletionSource[] = [
+  ...argumentCompletionSources,
+  inCommandCompletionSource,
+  explicitCommandCompletionSource,
+  beginEnvironmentCompletionSource,
+  ...importOverleafModules('sourceEditorCompletionSources').map(
+    (item: any) => item.import.default
+  ),
+]
 
 export const latex = () => {
   return new LanguageSupport(LaTeXLanguage, [
-    indentUnit.of('    '), // 4 spaces
     shortcuts(),
-    documentOutline.extension,
-    documentCommands.extension,
-    documentEnvironmentNames.extension,
+    documentOutline,
+    documentCommands,
+    documentEnvironments,
     latexIndentService(),
     linting(),
     metadata(),
@@ -40,5 +46,7 @@ export const latex = () => {
         autocomplete: completionSource,
       })
     ),
+    figureModal(),
+    figureModalPasteHandler(),
   ])
 }

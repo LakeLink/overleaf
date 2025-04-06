@@ -2,7 +2,7 @@ const OError = require('@overleaf/o-error')
 const Settings = require('@overleaf/settings')
 const logger = require('@overleaf/logger')
 const Async = require('async')
-const _ = require('underscore')
+const _ = require('lodash')
 const { promisify } = require('util')
 const UserSessionsRedis = require('./UserSessionsRedis')
 const rclient = UserSessionsRedis.client()
@@ -86,7 +86,7 @@ const UserSessionsManager = {
         })
         return callback(err)
       }
-      sessionKeys = _.filter(sessionKeys, k => !_.contains(exclude, k))
+      sessionKeys = _.filter(sessionKeys, k => !_.includes(exclude, k))
       if (sessionKeys.length === 0) {
         logger.debug({ userId: user._id }, 'no other sessions found, returning')
         return callback(null, [])
@@ -126,13 +126,16 @@ const UserSessionsManager = {
     })
   },
 
-  revokeAllUserSessions(user, retain, callback) {
-    if (!retain) {
-      retain = []
-    }
-    retain = retain.map(i => UserSessionsManager._sessionKey(i))
+  /**
+   * @param {{_id: string}} user
+   * @param {string | null | undefined} retainSessionID - the session ID to exclude from deletion
+   * @param {(err: Error | null, data?: unknown) => void} callback
+   */
+  removeSessionsFromRedis(user, retainSessionID, callback) {
     if (!user) {
-      return callback(null)
+      return callback(
+        new Error('bug: user not passed to removeSessionsFromRedis')
+      )
     }
     const sessionSetKey = UserSessionsRedis.sessionSetKey(user)
     rclient.smembers(sessionSetKey, function (err, sessionKeys) {
@@ -143,16 +146,18 @@ const UserSessionsManager = {
         })
         return callback(err)
       }
-      const keysToDelete = _.filter(
-        sessionKeys,
-        k => !Array.from(retain).includes(k)
-      )
+      const keysToDelete = retainSessionID
+        ? _.without(
+            sessionKeys,
+            UserSessionsManager._sessionKey(retainSessionID)
+          )
+        : sessionKeys
       if (keysToDelete.length === 0) {
         logger.debug(
           { userId: user._id },
           'no sessions in UserSessions set to delete, returning'
         )
-        return callback(null)
+        return callback(null, 0)
       }
       logger.debug(
         { userId: user._id, count: keysToDelete.length },
@@ -177,7 +182,7 @@ const UserSessionsManager = {
             })
             return callback(err)
           }
-          callback(null)
+          callback(null, keysToDelete.length)
         })
       })
     })
@@ -242,7 +247,12 @@ const UserSessionsManager = {
 
 UserSessionsManager.promises = {
   getAllUserSessions: promisify(UserSessionsManager.getAllUserSessions),
-  revokeAllUserSessions: promisify(UserSessionsManager.revokeAllUserSessions),
+  removeSessionsFromRedis: (user, retainSessionID = null) =>
+    promisify(UserSessionsManager.removeSessionsFromRedis)(
+      user,
+      retainSessionID
+    ),
+  untrackSession: promisify(UserSessionsManager.untrackSession),
 }
 
 module.exports = UserSessionsManager

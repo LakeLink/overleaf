@@ -1,10 +1,8 @@
 const { callbackify } = require('util')
 const { db } = require('../../infrastructure/mongodb')
-const metrics = require('@overleaf/metrics')
-const logger = require('@overleaf/logger')
 const moment = require('moment')
 const settings = require('@overleaf/settings')
-const { promisifyAll } = require('../../util/promises')
+const { promisifyAll } = require('@overleaf/promise-utils')
 const {
   promises: InstitutionsAPIPromises,
 } = require('../Institutions/InstitutionsAPI')
@@ -42,7 +40,10 @@ function _pastReconfirmDate(lastDayToReconfirm) {
   return moment(lastDayToReconfirm).isBefore()
 }
 
-function _emailInReconfirmNotificationPeriod(cachedLastDayToReconfirm) {
+function _emailInReconfirmNotificationPeriod(
+  cachedLastDayToReconfirm,
+  lastDayToReconfirm
+) {
   const globalReconfirmPeriod = settings.reconfirmNotificationDays
 
   if (!globalReconfirmPeriod || !cachedLastDayToReconfirm) return false
@@ -52,7 +53,20 @@ function _emailInReconfirmNotificationPeriod(cachedLastDayToReconfirm) {
     'days'
   )
 
-  return moment().isAfter(notificationStarts)
+  let isInNotificationPeriod = moment().isAfter(notificationStarts)
+
+  if (!isInNotificationPeriod) {
+    // for possible issues in v1/v2 date mismatch, ensure v2 date doesn't show as needing to reconfirm
+
+    const notificationStartsV2 = moment(lastDayToReconfirm).subtract(
+      globalReconfirmPeriod,
+      'days'
+    )
+
+    isInNotificationPeriod = moment().isAfter(notificationStartsV2)
+  }
+
+  return isInNotificationPeriod
 }
 
 async function getUserFullEmails(userId) {
@@ -70,9 +84,8 @@ async function getUserFullEmails(userId) {
     return decorateFullEmails(user.email, user.emails, [], [])
   }
 
-  const affiliationsData = await InstitutionsAPIPromises.getUserAffiliations(
-    userId
-  )
+  const affiliationsData =
+    await InstitutionsAPIPromises.getUserAffiliations(userId)
 
   return decorateFullEmails(
     user.email,
@@ -80,6 +93,18 @@ async function getUserFullEmails(userId) {
     affiliationsData,
     user.samlIdentifiers || []
   )
+}
+
+async function getUserConfirmedEmails(userId) {
+  const user = await UserGetter.promises.getUser(userId, {
+    emails: 1,
+  })
+
+  if (!user) {
+    throw new Error('User not Found')
+  }
+
+  return user.emails.filter(email => !!email.confirmedAt)
 }
 
 async function getSsoUsersAtInstitution(institutionId, projection) {
@@ -111,6 +136,14 @@ const UserGetter = {
     }
   },
 
+  getUserFeatures(userId, callback) {
+    this.getUser(userId, { features: 1 }, (error, user) => {
+      if (error) return callback(error)
+      if (!user) return callback(new Errors.NotFoundError('user not found'))
+      callback(null, user.features)
+    })
+  },
+
   getUserEmail(userId, callback) {
     this.getUser(userId, { email: 1 }, (error, user) =>
       callback(error, user && user.email)
@@ -118,6 +151,8 @@ const UserGetter = {
   },
 
   getUserFullEmails: callbackify(getUserFullEmails),
+
+  getUserConfirmedEmails: callbackify(getUserConfirmedEmails),
 
   getUserByMainEmail(email, projection, callback) {
     email = email.trim()
@@ -260,7 +295,8 @@ const decorateFullEmails = (
       }
       const pastReconfirmDate = _pastReconfirmDate(lastDayToReconfirm)
       const inReconfirmNotificationPeriod = _emailInReconfirmNotificationPeriod(
-        cachedLastDayToReconfirm
+        cachedLastDayToReconfirm,
+        lastDayToReconfirm
       )
       emailData.affiliation = {
         institution,
@@ -297,16 +333,6 @@ const decorateFullEmails = (
 
   return emailsData
 }
-;[
-  'getUser',
-  'getUserEmail',
-  'getUserByMainEmail',
-  'getUserByAnyEmail',
-  'getUsers',
-  'ensureUniqueEmailAddress',
-].map(method =>
-  metrics.timeAsyncMethod(UserGetter, method, 'mongo.UserGetter', logger)
-)
 
 UserGetter.promises = promisifyAll(UserGetter, {
   without: ['getSsoUsersAtInstitution', 'getUserFullEmails'],

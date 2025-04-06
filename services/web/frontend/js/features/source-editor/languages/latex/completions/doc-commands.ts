@@ -1,7 +1,8 @@
-import { customSnippetCompletion } from './apply'
+import { applySnippet, extendOverUnpairedClosingBrace } from './apply'
 import { Completion, CompletionContext } from '@codemirror/autocomplete'
 import { documentCommands } from '../document-commands'
 import { Command } from '../../../utils/tree-operations/commands'
+import { syntaxTree } from '@codemirror/language'
 
 const commandNameFromLabel = (label: string): string | undefined =>
   label.match(/^\\\w+/)?.[0]
@@ -16,19 +17,22 @@ export function customCommandCompletions(
       .filter(Boolean)
   )
 
-  const output = []
+  const output: Completion[] = []
 
   const items = countCommandUsage(context)
 
   for (const item of items.values()) {
-    if (!existingCommands.has(commandNameFromLabel(item.label))) {
-      output.push(
-        customSnippetCompletion(item.snippet, {
-          type: 'cmd',
-          label: item.label,
-          boost: item.count - 10,
-        })
-      )
+    if (
+      !existingCommands.has(commandNameFromLabel(item.label)) &&
+      !item.ignoreInAutoComplete
+    ) {
+      output.push({
+        type: 'cmd',
+        label: item.label,
+        boost: Math.max(0, item.count - 10),
+        apply: applySnippet(item.snippet),
+        extend: extendOverUnpairedClosingBrace,
+      })
     }
   }
 
@@ -36,28 +40,38 @@ export function customCommandCompletions(
 }
 
 const countCommandUsage = (context: CompletionContext) => {
-  const { doc } = context.state
-
-  const excludeLineNumber = doc.lineAt(context.pos).number
+  const tree = syntaxTree(context.state)
+  const currentNode = tree.resolveInner(context.pos, -1)
 
   const result = new Map<
     string,
-    { label: string; snippet: string; count: number }
+    {
+      label: string
+      snippet: string
+      count: number
+      ignoreInAutoComplete?: boolean
+    }
   >()
 
   const commandListProjection = context.state.field(documentCommands)
+
   if (!commandListProjection.items) {
     return result
   }
 
   for (const command of commandListProjection.items) {
-    if (command.line === excludeLineNumber) {
+    if (command.from === currentNode.from) {
       continue
     }
     const label = buildLabel(command)
     const snippet = buildSnippet(command)
 
-    const item = result.get(label) || { label, snippet, count: 0 }
+    const item = result.get(label) || {
+      label,
+      snippet,
+      count: 0,
+      ignoreInAutoComplete: command.ignoreInAutocomplete,
+    }
     item.count++
     result.set(label, item)
   }
@@ -68,15 +82,15 @@ const countCommandUsage = (context: CompletionContext) => {
 const buildLabel = (command: Command): string => {
   return [
     `${command.title}`,
-    '[]'.repeat(command.optionalArgCount),
-    '{}'.repeat(command.requiredArgCount),
+    '[]'.repeat(command.optionalArgCount ?? 0),
+    '{}'.repeat(command.requiredArgCount ?? 0),
   ].join('')
 }
 
 const buildSnippet = (command: Command): string => {
   return [
     `${command.title}`,
-    '[#{}]'.repeat(command.optionalArgCount),
-    '{#{}}'.repeat(command.requiredArgCount),
+    '[#{}]'.repeat(command.optionalArgCount ?? 0),
+    '{#{}}'.repeat(command.requiredArgCount ?? 0),
   ].join('')
 }

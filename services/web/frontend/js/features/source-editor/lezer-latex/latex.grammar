@@ -25,10 +25,6 @@
     VerbatimContent
 }
 
-@external tokens mathDelimiterTokenizer from "./tokens.mjs" {
-    MathDelimiter
-}
-
 // external tokenizer to read control sequence names including @ signs
 // (which are often used in TeX definitions).
 @external tokens csnameTokenizer from "./tokens.mjs" {
@@ -58,11 +54,13 @@
     DocumentClassCtrlSeq,
     UsePackageCtrlSeq,
     HrefCtrlSeq,
+    UrlCtrlSeq,
     VerbCtrlSeq,
     LstInlineCtrlSeq,
     IncludeGraphicsCtrlSeq,
     CaptionCtrlSeq,
     DefCtrlSeq,
+    LetCtrlSeq,
     LeftCtrlSeq,
     RightCtrlSeq,
     NewCommandCtrlSeq,
@@ -81,10 +79,36 @@
     InputCtrlSeq,
     IncludeCtrlSeq,
     ItemCtrlSeq,
+    NewTheoremCtrlSeq,
+    TheoremStyleCtrlSeq,
     CenteringCtrlSeq,
     BibliographyCtrlSeq,
     BibliographyStyleCtrlSeq,
-    AuthorCtrlSeq
+    AuthorCtrlSeq,
+    AffilCtrlSeq,
+    AffiliationCtrlSeq,
+    DateCtrlSeq,
+    MaketitleCtrlSeq,
+    TextColorCtrlSeq,
+    ColorBoxCtrlSeq,
+    HLineCtrlSeq,
+    TopRuleCtrlSeq,
+    MidRuleCtrlSeq,
+    BottomRuleCtrlSeq,
+    MultiColumnCtrlSeq,
+    ParBoxCtrlSeq,
+    TextBoldCtrlSeq,
+    TextItalicCtrlSeq,
+    TextSmallCapsCtrlSeq,
+    TextTeletypeCtrlSeq,
+    TextMediumCtrlSeq,
+    TextSansSerifCtrlSeq,
+    TextSuperscriptCtrlSeq,
+    TextSubscriptCtrlSeq,
+    TextStrikeOutCtrlSeq,
+    EmphasisCtrlSeq,
+    UnderlineCtrlSeq,
+    SetLengthCtrlSeq
 }
 
 @external specialize {EnvName} specializeEnvName from "./tokens.mjs" {
@@ -95,14 +119,16 @@
     VerbatimEnvName,
     TikzPictureEnvName,
     FigureEnvName,
-    ListEnvName
+    ListEnvName,
+    TableEnvName
 }
 
 @external specialize {CtrlSym} specializeCtrlSym from "./tokens.mjs" {
     OpenParenCtrlSym,
     CloseParenCtrlSym,
     OpenBracketCtrlSym,
-    CloseBracketCtrlSym
+    CloseBracketCtrlSym,
+    LineBreakCtrlSym
 }
 
 @tokens {
@@ -113,7 +139,7 @@
     Whitespace { $[ \t]+ }
     NewLine { "\n" }
     BlankLine { "\n" "\n"+ }
-    Normal { ![\\{}\[\]$&#^_% \t\n] ![\\{}\[\]$&#^_%\t\n]* }  // allow ~ space in normal text
+    Normal { ![\\{}\[\]$&~#^_% \t\n] ![\\{}\[\]$&~#^_%\t\n]* }  // everything is normal text, except these characters
     @precedence { CtrlSeq, CtrlSym, BlankLine, NewLine, Whitespace, Normal }
 
     OpenBrace[closedBy=CloseBrace] { "{" }
@@ -127,11 +153,12 @@
 
     Number { $[0-9]+ ("." $[0-9]*)? }
     MathSpecialChar { $[^_=<>()\-+/*]+ }  // FIXME not all of these are special
-    MathChar { ![0-9^_=<>()\-+/*\\{}\[\]\n$%&]+ }
+    MathChar { ![0-9^_=<>()\-+/*\\{}\[\]$%&~ \t\n]+ }
 
     @precedence { Number, MathSpecialChar, MathChar }
 
     Ampersand { "&" }
+    Tilde { "~" }
 
     EnvName {  $[a-zA-Z]+ $[*]? }
 }
@@ -176,6 +203,10 @@ PackageArgument {
     !argument ShortTextArgument
 }
 
+TabularArgument {
+    !argument OpenBrace TabularContent CloseBrace
+}
+
 UrlArgument {
     OpenBrace LiteralArgContent CloseBrace
 }
@@ -189,35 +220,35 @@ BareFilePathArgument {
 }
 
 DefinitionArgument {
-    !argument NewLine? Whitespace* OpenBrace DefinitionFragment CloseBrace
-}
-
-argument[@isGroup="$Argument"] {
-      TextArgument
-    | SectioningArgument
-    | LabelArgument
-    | RefArgument
-    | BibKeyArgument
-    | PackageArgument
-    | UrlArgument
-    | FilePathArgument
-    | BareFilePathArgument
-    | DefinitionArgument
+    !argument NewLine? Whitespace* OpenBrace DefinitionFragment? CloseBrace
 }
 
 MacroParameter {
     "#" ("1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
 }
 
+OptionalMacroParameter {
+    OpenBracket MacroParameter CloseBracket
+}
+
 // The autocompletion code in services/web/frontend/js/features/source-editor/utils/tree-operations/commands.ts
 // depends on following the `KnownCommand { Command { CommandCtrlSeq [args] } }`
 // structure
-KnownCommand {
+KnownCommand<ArgumentType> {
     Title {
         TitleCtrlSeq optionalWhitespace? OptionalArgument? TextArgument
     } |
     Author {
         AuthorCtrlSeq optionalWhitespace? OptionalArgument? optionalWhitespace? TextArgument
+    } |
+    Affil {
+        AffilCtrlSeq optionalWhitespace? OptionalArgument? optionalWhitespace? TextArgument
+    } |
+    Affiliation {
+        AffiliationCtrlSeq optionalWhitespace? OptionalArgument? optionalWhitespace? TextArgument
+    } |
+    Date {
+        DateCtrlSeq optionalWhitespace? OptionalArgument? optionalWhitespace? ShortTextArgument
     } |
     DocumentClass {
         DocumentClassCtrlSeq optionalWhitespace? OptionalArgument?
@@ -235,8 +266,23 @@ KnownCommand {
         UsePackageCtrlSeq optionalWhitespace? OptionalArgument?
         PackageArgument
     } |
+    TextColorCommand {
+        TextColorCtrlSeq optionalWhitespace? ShortTextArgument optionalWhitespace? ArgumentType
+    } |
+    ColorBoxCommand {
+        ColorBoxCtrlSeq optionalWhitespace? ShortTextArgument optionalWhitespace? ArgumentType
+    } |
     HrefCommand {
         HrefCtrlSeq optionalWhitespace? UrlArgument ShortTextArgument
+    } |
+    NewTheoremCommand {
+        NewTheoremCtrlSeq "*"? optionalWhitespace? ShortTextArgument ((OptionalArgument? TextArgument) | (TextArgument OptionalArgument))
+    } |
+    TheoremStyleCommand {
+        TheoremStyleCtrlSeq optionalWhitespace? ShortTextArgument
+    } |
+    UrlCommand {
+        UrlCtrlSeq optionalWhitespace? UrlArgument
     } |
     VerbCommand {
         VerbCtrlSeq VerbContent
@@ -249,7 +295,7 @@ KnownCommand {
         IncludeGraphicsArgument { FilePathArgument }
     } |
     Caption {
-        CaptionCtrlSeq optionalWhitespace? OptionalArgument? TextArgument
+        CaptionCtrlSeq "*"? optionalWhitespace? OptionalArgument? TextArgument
     } |
     Label {
         LabelCtrlSeq optionalWhitespace? LabelArgument
@@ -262,16 +308,13 @@ KnownCommand {
     } |
     Def {
         // allow more general Csname argument to \def commands, since other symbols such as '@' are often used in definitions
-        DefCtrlSeq (Csname | CtrlSym) MacroParameter* optionalWhitespace? DefinitionArgument
+        DefCtrlSeq optionalWhitespace? (Csname | CtrlSym) optionalWhitespace? (MacroParameter | OptionalMacroParameter)* optionalWhitespace? DefinitionArgument
+    } |
+    Let {
+        LetCtrlSeq Csname optionalWhitespace? "="? optionalWhitespace? Csname
     } |
     Hbox {
         HboxCtrlSeq optionalWhitespace? TextArgument
-    } |
-    Left {
-        LeftCtrlSeq optionalWhitespace?
-    } |
-    Right {
-        RightCtrlSeq optionalWhitespace?
     } |
     NewCommand {
         NewCommandCtrlSeq optionalWhitespace?
@@ -309,20 +352,88 @@ KnownCommand {
         CenteringCtrlSeq
     } |
     Item {
-        ItemCtrlSeq optionalWhitespace?
+        ItemCtrlSeq OptionalArgument? optionalWhitespace?
+    } |
+    Maketitle {
+        MaketitleCtrlSeq optionalWhitespace?
+    } |
+    HorizontalLine {
+        (HLineCtrlSeq | TopRuleCtrlSeq | MidRuleCtrlSeq | BottomRuleCtrlSeq) optionalWhitespace?
+    } |
+    MultiColumn {
+        MultiColumnCtrlSeq
+            optionalWhitespace? SpanArgument { ShortTextArgument }
+            optionalWhitespace? ColumnArgument { ShortTextArgument }
+            optionalWhitespace? TabularArgument
+    } |
+    MathTextCommand {
+        MathTextCtrlSeq optionalWhitespace? "*"? TextArgument
+    } |
+    ParBoxCommand {
+        ParBoxCtrlSeq
+            (optionalWhitespace? OptionalArgument)*
+            ShortTextArgument
+            optionalWhitespace? TextArgument
+    } |
+    TextBoldCommand {
+        TextBoldCtrlSeq TextArgument
+    } |
+    TextItalicCommand {
+        TextItalicCtrlSeq TextArgument
+    } |
+    TextSmallCapsCommand {
+        TextSmallCapsCtrlSeq TextArgument
+    } |
+    TextTeletypeCommand {
+        TextTeletypeCtrlSeq TextArgument
+    } |
+    TextMediumCommand {
+        TextMediumCtrlSeq TextArgument
+    } |
+    TextSansSerifCommand {
+        TextSansSerifCtrlSeq TextArgument
+    } |
+    TextSuperscriptCommand {
+        TextSuperscriptCtrlSeq TextArgument
+    } |
+    TextSubscriptCommand {
+        TextSubscriptCtrlSeq TextArgument
+    } |
+    StrikeOutCommand {
+        TextStrikeOutCtrlSeq ArgumentType
+    } |
+    EmphasisCommand {
+        EmphasisCtrlSeq ArgumentType
+    } |
+    UnderlineCommand {
+        UnderlineCtrlSeq ArgumentType
+    } |
+    SetLengthCommand {
+        SetLengthCtrlSeq optionalWhitespace? ShortTextArgument optionalWhitespace? ShortTextArgument
     }
 }
 
 UnknownCommand {
       (CtrlSeq !argument Whitespace (OptionalArgument | TextArgument)+)
-    | ((CtrlSeq | MathTextCtrlSeq) (OptionalArgument | TextArgument)+)
+    | (CtrlSeq (OptionalArgument | TextArgument)+)
     | CtrlSeq Whitespace?
     | CtrlSym
 }
 
 Command {
-      KnownCommand
+      KnownCommand<TextArgument>
     | UnknownCommand
+    | KnownCtrlSym
+    // Not technically allowed in normal mode, but not worth failing the parse over
+    | LeftCtrlSeq
+    | RightCtrlSeq
+
+}
+
+KnownCtrlSym {
+    LineBreak {
+        LineBreakCtrlSym OptionalArgument?
+    }
 }
 
 textBase {
@@ -334,6 +445,7 @@ textBase {
     | Normal
     | Whitespace
     | Ampersand
+    | Tilde
     )
 }
 
@@ -368,14 +480,14 @@ SectioningCommand<Command> {
 documentSection<Command, Next> {
     SectioningCommand<Command> Content<(sectionText | !section Next)*>
 }
-Book[@isGroup="$SectioningCommand"] { documentSection<BookCtrlSeq, Part | Chapter | Section | SubSection | SubSubSection | Paragraph | SubParagraph> }
-Part[@isGroup="$SectioningCommand"] { documentSection<PartCtrlSeq, Chapter | Section | SubSection | SubSubSection | Paragraph | SubParagraph> }
-Chapter[@isGroup="$SectioningCommand"] { documentSection<ChapterCtrlSeq, Section | SubSection | SubSubSection | Paragraph | SubParagraph> }
-Section[@isGroup="$SectioningCommand"] { documentSection<SectionCtrlSeq, SubSection | SubSubSection | Paragraph | SubParagraph> }
-SubSection[@isGroup="$SectioningCommand"] { documentSection<SubSectionCtrlSeq, SubSubSection | Paragraph | SubParagraph> }
-SubSubSection[@isGroup="$SectioningCommand"] { documentSection<SubSubSectionCtrlSeq, Paragraph | SubParagraph> }
-Paragraph[@isGroup="$SectioningCommand"] { documentSection<ParagraphCtrlSeq, SubParagraph> }
-SubParagraph[@isGroup="$SectioningCommand"] { SectioningCommand<SubParagraphCtrlSeq> Content<sectionText*> }
+Book[@isGroup="$Section"] { documentSection<BookCtrlSeq, Part | Chapter | Section | SubSection | SubSubSection | Paragraph | SubParagraph> }
+Part[@isGroup="$Section"] { documentSection<PartCtrlSeq, Chapter | Section | SubSection | SubSubSection | Paragraph | SubParagraph> }
+Chapter[@isGroup="$Section"] { documentSection<ChapterCtrlSeq, Section | SubSection | SubSubSection | Paragraph | SubParagraph> }
+Section[@isGroup="$Section"] { documentSection<SectionCtrlSeq, SubSection | SubSubSection | Paragraph | SubParagraph> }
+SubSection[@isGroup="$Section"] { documentSection<SubSectionCtrlSeq, SubSubSection | Paragraph | SubParagraph> }
+SubSubSection[@isGroup="$Section"] { documentSection<SubSubSectionCtrlSeq, Paragraph | SubParagraph> }
+Paragraph[@isGroup="$Section"] { documentSection<ParagraphCtrlSeq, SubParagraph> }
+SubParagraph[@isGroup="$Section"] { SectioningCommand<SubParagraphCtrlSeq> Content<sectionText*> }
 
 sectioningCommand {
     Book | Part | Chapter | Section | SubSection | SubSubSection | Paragraph | SubParagraph
@@ -419,6 +531,7 @@ ShortOptionalArg {
     ( textBase
     | NonEmptyGroup<ShortOptionalArg>
     | "#" // macro character
+    | "_" // underscore is used in some parameter names
     )*
 }
 
@@ -431,17 +544,17 @@ TikzPictureContent {  /// same as Text but with added allowed characters
 }
 
 DefinitionFragment {
-    ( KnownCommand
-    | CtrlSeq optionalWhitespace?
-    | CtrlSym
+    ( DefinitionFragmentCommand
     | Begin
     | End
-    | NonEmptyGroup<DefinitionFragment>
+    | Group<DefinitionFragment>
     | Dollar
     | OpenParenCtrlSym
     | CloseParenCtrlSym
     | OpenBracketCtrlSym
     | CloseBracketCtrlSym
+    | LeftCtrlSeq
+    | RightCtrlSeq
     | BlankLine
     | NewLine
     | Normal
@@ -450,6 +563,7 @@ DefinitionFragment {
     | CloseBracket
     | "#" // macro character
     | Ampersand // for tables
+    | Tilde // unbreakable space
     | "_" | "^" // other math chars
     | SectioningCommand<
         BookCtrlSeq |
@@ -461,8 +575,17 @@ DefinitionFragment {
         ParagraphCtrlSeq |
         SubParagraphCtrlSeq
       >
-    )*
+    )+
+}
 
+DefinitionFragmentArgument {
+    OpenBrace DefinitionFragment? CloseBrace
+}
+
+DefinitionFragmentCommand {
+      KnownCommand<TextArgument>
+    | DefinitionFragmentUnknownCommand { genericUnknownCommandWithOptionalArguments<DefinitionFragmentArgument, OptionalArgument> }
+    | KnownCtrlSym
 }
 
 KnownEnvironment {
@@ -474,6 +597,7 @@ KnownEnvironment {
     | TikzPictureEnvironment
     | FigureEnvironment
     | ListEnvironment
+    | TableEnvironment
     )
 }
 
@@ -496,12 +620,20 @@ DocumentEnvironment[@isGroup="$Environment"] {
     (TrailingWhitespaceOnly | TrailingContent)?
 }
 
+TabularContent {
+    (textWithGroupsEnvironmentsAndBlankLines)*
+}
+
 TabularEnvironment[@isGroup="$Environment"] {
     BeginEnv<TabularEnvName>
-    Content<TabularContent {
-        (textWithGroupsEnvironmentsAndBlankLines)+
-    }>
+    Content<TabularContent>
     EndEnv<TabularEnvName>
+}
+
+TableEnvironment[@isGroup="$Environment"] {
+    BeginEnv<TableEnvName>
+    Content<Text>
+    EndEnv<TableEnvName>
 }
 
 EquationEnvironment[@isGroup="$Environment"] {
@@ -545,9 +677,9 @@ EnvNameGroup<name> {
 }
 
 Environment[@isGroup="$Environment"] {
-    BeginEnv<EnvName>
+    BeginEnv<EnvName?>
     Content<Text>
-    EndEnv<EnvName>
+    EndEnv<EnvName?>
 }
 
 Group<GroupContent> {
@@ -560,7 +692,7 @@ NonEmptyGroup<GroupContent> {
 
 ///  MATH MODE
 
-DollarMath {
+DollarMath[@isGroup="$MathContainer"] {
   Dollar (InlineMath | DisplayMath) Dollar
 }
 
@@ -582,7 +714,7 @@ CloseParenMath[openedBy=OpenParenMath] {
 }
 
 // alternative syntax \( math \) for inline math, it is the same as $ math $
-ParenMath {
+ParenMath[@isGroup="$MathContainer"] {
     OpenParenMath
     Math?
     CloseParenMath
@@ -597,7 +729,7 @@ CloseBracketMath[openedBy=OpenBracketMath] {
 }
 
 // alternative syntax \[ math \] for display math, it is the same as $$ math $$
-BracketMath {
+BracketMath[@isGroup="$MathContainer"] {
     OpenBracketMath
     Math?
     CloseBracketMath
@@ -607,35 +739,51 @@ BracketMath {
 // because display math can contain blank lines while inline math cannot.
 
 Math {
-    ( MathTextCommand
-    | MathCommand
-    | MathCtrlSym
-    | MathGroup
+    ( MathCommand
+    | Group<Math>
     | MathDelimitedGroup
     | MathSpecialChar
     | Number
     | NewLine
+    | Whitespace
     | KnownEnvironment
     | Environment
     | MathChar
     | OpenBracket
     | CloseBracket
     | Ampersand
-    | Label {
-        LabelCtrlSeq optionalWhitespace? OptionalArgument? LabelArgument
-    }
+    | Tilde
     )+
 }
 
-MathTextCommand {
-    (MathTextCtrlSeq | HboxCtrlSeq) optionalWhitespace? "*"? TextArgument
+
+MathCommand {
+    KnownCommand<MathArgument>
+  | MathUnknownCommand { genericUnknownCommand<MathArgument> }
+  | KnownCtrlSym
 }
 
-MathCommand { CtrlSeq }
+@external tokens argumentListTokenizer from "./tokens.mjs" {
+    hasMoreArguments,
+    endOfArguments
+}
 
-MathCtrlSym { CtrlSym }
+@external tokens argumentListWithOptionalTokenizer from "./tokens.mjs" {
+    hasMoreArgumentsOrOptionals,
+    endOfArgumentsAndOptionals
+}
 
-MathGroup {
+genericUnknownCommand<ArgumentType> {
+    CtrlSeq (hasMoreArguments optionalWhitespace? ArgumentType)* endOfArguments
+  | CtrlSym
+}
+
+genericUnknownCommandWithOptionalArguments<ArgumentType, OptionalArgumentType> {
+    CtrlSeq (hasMoreArgumentsOrOptionals optionalWhitespace? (ArgumentType | OptionalArgumentType))* endOfArgumentsAndOptionals
+  | CtrlSym
+}
+
+MathArgument {
     OpenBrace Math? CloseBrace
 }
 
@@ -650,6 +798,25 @@ MathOpening {
 
 MathClosing {
     RightCtrlSeq optionalWhitespace? MathDelimiter
+}
+
+MathDelimiter {
+    // Allowed delimiters, from the LaTeX manual, table 3.10
+    "/" | "|" | "(" | ")" | "[" | "]" |
+   "\\{" | "\\}" | "\\|" |
+    "\\lfloor" | "\\rfloor" |
+    "\\lceil" | "\\rceil" |
+    "\\langle" | "\\rangle" |
+    "\\backslash" | "\\uparrow" |
+    "\\Uparrow" | "\\Downarrow" |
+    "\\updownarrow" | "\\Updownarrow" |
+    "\\downarrow" | "\\lvert" |
+    "\\lVert" | "\\rVert" |
+    "\\rvert" | "\\vert" | "\\Vert" |
+    "\\lbrace" | "\\rbrace" |
+    "\\lbrack" | "\\rbrack" |
+    // Also allow the empty match
+    "."
 }
 
 // NOTE: precedence works differently for rules and token, in the rule

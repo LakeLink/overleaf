@@ -1,29 +1,33 @@
+import classNames from 'classnames'
 import type { ReactNode } from 'react'
-import { DiffOperation } from '../../services/types/diff-operation'
+import type { FileOperation } from '../../services/types/file-operation'
+import OLTag from '@/features/ui/components/ol/ol-tag'
 
 type FileTreeItemProps = {
   name: string
-  operation?: DiffOperation
+  operation?: FileOperation
   icons: ReactNode
 }
 
-export default function FileTreeItem({
+export default function HistoryFileTreeItem({
   name,
   operation,
   icons,
 }: FileTreeItemProps) {
   return (
-    <div className="entity" role="presentation">
-      <div className="entity-name entity-name-react" role="presentation">
-        {icons}
-        <button className="item-name-button">
-          <span>{name}</span>
-          {operation ? (
-            <span className="history-file-entity-operation-badge">
-              {operation}
-            </span>
-          ) : null}
-        </button>
+    <div className="history-file-tree-item" role="presentation">
+      {icons}
+      <div className="history-file-tree-item-name-wrapper">
+        <div
+          className={classNames('history-file-tree-item-name', {
+            strikethrough: operation === 'removed',
+          })}
+        >
+          {name}
+        </div>
+        {operation && (
+          <OLTag className="history-file-tree-item-badge">{operation}</OLTag>
+        )}
       </div>
     </div>
   )

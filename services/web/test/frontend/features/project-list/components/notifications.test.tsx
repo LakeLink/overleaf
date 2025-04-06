@@ -1,26 +1,37 @@
 import { expect } from 'chai'
-import sinon from 'sinon'
+import sinon, { SinonStub } from 'sinon'
 import {
   fireEvent,
   render,
   screen,
   waitForElementToBeRemoved,
+  within,
 } from '@testing-library/react'
 import fetchMock from 'fetch-mock'
 import { merge, cloneDeep } from 'lodash'
 import {
   professionalUserData,
   unconfirmedUserData,
+  untrustedUserData,
+  unconfirmedCommonsUserData,
+  confirmedUserData,
 } from '../../settings/fixtures/test-user-email-data'
 import {
-  notification,
+  notificationDropboxDuplicateProjectNames,
+  notificationGroupInviteDefault,
+  notificationIPMatchedAffiliation,
+  notificationProjectInvite,
+  notificationTPDSFileLimit,
   notificationsInstitution,
 } from '../fixtures/notifications-data'
 import Common from '../../../../../frontend/js/features/project-list/components/notifications/groups/common'
 import Institution from '../../../../../frontend/js/features/project-list/components/notifications/groups/institution'
-import ConfirmEmail from '../../../../../frontend/js/features/project-list/components/notifications/groups/confirm-email'
+import ConfirmEmail, {
+  getEmailDeletionDate,
+} from '../../../../../frontend/js/features/project-list/components/notifications/groups/confirm-email'
 import ReconfirmationInfo from '../../../../../frontend/js/features/project-list/components/notifications/groups/affiliation/reconfirmation-info'
 import { ProjectListProvider } from '../../../../../frontend/js/features/project-list/context/project-list-context'
+import { SplitTestProvider } from '@/shared/context/split-test-context'
 import {
   Notification,
   Institution as InstitutionType,
@@ -28,14 +39,25 @@ import {
 import { DeepPartial } from '../../../../../types/utils'
 import { Project } from '../../../../../types/project/dashboard/api'
 import GroupsAndEnterpriseBanner from '../../../../../frontend/js/features/project-list/components/notifications/groups-and-enterprise-banner'
-import localStorage from '../../../../../frontend/js/infrastructure/local-storage'
+import GroupSsoSetupSuccess from '../../../../../frontend/js/features/project-list/components/notifications/groups/group-sso-setup-success'
+import localStorage from '@/infrastructure/local-storage'
 import * as useLocationModule from '../../../../../frontend/js/shared/hooks/use-location'
+import {
+  commonsSubscription,
+  freeSubscription,
+  groupSubscription,
+  individualSubscription,
+} from '../fixtures/user-subscriptions'
+import getMeta from '@/utils/meta'
+import * as bootstrapUtils from '@/features/utils/bootstrap-5'
 
 const renderWithinProjectListProvider = (Component: React.ComponentType) => {
   render(<Component />, {
     wrapper: ({ children }) => (
       <ProjectListProvider>
-        <ul className="list-unstyled">{children}</ul>
+        <SplitTestProvider>
+          <ul className="list-unstyled">{children}</ul>
+        </SplitTestProvider>
       </ProjectListProvider>
     ),
   })
@@ -47,8 +69,17 @@ describe('<UserNotifications />', function () {
     appName: 'Overleaf',
   }
 
+  let isBootstrap5Stub: SinonStub
+
+  before(function () {
+    isBootstrap5Stub = sinon.stub(bootstrapUtils, 'isBootstrap5').returns(true)
+  })
+
+  after(function () {
+    isBootstrap5Stub.restore()
+  })
+
   beforeEach(function () {
-    window.metaAttributesCache = window.metaAttributesCache || new Map()
     fetchMock.reset()
 
     // at least one project is required to show some notifications
@@ -63,18 +94,16 @@ describe('<UserNotifications />', function () {
   })
 
   afterEach(function () {
-    window.metaAttributesCache = new Map()
     fetchMock.reset()
   })
 
   describe('<Common>', function () {
     beforeEach(function () {
-      window.metaAttributesCache = window.metaAttributesCache || new Map()
-      window.metaAttributesCache.set('ol-ExposedSettings', exposedSettings)
+      window.metaAttributesCache.set('ol-user', {})
+      Object.assign(getMeta('ol-ExposedSettings'), exposedSettings)
     })
 
     afterEach(function () {
-      window.metaAttributesCache = new Map()
       fetchMock.reset()
     })
 
@@ -84,7 +113,7 @@ describe('<UserNotifications />', function () {
         templateKey: 'notification_project_invite',
       }
       window.metaAttributesCache.set('ol-notifications', [
-        merge(cloneDeep(notification), reconfiguredNotification),
+        merge(cloneDeep(notificationProjectInvite), reconfiguredNotification),
       ])
 
       renderWithinProjectListProvider(Common)
@@ -95,7 +124,7 @@ describe('<UserNotifications />', function () {
         200
       )
       const acceptMock = fetchMock.post(
-        `project/${notification.messageOpts.projectId}/invite/token/${notification.messageOpts.token}/accept`,
+        `project/${notificationProjectInvite.messageOpts.projectId}/invite/token/${notificationProjectInvite.messageOpts.token}/accept`,
         200
       )
 
@@ -120,9 +149,9 @@ describe('<UserNotifications />', function () {
       screen.getByText(/joined/i)
       expect(screen.queryByRole('button', { name: /join project/i })).to.be.null
 
-      const openProject = screen.getByRole('link', { name: /open project/i })
+      const openProject = screen.getByRole('button', { name: /open project/i })
       expect(openProject.getAttribute('href')).to.equal(
-        `/project/${notification.messageOpts.projectId}`
+        `/project/${notificationProjectInvite.messageOpts.projectId}`
       )
 
       const closeBtn = screen.getByRole('button', { name: /close/i })
@@ -138,13 +167,13 @@ describe('<UserNotifications />', function () {
         templateKey: 'notification_project_invite',
       }
       window.metaAttributesCache.set('ol-notifications', [
-        merge(cloneDeep(notification), reconfiguredNotification),
+        merge(cloneDeep(notificationProjectInvite), reconfiguredNotification),
       ])
 
       renderWithinProjectListProvider(Common)
       await fetchMock.flush(true)
       fetchMock.post(
-        `project/${notification.messageOpts.projectId}/invite/token/${notification.messageOpts.token}/accept`,
+        `project/${notificationProjectInvite.messageOpts.projectId}/invite/token/${notificationProjectInvite.messageOpts.token}/accept`,
         500
       )
 
@@ -163,7 +192,7 @@ describe('<UserNotifications />', function () {
 
       expect(fetchMock.called()).to.be.true
       screen.getByRole('button', { name: /join project/i })
-      expect(screen.queryByRole('link', { name: /open project/i })).to.be.null
+      expect(screen.queryByRole('button', { name: /open project/i })).to.be.null
     })
 
     it('shows WFH2020', async function () {
@@ -172,7 +201,7 @@ describe('<UserNotifications />', function () {
         templateKey: 'wfh_2020_upgrade_offer',
       }
       window.metaAttributesCache.set('ol-notifications', [
-        merge(cloneDeep(notification), reconfiguredNotification),
+        merge(reconfiguredNotification),
       ])
 
       renderWithinProjectListProvider(Common)
@@ -182,7 +211,7 @@ describe('<UserNotifications />', function () {
       screen.getByRole('alert')
       screen.getByText(/your free WFH2020 upgrade came to an end on/i)
 
-      const viewLink = screen.getByRole('link', { name: /view/i })
+      const viewLink = screen.getByRole('button', { name: /view/i })
       expect(viewLink.getAttribute('href')).to.equal(
         'https://www.overleaf.com/events/wfh2020'
       )
@@ -200,7 +229,10 @@ describe('<UserNotifications />', function () {
         messageOpts: { ssoEnabled: true },
       }
       window.metaAttributesCache.set('ol-notifications', [
-        merge(cloneDeep(notification), reconfiguredNotification),
+        merge(
+          cloneDeep(notificationIPMatchedAffiliation),
+          reconfiguredNotification
+        ),
       ])
 
       renderWithinProjectListProvider(Common)
@@ -218,9 +250,9 @@ describe('<UserNotifications />', function () {
       expect(findOutMore.getAttribute('href')).to.equal(
         'https://www.overleaf.com/learn/how-to/Institutional_Login'
       )
-      const linkAccount = screen.getByRole('link', { name: /link account/i })
+      const linkAccount = screen.getByRole('button', { name: /link account/i })
       expect(linkAccount.getAttribute('href')).to.equal(
-        `${exposedSettings.samlInitPath}?university_id=${notification.messageOpts.institutionId}&auto=/project`
+        `${exposedSettings.samlInitPath}?university_id=${notificationIPMatchedAffiliation.messageOpts.institutionId}&auto=/project`
       )
       const closeBtn = screen.getByRole('button', { name: /close/i })
       fireEvent.click(closeBtn)
@@ -236,7 +268,10 @@ describe('<UserNotifications />', function () {
         messageOpts: { ssoEnabled: false },
       }
       window.metaAttributesCache.set('ol-notifications', [
-        merge(cloneDeep(notification), reconfiguredNotification),
+        merge(
+          cloneDeep(notificationIPMatchedAffiliation),
+          reconfiguredNotification
+        ),
       ])
 
       renderWithinProjectListProvider(Common)
@@ -250,7 +285,7 @@ describe('<UserNotifications />', function () {
         /add an institutional email address to claim your features/i
       )
 
-      const addAffiliation = screen.getByRole('link', {
+      const addAffiliation = screen.getByRole('button', {
         name: /add affiliation/i,
       })
       expect(addAffiliation.getAttribute('href')).to.equal(`/user/settings`)
@@ -266,7 +301,7 @@ describe('<UserNotifications />', function () {
         templateKey: 'notification_tpds_file_limit',
       }
       window.metaAttributesCache.set('ol-notifications', [
-        merge(cloneDeep(notification), reconfiguredNotification),
+        merge(cloneDeep(notificationTPDSFileLimit), reconfiguredNotification),
       ])
 
       renderWithinProjectListProvider(Common)
@@ -274,14 +309,12 @@ describe('<UserNotifications />', function () {
 
       screen.getByRole('alert')
       screen.getByText(/file limit/i)
-      screen.getByText(
-        /please decrease the size of your project to prevent further errors/i
-      )
+      screen.getByText(/You can't add more files to the project or sync it/i)
 
-      const accountSettings = screen.getByRole('link', {
-        name: /account settings/i,
+      const accountSettings = screen.getByRole('button', {
+        name: /Open project/i,
       })
-      expect(accountSettings.getAttribute('href')).to.equal('/user/settings')
+      expect(accountSettings.getAttribute('href')).to.equal('/project/123')
       const closeBtn = screen.getByRole('button', { name: /close/i })
       fireEvent.click(closeBtn)
 
@@ -294,7 +327,10 @@ describe('<UserNotifications />', function () {
         templateKey: 'notification_dropbox_duplicate_project_names',
       }
       window.metaAttributesCache.set('ol-notifications', [
-        merge(cloneDeep(notification), reconfiguredNotification),
+        merge(
+          cloneDeep(notificationDropboxDuplicateProjectNames),
+          reconfiguredNotification
+        ),
       ])
 
       renderWithinProjectListProvider(Common)
@@ -323,7 +359,10 @@ describe('<UserNotifications />', function () {
           'notification_dropbox_unlinked_due_to_lapsed_reconfirmation',
       }
       window.metaAttributesCache.set('ol-notifications', [
-        merge(cloneDeep(notification), reconfiguredNotification),
+        merge(
+          cloneDeep(notificationDropboxDuplicateProjectNames),
+          reconfiguredNotification
+        ),
       ])
 
       renderWithinProjectListProvider(Common)
@@ -353,7 +392,7 @@ describe('<UserNotifications />', function () {
         html: 'unspecific message',
       }
       window.metaAttributesCache.set('ol-notifications', [
-        merge(cloneDeep(notification), reconfiguredNotification),
+        reconfiguredNotification,
       ])
 
       renderWithinProjectListProvider(Common)
@@ -369,12 +408,74 @@ describe('<UserNotifications />', function () {
       expect(fetchMock.called()).to.be.true
       expect(screen.queryByRole('alert')).to.be.null
     })
+
+    describe('<GroupInvitation />', function () {
+      describe('without existing personal subscription', function () {
+        it('shows group invitation notification for user without personal subscription', async function () {
+          const notificationGroupInvite: DeepPartial<Notification> = {
+            _id: 1,
+            templateKey: 'notification_group_invitation',
+          }
+
+          window.metaAttributesCache.set('ol-notifications', [
+            merge(
+              cloneDeep(notificationGroupInviteDefault),
+              notificationGroupInvite
+            ),
+          ])
+
+          renderWithinProjectListProvider(Common)
+          await fetchMock.flush(true)
+          fetchMock.delete(`/notifications/${notificationGroupInvite._id}`, 200)
+          screen.getByRole('alert')
+          screen.getByText('inviter@overleaf.com')
+          screen.getByText(
+            /has invited you to join a group subscription on Overleaf/
+          )
+          screen.getByRole('button', { name: 'Join now' })
+          screen.getByRole('button', { name: /close/i })
+        })
+
+        describe('with existing personal subscription', function () {
+          it('shows group invitation notification for user with personal subscription', async function () {
+            const notificationGroupInvite: DeepPartial<Notification> = {
+              _id: 1,
+              templateKey: 'notification_group_invitation',
+            }
+
+            window.metaAttributesCache.set('ol-notifications', [
+              merge(
+                cloneDeep(notificationGroupInviteDefault),
+                notificationGroupInvite
+              ),
+            ])
+            window.metaAttributesCache.set(
+              'ol-hasIndividualRecurlySubscription',
+              true
+            )
+
+            renderWithinProjectListProvider(Common)
+            await fetchMock.flush(true)
+            fetchMock.delete(
+              `/notifications/${notificationGroupInvite._id}`,
+              200
+            )
+
+            screen.getByRole('alert')
+            screen.getByText(
+              /inviter@overleaf.com has invited you to join a group Overleaf subscription. If you join this group, you may not need your individual subscription. Would you like to cancel it/
+            )
+            screen.getByRole('button', { name: 'Not now' })
+            screen.getByRole('button', { name: 'Cancel my subscription' })
+          })
+        })
+      })
+    })
   })
 
   describe('<Institution>', function () {
     beforeEach(function () {
-      window.metaAttributesCache = window.metaAttributesCache || new Map()
-      window.metaAttributesCache.set('ol-ExposedSettings', exposedSettings)
+      Object.assign(getMeta('ol-ExposedSettings'), exposedSettings)
       fetchMock.reset()
     })
 
@@ -400,7 +501,7 @@ describe('<UserNotifications />', function () {
         '/learn/how-to/Institutional_Login'
       )
 
-      const action = screen.getByRole('link', { name: /link account/i })
+      const action = screen.getByRole('button', { name: /link account/i })
       expect(action.getAttribute('href')).to.equal(
         `${exposedSettings.samlInitPath}?university_id=${notificationsInstitution.institutionId}&auto=/project&email=${notificationsInstitution.email}`
       )
@@ -465,7 +566,7 @@ describe('<UserNotifications />', function () {
       screen.getByRole('alert')
       screen.getByText(/which is already registered with/i)
 
-      const action = screen.getByRole('link', { name: /find out more/i })
+      const action = screen.getByRole('button', { name: /find out more/i })
       expect(action.getAttribute('href')).to.equal(
         '/learn/how-to/Institutional_Login'
       )
@@ -502,31 +603,142 @@ describe('<UserNotifications />', function () {
     })
   })
 
+  describe('getEmailDeletionDate', function () {
+    beforeEach(async function () {
+      window.metaAttributesCache.set('ol-userEmails', [
+        confirmedUserData,
+        untrustedUserData,
+      ])
+      this.clock = sinon.useFakeTimers(new Date('2025-07-01').getTime())
+    })
+
+    afterEach(function () {
+      this.clock.restore()
+    })
+
+    it('returns deletion date for unconfirmed email within notification window', function () {
+      window.metaAttributesCache.set('ol-userEmails', [unconfirmedUserData])
+      const signUpDate = '2022-01-01' // Before cutoff '2025-03-03'
+      const emailDeletionDate = getEmailDeletionDate(
+        unconfirmedUserData,
+        signUpDate
+      )
+      expect(emailDeletionDate).to.equal(
+        new Date('2025-09-03').toLocaleDateString()
+      )
+    })
+
+    it('returns false for primary email', function () {
+      const primaryUserData = { ...unconfirmedUserData, default: true }
+      const signUpDate = '2022-01-01'
+      const emailDeletionDate = getEmailDeletionDate(
+        primaryUserData,
+        signUpDate
+      )
+      expect(emailDeletionDate).to.be.false
+    })
+
+    it('returns false for already confirmed email', function () {
+      window.metaAttributesCache.set('ol-userEmails', [confirmedUserData])
+      const signUpDate = '2022-01-01'
+      const emailDeletionDate = getEmailDeletionDate(
+        confirmedUserData,
+        signUpDate
+      )
+      expect(emailDeletionDate).to.be.false
+    })
+  })
+
   describe('<ConfirmEmail/>', function () {
     beforeEach(async function () {
-      window.metaAttributesCache.set('ol-ExposedSettings', {
+      Object.assign(getMeta('ol-ExposedSettings'), {
         emailConfirmationDisabled: false,
       })
-      window.metaAttributesCache.set('ol-userEmails', [unconfirmedUserData])
-
-      renderWithinProjectListProvider(ConfirmEmail)
-      await fetchMock.flush(true)
+      window.metaAttributesCache.set('ol-userEmails', [
+        confirmedUserData,
+        untrustedUserData,
+      ])
+      window.metaAttributesCache.set(
+        'ol-usersBestSubscription',
+        freeSubscription
+      )
+      window.metaAttributesCache.set('ol-user', {
+        signUpDate: new Date('2024-01-01').toISOString(),
+      })
+      this.clock = sinon.useFakeTimers(new Date('2025-07-01').getTime())
     })
 
     afterEach(function () {
       fetchMock.reset()
+      this.clock.restore()
     })
 
-    it('sends successfully', async function () {
+    function testUnconfirmedNotification(
+      userEmails: any[],
+      isPrimary: boolean
+    ) {
+      it(`sends unconfirmed notification email successfully when email is ${isPrimary ? 'primary' : 'secondary'}`, async function () {
+        window.metaAttributesCache.set('ol-userEmails', userEmails)
+
+        renderWithinProjectListProvider(ConfirmEmail)
+        await fetchMock.flush(true)
+        fetchMock.post('/user/emails/resend_confirmation', 200)
+
+        const email = userEmails[0].email
+        const notificationBody = screen.getByTestId('pro-notification-body')
+
+        if (isPrimary) {
+          expect(notificationBody.textContent).to.contain(
+            `Please confirm your primary email address ${email} by clicking on the link in the confirmation email.`
+          )
+        } else {
+          expect(notificationBody.textContent).to.contain(
+            `Please confirm your secondary email address ${email} by clicking on the link in the confirmation email.`
+          )
+        }
+
+        const resendButton = screen.getByRole('button', { name: /resend/i })
+        fireEvent.click(resendButton)
+
+        await waitForElementToBeRemoved(() =>
+          screen.getByRole('button', { name: /resend/i })
+        )
+
+        expect(fetchMock.called()).to.be.true
+        expect(screen.queryByRole('alert')).to.be.null
+      })
+    }
+
+    testUnconfirmedNotification(
+      [{ email: 'baz@overleaf.com', default: true }],
+      true
+    )
+
+    testUnconfirmedNotification(
+      [{ email: 'baz@overleaf.com', default: false }],
+      false
+    )
+
+    it('sends untrusted notification email successfully', async function () {
+      window.metaAttributesCache.set('ol-userEmails', [untrustedUserData])
+
+      renderWithinProjectListProvider(ConfirmEmail)
+      await fetchMock.flush(true)
       fetchMock.post('/user/emails/resend_confirmation', 200)
+
+      const email = untrustedUserData.email
+      const notificationBody = screen.getByTestId(
+        'not-trusted-notification-body'
+      )
+      expect(notificationBody.textContent).to.contain(
+        `To enhance the security of your Overleaf account, please reconfirm your secondary email address ${email}.`
+      )
 
       const resendButton = screen.getByRole('button', { name: /resend/i })
       fireEvent.click(resendButton)
 
-      expect(screen.queryByRole('button', { name: /resend/i })).to.be.null
-
       await waitForElementToBeRemoved(() =>
-        screen.getByText(/resending confirmation email/i)
+        screen.getByRole('button', { name: /resend/i })
       )
 
       expect(fetchMock.called()).to.be.true
@@ -534,36 +746,93 @@ describe('<UserNotifications />', function () {
     })
 
     it('fails to send', async function () {
+      window.metaAttributesCache.set('ol-userEmails', [unconfirmedUserData])
+
+      renderWithinProjectListProvider(ConfirmEmail)
+      await fetchMock.flush(true)
       fetchMock.post('/user/emails/resend_confirmation', 500)
 
-      const resendButton = screen.getByRole('button', { name: /resend/i })
+      const resendButtons = screen.getAllByRole('button', { name: /resend/i })
+      const resendButton = resendButtons[0]
       fireEvent.click(resendButton)
+      const notificationBody = screen.getByTestId('pro-notification-body')
 
       await waitForElementToBeRemoved(() =>
-        screen.getByText(/resending confirmation email/i)
+        within(notificationBody).getByTestId(
+          'loading-resending-confirmation-email'
+        )
       )
 
       expect(fetchMock.called()).to.be.true
       screen.getByText(/something went wrong/i)
     })
+
+    for (const subscription of [freeSubscription, individualSubscription]) {
+      it(`shows commons notification for commons account when user is on ${subscription.type} plan`, async function () {
+        window.metaAttributesCache.set('ol-userEmails', [
+          unconfirmedCommonsUserData,
+        ])
+        window.metaAttributesCache.set('ol-usersBestSubscription', subscription)
+
+        renderWithinProjectListProvider(ConfirmEmail)
+        await fetchMock.flush(true)
+
+        const alert = screen.getByRole('alert')
+        const email = unconfirmedCommonsUserData.email
+        const notificationBody = within(alert).getByTestId('notification-body')
+        expect(notificationBody.textContent).to.contain(
+          'You are one step away from accessing Overleaf Professional features'
+        )
+        expect(notificationBody.textContent).to.contain(
+          `Overleaf has an Overleaf subscription. Click the confirmation link sent to ${email} to upgrade to Overleaf Professional`
+        )
+      })
+    }
+    for (const subscription of [groupSubscription, commonsSubscription]) {
+      it(`shows default notification for commons account when user is on ${subscription.type} plan`, async function () {
+        window.metaAttributesCache.set('ol-userEmails', [
+          unconfirmedCommonsUserData,
+        ])
+        window.metaAttributesCache.set('ol-usersBestSubscription', subscription)
+
+        renderWithinProjectListProvider(ConfirmEmail)
+        await fetchMock.flush(true)
+
+        const alert = screen.getByRole('alert')
+        const email = unconfirmedCommonsUserData.email
+        const notificationBody = within(alert).getByTestId(
+          'pro-notification-body'
+        )
+        const isPrimary = unconfirmedCommonsUserData.default
+        if (isPrimary) {
+          expect(notificationBody.textContent).to.contain(
+            `Please confirm your primary email address ${email} by clicking on the link in the confirmation email`
+          )
+        } else {
+          expect(notificationBody.textContent).to.contain(
+            `Please confirm your secondary email address ${email} by clicking on the link in the confirmation email`
+          )
+        }
+      })
+    }
   })
 
   describe('<Affiliation/>', function () {
     let assignStub: sinon.SinonStub
 
     beforeEach(function () {
-      window.metaAttributesCache = window.metaAttributesCache || new Map()
-      window.metaAttributesCache.set('ol-ExposedSettings', exposedSettings)
+      Object.assign(getMeta('ol-ExposedSettings'), exposedSettings)
       assignStub = sinon.stub()
       this.locationStub = sinon.stub(useLocationModule, 'useLocation').returns({
         assign: assignStub,
+        replace: sinon.stub(),
         reload: sinon.stub(),
+        setHash: sinon.stub(),
       })
       fetchMock.reset()
     })
 
     afterEach(function () {
-      window.metaAttributesCache = new Map()
       this.locationStub.restore()
       fetchMock.reset()
     })
@@ -596,7 +865,7 @@ describe('<UserNotifications />', function () {
         screen.getByRole('button', { name: /confirm affiliation/i })
       )
 
-      await waitForElementToBeRemoved(() => screen.getByText(/sending/i))
+      await waitForElementToBeRemoved(() => screen.getByText(/loading/i))
       screen.getByText(/check your email inbox to confirm/i)
       expect(screen.queryByRole('button', { name: /confirm affiliation/i })).to
         .be.null
@@ -606,7 +875,7 @@ describe('<UserNotifications />', function () {
       fireEvent.click(
         screen.getByRole('button', { name: /resend confirmation email/i })
       )
-      await waitForElementToBeRemoved(() => screen.getByText(/sending/i))
+      await waitForElementToBeRemoved(() => screen.getByText('Sending…'))
       expect(sendReconfirmationMock.calls()).to.have.lengthOf(2)
     })
 
@@ -646,7 +915,6 @@ describe('<UserNotifications />', function () {
 
   describe('<GroupsAndEnterpriseBanner />', function () {
     beforeEach(function () {
-      window.metaAttributesCache = window.metaAttributesCache || new Map()
       localStorage.clear()
       fetchMock.reset()
 
@@ -662,13 +930,12 @@ describe('<UserNotifications />', function () {
 
       window.metaAttributesCache.set(
         'ol-groupsAndEnterpriseBannerVariant',
-        'did-you-know'
+        'on-premise'
       )
     })
 
     afterEach(function () {
       fetchMock.reset()
-      window.metaAttributesCache = window.metaAttributesCache || new Map()
     })
 
     it('does not show the banner for users that are in group or are affiliated', async function () {
@@ -677,7 +944,7 @@ describe('<UserNotifications />', function () {
       renderWithinProjectListProvider(GroupsAndEnterpriseBanner)
       await fetchMock.flush(true)
 
-      expect(screen.queryByRole('link', { name: 'Contact Sales' })).to.be.null
+      expect(screen.queryByRole('button', { name: 'Contact Sales' })).to.be.null
     })
 
     it('shows the banner for users that have dismissed the previous banners', async function () {
@@ -687,7 +954,7 @@ describe('<UserNotifications />', function () {
       renderWithinProjectListProvider(GroupsAndEnterpriseBanner)
       await fetchMock.flush(true)
 
-      expect(screen.queryByRole('link', { name: 'Contact Sales' })).to.not.be
+      expect(screen.queryByRole('button', { name: 'Contact Sales' })).to.not.be
         .null
     })
 
@@ -703,7 +970,7 @@ describe('<UserNotifications />', function () {
       renderWithinProjectListProvider(GroupsAndEnterpriseBanner)
       await fetchMock.flush(true)
 
-      expect(screen.queryByRole('link', { name: 'Contact Sales' })).to.not.be
+      expect(screen.queryByRole('button', { name: 'Contact Sales' })).to.not.be
         .null
     })
 
@@ -719,7 +986,7 @@ describe('<UserNotifications />', function () {
       renderWithinProjectListProvider(GroupsAndEnterpriseBanner)
       await fetchMock.flush(true)
 
-      expect(screen.queryByRole('link', { name: 'Contact Sales' })).to.be.null
+      expect(screen.queryByRole('button', { name: 'Contact Sales' })).to.be.null
     })
 
     describe('users that are not in group and are not affiliated', function () {
@@ -742,28 +1009,10 @@ describe('<UserNotifications />', function () {
 
       afterEach(function () {
         fetchMock.reset()
-        window.metaAttributesCache = window.metaAttributesCache || new Map()
       })
 
       after(function () {
         localStorage.clear()
-      })
-
-      it('will show the correct text for the `did-you-know` variant', async function () {
-        window.metaAttributesCache.set(
-          'ol-groupsAndEnterpriseBannerVariant',
-          'did-you-know'
-        )
-
-        renderWithinProjectListProvider(GroupsAndEnterpriseBanner)
-        await fetchMock.flush(true)
-
-        screen.getByText(
-          'Did you know that Overleaf offers group and organization-wide subscription options? Request information or a quote.'
-        )
-        const link = screen.getByRole('link', { name: 'Contact Sales' })
-
-        expect(link.getAttribute('href')).to.equal(`/for/contact-sales-1`)
       })
 
       it('will show the correct text for the `on-premise` variant', async function () {
@@ -778,26 +1027,9 @@ describe('<UserNotifications />', function () {
         screen.getByText(
           'Overleaf On-Premises: Does your company want to keep its data within its firewall? Overleaf offers Server Pro, an on-premises solution for companies. Get in touch to learn more.'
         )
-        const link = screen.getByRole('link', { name: 'Contact Sales' })
+        const link = screen.getByRole('button', { name: 'Contact Sales' })
 
         expect(link.getAttribute('href')).to.equal(`/for/contact-sales-2`)
-      })
-
-      it('will show the correct text for the `people` variant', async function () {
-        window.metaAttributesCache.set(
-          'ol-groupsAndEnterpriseBannerVariant',
-          'people'
-        )
-
-        renderWithinProjectListProvider(GroupsAndEnterpriseBanner)
-        await fetchMock.flush(true)
-
-        screen.getByText(
-          'Other people at your company may already be using Overleaf. Save money with Overleaf group and company-wide subscriptions. Request more information.'
-        )
-        const link = screen.getByRole('link', { name: 'Contact Sales' })
-
-        expect(link.getAttribute('href')).to.equal(`/for/contact-sales-3`)
       })
 
       it('will show the correct text for the `FOMO` variant', async function () {
@@ -812,10 +1044,26 @@ describe('<UserNotifications />', function () {
         screen.getByText(
           'Why do Fortune 500 companies and top research institutions trust Overleaf to streamline their collaboration? Get in touch to learn more.'
         )
-        const link = screen.getByRole('link', { name: 'Contact Sales' })
+        const link = screen.getByRole('button', { name: 'Contact Sales' })
 
         expect(link.getAttribute('href')).to.equal(`/for/contact-sales-4`)
       })
+    })
+  })
+
+  describe('GroupSsoSetupSuccess', function () {
+    it('shows group SSO linked notification', function () {
+      window.metaAttributesCache.set('ol-groupSsoSetupSuccess', true)
+      renderWithinProjectListProvider(GroupSsoSetupSuccess)
+      screen.getByText('Success! Single sign-on is all set up for you.')
+    })
+
+    it('does not show group SSO linked notification', function () {
+      window.metaAttributesCache.set('ol-groupSsoSetupSuccess', false)
+      renderWithinProjectListProvider(GroupSsoSetupSuccess)
+      expect(
+        screen.queryByText('Success! Single sign-on is all set up for you.')
+      ).to.be.null
     })
   })
 })

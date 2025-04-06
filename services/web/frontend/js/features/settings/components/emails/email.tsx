@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import { UserEmailData } from '../../../../../../types/user-email'
-import ResendConfirmationEmailButton from './resend-confirmation-email-button'
 import { ssoAvailableForInstitution } from '../../utils/sso'
+import OLBadge from '@/features/ui/components/ol/ol-badge'
+import ResendConfirmationCodeModal from '@/features/settings/components/emails/resend-confirmation-code-modal'
 
 type EmailProps = {
   userEmailData: UserEmailData
@@ -26,25 +27,22 @@ function Email({ userEmailData }: EmailProps) {
       {userEmailData.email}
       {!userEmailData.confirmedAt && (
         <div className="small">
-          <strong>
-            {t('unconfirmed')}.
-            {!ssoAvailable && <span> {t('please_check_your_inbox')}.</span>}
-          </strong>
+          <strong>{t('unconfirmed')}.</strong>
           <br />
           {!ssoAvailable && (
-            <ResendConfirmationEmailButton email={userEmailData.email} />
+            <ResendConfirmationCodeModal email={userEmailData.email} />
           )}
         </div>
       )}
       {hasBadges && (
-        <div className="small">
+        <div>
           {isPrimary && (
             <>
-              <span className="label label-info">Primary</span>{' '}
+              <OLBadge bg="info">Primary</OLBadge>{' '}
             </>
           )}
           {isProfessional && (
-            <span className="label label-primary">{t('professional')}</span>
+            <OLBadge bg="primary">{t('professional')}</OLBadge>
           )}
         </div>
       )}

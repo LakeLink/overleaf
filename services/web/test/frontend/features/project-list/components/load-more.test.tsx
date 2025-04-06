@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/dom'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { expect } from 'chai'
 import fetchMock from 'fetch-mock'
 import LoadMore from '../../../../../frontend/js/features/project-list/components/load-more'
@@ -72,9 +72,9 @@ describe('<LoadMore />', function () {
     })
 
     await waitFor(() => {
-      screen.getByLabelText(
-        `Show ${currentList.length - 20 - 20} more projects`
-      )
+      screen.getByRole('button', {
+        name: `Show ${currentList.length - 20 - 20} more projects`,
+      })
       screen.getByText(`Showing 40 out of ${currentList.length} projects.`)
     })
   })

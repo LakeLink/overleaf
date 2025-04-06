@@ -1,7 +1,7 @@
 const sinon = require('sinon')
 const SandboxedModule = require('sandboxed-module')
 const path = require('path')
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 const modulePath = path.join(
   __dirname,
   '../../../../app/src/Features/DocumentUpdater/DocumentUpdaterHandler'
@@ -28,6 +28,7 @@ describe('DocumentUpdaterHandler', function () {
           url: 'http://project_history.example.com',
         },
       },
+      moduleImportSequence: [],
     }
     this.source = 'dropbox'
 
@@ -44,14 +45,25 @@ describe('DocumentUpdaterHandler', function () {
         '../../models/Project': {
           Project: (this.Project = {}),
         },
+        '../Project/ProjectGetter': (this.ProjectGetter = {
+          getProjectWithoutLock: sinon.stub(),
+        }),
         '../../Features/Project/ProjectLocator': {},
         '@overleaf/metrics': {
           Timer: class {
             done() {}
           },
         },
+        '../FileStore/FileStoreHandler': {
+          _buildUrl: sinon.stub().callsFake((projectId, fileId) => {
+            return `http://filestore/project/${projectId}/file/${fileId}`
+          }),
+        },
       },
     })
+    this.ProjectGetter.getProjectWithoutLock
+      .withArgs(this.project_id)
+      .yields(null, this.project)
   })
 
   describe('flushProjectToMongo', function () {
@@ -448,6 +460,40 @@ describe('DocumentUpdaterHandler', function () {
     })
   })
 
+  describe('getComment', function () {
+    describe('successfully', function () {
+      beforeEach(function () {
+        this.comment = {
+          id: 'mock-comment-id-1',
+        }
+        this.body = this.comment
+        this.request.callsArgWith(1, null, { statusCode: 200 }, this.body)
+        this.handler.getComment(
+          this.project_id,
+          this.doc_id,
+          this.comment.id,
+          this.callback
+        )
+      })
+
+      it('should get the comment from the document updater', function () {
+        const url = `${this.settings.apis.documentupdater.url}/project/${this.project_id}/doc/${this.doc_id}/comment/${this.comment.id}`
+        this.request
+          .calledWith({
+            url,
+            method: 'GET',
+            json: true,
+            timeout: 30 * 1000,
+          })
+          .should.equal(true)
+      })
+
+      it('should call the callback with the comment', function () {
+        this.callback.calledWithExactly(null, this.comment).should.equal(true)
+      })
+    })
+  })
+
   describe('getDocument', function () {
     describe('successfully', function () {
       beforeEach(function () {
@@ -766,6 +812,7 @@ describe('DocumentUpdaterHandler', function () {
           this.project_id,
           this.doc_id,
           this.thread_id,
+          this.user_id,
           this.callback
         )
       })
@@ -796,6 +843,7 @@ describe('DocumentUpdaterHandler', function () {
           this.project_id,
           this.doc_id,
           this.thread_id,
+          this.user_id,
           this.callback
         )
       })
@@ -814,6 +862,175 @@ describe('DocumentUpdaterHandler', function () {
           this.project_id,
           this.doc_id,
           this.thread_id,
+          this.user_id,
+          this.callback
+        )
+      })
+
+      it('should return the callback with an error', function () {
+        this.callback
+          .calledWith(
+            sinon.match
+              .instanceOf(Error)
+              .and(
+                sinon.match.has(
+                  'message',
+                  'document updater returned a failure status code: 500'
+                )
+              )
+          )
+          .should.equal(true)
+      })
+    })
+  })
+
+  describe('resolveThread', function () {
+    beforeEach(function () {
+      this.thread_id = 'mock-thread-id-1'
+    })
+
+    describe('successfully', function () {
+      beforeEach(function () {
+        this.request.callsArgWith(1, null, { statusCode: 200 }, this.body)
+        this.handler.resolveThread(
+          this.project_id,
+          this.doc_id,
+          this.thread_id,
+          this.user_id,
+          this.callback
+        )
+      })
+
+      it('should resolve the thread in the document updater', function () {
+        this.request
+          .calledWithMatch({
+            url: `${this.settings.apis.documentupdater.url}/project/${this.project_id}/doc/${this.doc_id}/comment/${this.thread_id}/resolve`,
+            method: 'POST',
+          })
+          .should.equal(true)
+      })
+
+      it('should call the callback', function () {
+        this.callback.calledWith(null).should.equal(true)
+      })
+    })
+
+    describe('when the document updater API returns an error', function () {
+      beforeEach(function () {
+        this.request.callsArgWith(
+          1,
+          new Error('something went wrong'),
+          null,
+          null
+        )
+        this.handler.resolveThread(
+          this.project_id,
+          this.doc_id,
+          this.thread_id,
+          this.user_id,
+          this.callback
+        )
+      })
+
+      it('should return an error to the callback', function () {
+        this.callback
+          .calledWith(sinon.match.instanceOf(Error))
+          .should.equal(true)
+      })
+    })
+
+    describe('when the document updater returns a failure error code', function () {
+      beforeEach(function () {
+        this.request.callsArgWith(1, null, { statusCode: 500 }, '')
+        this.handler.resolveThread(
+          this.project_id,
+          this.doc_id,
+          this.thread_id,
+          this.user_id,
+          this.callback
+        )
+      })
+
+      it('should return the callback with an error', function () {
+        this.callback
+          .calledWith(
+            sinon.match
+              .instanceOf(Error)
+              .and(
+                sinon.match.has(
+                  'message',
+                  'document updater returned a failure status code: 500'
+                )
+              )
+          )
+          .should.equal(true)
+      })
+    })
+  })
+
+  describe('reopenThread', function () {
+    beforeEach(function () {
+      this.thread_id = 'mock-thread-id-1'
+    })
+
+    describe('successfully', function () {
+      beforeEach(function () {
+        this.request.callsArgWith(1, null, { statusCode: 200 }, this.body)
+        this.handler.reopenThread(
+          this.project_id,
+          this.doc_id,
+          this.thread_id,
+          this.user_id,
+          this.callback
+        )
+      })
+
+      it('should reopen the thread in the document updater', function () {
+        this.request
+          .calledWithMatch({
+            url: `${this.settings.apis.documentupdater.url}/project/${this.project_id}/doc/${this.doc_id}/comment/${this.thread_id}/reopen`,
+            method: 'POST',
+          })
+          .should.equal(true)
+      })
+
+      it('should call the callback', function () {
+        this.callback.calledWith(null).should.equal(true)
+      })
+    })
+
+    describe('when the document updater API returns an error', function () {
+      beforeEach(function () {
+        this.request.callsArgWith(
+          1,
+          new Error('something went wrong'),
+          null,
+          null
+        )
+        this.handler.reopenThread(
+          this.project_id,
+          this.doc_id,
+          this.thread_id,
+          this.user_id,
+          this.callback
+        )
+      })
+
+      it('should return an error to the callback', function () {
+        this.callback
+          .calledWith(sinon.match.instanceOf(Error))
+          .should.equal(true)
+      })
+    })
+
+    describe('when the document updater returns a failure error code', function () {
+      beforeEach(function () {
+        this.request.callsArgWith(1, null, { statusCode: 500 }, '')
+        this.handler.reopenThread(
+          this.project_id,
+          this.doc_id,
+          this.thread_id,
+          this.user_id,
           this.callback
         )
       })
@@ -945,8 +1162,12 @@ describe('DocumentUpdaterHandler', function () {
               id: this.docId.toString(),
               pathname: '/foo',
               docLines: 'a\nb',
+              historyRangesSupport: false,
               url: undefined,
               hash: undefined,
+              ranges: undefined,
+              metadata: undefined,
+              createdBlob: false,
             },
           ]
 
@@ -957,20 +1178,18 @@ describe('DocumentUpdaterHandler', function () {
             this.changes,
             this.source,
             () => {
-              this.request
-                .calledWith({
-                  url: this.url,
-                  method: 'POST',
-                  json: {
-                    updates,
-                    userId: this.user_id,
-                    version: this.version,
-                    projectHistoryId: this.projectHistoryId,
-                    source: this.source,
-                  },
-                  timeout: 30 * 1000,
-                })
-                .should.equal(true)
+              this.request.should.have.been.calledWith({
+                url: this.url,
+                method: 'POST',
+                json: {
+                  updates,
+                  userId: this.user_id,
+                  version: this.version,
+                  projectHistoryId: this.projectHistoryId,
+                  source: this.source,
+                },
+                timeout: 30 * 1000,
+              })
               done()
             }
           )
@@ -998,7 +1217,11 @@ describe('DocumentUpdaterHandler', function () {
               pathname: '/bar',
               url: 'filestore.example.com/file',
               docLines: undefined,
+              historyRangesSupport: false,
               hash: '12345',
+              ranges: undefined,
+              createdBlob: false,
+              metadata: undefined,
             },
           ]
 
@@ -1009,20 +1232,18 @@ describe('DocumentUpdaterHandler', function () {
             this.changes,
             this.source,
             () => {
-              this.request
-                .calledWith({
-                  url: this.url,
-                  method: 'POST',
-                  json: {
-                    updates,
-                    userId: this.user_id,
-                    version: this.version,
-                    projectHistoryId: this.projectHistoryId,
-                    source: this.source,
-                  },
-                  timeout: 30 * 1000,
-                })
-                .should.equal(true)
+              this.request.should.have.been.calledWith({
+                url: this.url,
+                method: 'POST',
+                json: {
+                  updates,
+                  userId: this.user_id,
+                  version: this.version,
+                  projectHistoryId: this.projectHistoryId,
+                  source: this.source,
+                },
+                timeout: 30 * 1000,
+              })
               done()
             }
           )
@@ -1055,20 +1276,18 @@ describe('DocumentUpdaterHandler', function () {
             this.changes,
             this.source,
             () => {
-              this.request
-                .calledWith({
-                  url: this.url,
-                  method: 'POST',
-                  json: {
-                    updates,
-                    userId: this.user_id,
-                    version: this.version,
-                    projectHistoryId: this.projectHistoryId,
-                    source: this.source,
-                  },
-                  timeout: 30 * 1000,
-                })
-                .should.equal(true)
+              this.request.should.have.been.calledWith({
+                url: this.url,
+                method: 'POST',
+                json: {
+                  updates,
+                  userId: this.user_id,
+                  version: this.version,
+                  projectHistoryId: this.projectHistoryId,
+                  source: this.source,
+                },
+                timeout: 30 * 1000,
+              })
               done()
             }
           )
@@ -1109,8 +1328,12 @@ describe('DocumentUpdaterHandler', function () {
               id: this.docId.toString(),
               pathname: '/foo.doc',
               docLines: 'hello there',
+              historyRangesSupport: false,
               url: undefined,
               hash: undefined,
+              ranges: undefined,
+              metadata: undefined,
+              createdBlob: false,
             },
           ]
 
@@ -1165,6 +1388,588 @@ describe('DocumentUpdaterHandler', function () {
             'did not receive project version in changes'
           )
         })
+      })
+
+      describe('when ranges are present', function () {
+        beforeEach(function () {
+          this.docId = new ObjectId()
+          this.ranges = {
+            changes: [
+              {
+                op: { p: 0, i: 'foo' },
+                metadata: { ts: '2024-01-01T00:00:00.000Z', user_id: 'user-1' },
+              },
+              {
+                op: { p: 7, d: ' baz' },
+                metadata: { ts: '2024-02-01T00:00:00.000Z', user_id: 'user-1' },
+              },
+            ],
+            comments: [
+              {
+                op: { p: 4, c: 'bar', t: 'comment-1' },
+                metadata: { resolved: false },
+              },
+            ],
+          }
+          this.changes = {
+            newDocs: [
+              {
+                path: '/foo',
+                docLines: 'foo\nbar',
+                doc: { _id: this.docId },
+                ranges: this.ranges,
+              },
+            ],
+            newProject: { version: this.version },
+          }
+        })
+
+        it('should forward ranges', function (done) {
+          const updates = [
+            {
+              type: 'add-doc',
+              id: this.docId.toString(),
+              pathname: '/foo',
+              docLines: 'foo\nbar',
+              historyRangesSupport: false,
+              url: undefined,
+              hash: undefined,
+              ranges: this.ranges,
+              metadata: undefined,
+              createdBlob: false,
+            },
+          ]
+
+          this.handler.updateProjectStructure(
+            this.project_id,
+            this.projectHistoryId,
+            this.user_id,
+            this.changes,
+            this.source,
+            () => {
+              this.request.should.have.been.calledWith({
+                url: this.url,
+                method: 'POST',
+                json: {
+                  updates,
+                  userId: this.user_id,
+                  version: this.version,
+                  projectHistoryId: this.projectHistoryId,
+                  source: this.source,
+                },
+                timeout: 30 * 1000,
+              })
+              done()
+            }
+          )
+        })
+
+        it('should include flag when history ranges support is enabled', function (done) {
+          this.ProjectGetter.getProjectWithoutLock
+            .withArgs(this.project_id)
+            .yields(null, {
+              _id: this.project_id,
+              overleaf: { history: { rangesSupportEnabled: true } },
+            })
+
+          const updates = [
+            {
+              type: 'add-doc',
+              id: this.docId.toString(),
+              pathname: '/foo',
+              docLines: 'foo\nbar',
+              historyRangesSupport: true,
+              url: undefined,
+              hash: undefined,
+              ranges: this.ranges,
+              metadata: undefined,
+              createdBlob: false,
+            },
+          ]
+
+          this.handler.updateProjectStructure(
+            this.project_id,
+            this.projectHistoryId,
+            this.user_id,
+            this.changes,
+            this.source,
+            () => {
+              this.request.should.have.been.calledWith({
+                url: this.url,
+                method: 'POST',
+                json: {
+                  updates,
+                  userId: this.user_id,
+                  version: this.version,
+                  projectHistoryId: this.projectHistoryId,
+                  source: this.source,
+                },
+                timeout: 30 * 1000,
+              })
+              done()
+            }
+          )
+        })
+      })
+
+      describe('with filestore disabled', function () {
+        beforeEach(function () {
+          this.settings.disableFilestore = true
+        })
+        it('should add files without URL and with createdBlob', function (done) {
+          this.fileId = new ObjectId()
+          this.changes = {
+            newFiles: [
+              {
+                path: '/bar',
+                url: 'filestore.example.com/file',
+                file: { _id: this.fileId, hash: '12345' },
+              },
+            ],
+            newProject: { version: this.version },
+          }
+
+          const updates = [
+            {
+              type: 'add-file',
+              id: this.fileId.toString(),
+              pathname: '/bar',
+              docLines: undefined,
+              historyRangesSupport: false,
+              url: undefined,
+              hash: '12345',
+              ranges: undefined,
+              createdBlob: true,
+              metadata: undefined,
+            },
+          ]
+
+          this.handler.updateProjectStructure(
+            this.project_id,
+            this.projectHistoryId,
+            this.user_id,
+            this.changes,
+            this.source,
+            () => {
+              this.request.should.have.been.calledWith({
+                url: this.url,
+                method: 'POST',
+                json: {
+                  updates,
+                  userId: this.user_id,
+                  version: this.version,
+                  projectHistoryId: this.projectHistoryId,
+                  source: this.source,
+                },
+                timeout: 30 * 1000,
+              })
+              done()
+            }
+          )
+        })
+        it('should flag files without hash', function (done) {
+          this.fileId = new ObjectId()
+          this.changes = {
+            newFiles: [
+              {
+                path: '/bar',
+                url: 'filestore.example.com/file',
+                file: { _id: this.fileId },
+              },
+            ],
+            newProject: { version: this.version },
+          }
+
+          this.handler.updateProjectStructure(
+            this.project_id,
+            this.projectHistoryId,
+            this.user_id,
+            this.changes,
+            this.source,
+            err => {
+              err.should.match(/found file with missing hash/)
+              this.request.should.not.have.been.called
+              done()
+            }
+          )
+        })
+      })
+    })
+  })
+
+  describe('resyncProjectHistory', function () {
+    it('should add docs', function (done) {
+      const docId1 = new ObjectId()
+      const docId2 = new ObjectId()
+      const docs = [
+        { doc: { _id: docId1 }, path: 'main.tex' },
+        { doc: { _id: docId2 }, path: 'references.bib' },
+      ]
+      const files = []
+      this.request.yields(null, { statusCode: 200 })
+      const projectId = new ObjectId()
+      const projectHistoryId = 99
+      this.handler.resyncProjectHistory(
+        projectId,
+        projectHistoryId,
+        docs,
+        files,
+        {},
+        () => {
+          this.request.should.have.been.calledWith({
+            url: `${this.settings.apis.documentupdater.url}/project/${projectId}/history/resync`,
+            method: 'POST',
+            json: {
+              docs: [
+                { doc: docId1, path: 'main.tex' },
+                { doc: docId2, path: 'references.bib' },
+              ],
+              files: [],
+              projectHistoryId,
+            },
+            timeout: 6 * 60 * 1000,
+          })
+          done()
+        }
+      )
+    })
+    it('should add files', function (done) {
+      const fileId1 = new ObjectId()
+      const fileId2 = new ObjectId()
+      const fileId3 = new ObjectId()
+      const fileCreated2 = new Date()
+      const fileCreated3 = new Date()
+      const otherProjectId = new ObjectId().toString()
+      const files = [
+        { file: { _id: fileId1, hash: '42' }, path: '1.png' },
+        {
+          file: {
+            _id: fileId2,
+            hash: '1337',
+            created: fileCreated2,
+            linkedFileData: {
+              provider: 'references-provider',
+            },
+          },
+          path: '1.bib',
+        },
+        {
+          file: {
+            _id: fileId3,
+            hash: '21',
+            created: fileCreated3,
+            linkedFileData: {
+              provider: 'project_output_file',
+              build_id: '1234-abc',
+              clsiServerId: 'server-1',
+              source_project_id: otherProjectId,
+              source_output_file_path: 'foo/bar.txt',
+            },
+          },
+          path: 'bar.txt',
+        },
+      ]
+      const docs = []
+      this.request.yields(null, { statusCode: 200 })
+      const projectId = new ObjectId()
+      const projectHistoryId = 99
+      this.handler.resyncProjectHistory(
+        projectId,
+        projectHistoryId,
+        docs,
+        files,
+        {},
+        () => {
+          this.request.should.have.been.calledWith({
+            url: `${this.settings.apis.documentupdater.url}/project/${projectId}/history/resync`,
+            method: 'POST',
+            json: {
+              docs: [],
+              files: [
+                {
+                  file: fileId1,
+                  _hash: '42',
+                  path: '1.png',
+                  url: `http://filestore/project/${projectId}/file/${fileId1}`,
+                  createdBlob: false,
+                  metadata: undefined,
+                },
+                {
+                  file: fileId2,
+                  _hash: '1337',
+                  path: '1.bib',
+                  url: `http://filestore/project/${projectId}/file/${fileId2}`,
+                  createdBlob: false,
+                  metadata: {
+                    importedAt: fileCreated2,
+                    provider: 'references-provider',
+                  },
+                },
+                {
+                  file: fileId3,
+                  _hash: '21',
+                  path: 'bar.txt',
+                  url: `http://filestore/project/${projectId}/file/${fileId3}`,
+                  createdBlob: false,
+                  metadata: {
+                    importedAt: fileCreated3,
+                    provider: 'project_output_file',
+                    source_project_id: otherProjectId,
+                    source_output_file_path: 'foo/bar.txt',
+                    // build_id and clsiServerId are omitted
+                  },
+                },
+              ],
+              projectHistoryId,
+            },
+            timeout: 6 * 60 * 1000,
+          })
+          done()
+        }
+      )
+    })
+    describe('with filestore disabled', function () {
+      beforeEach(function () {
+        this.settings.disableFilestore = true
+      })
+      it('should add files without URL', function (done) {
+        const fileId1 = new ObjectId()
+        const fileId2 = new ObjectId()
+        const fileId3 = new ObjectId()
+        const fileCreated2 = new Date()
+        const fileCreated3 = new Date()
+        const otherProjectId = new ObjectId().toString()
+        const files = [
+          { file: { _id: fileId1, hash: '42' }, path: '1.png' },
+          {
+            file: {
+              _id: fileId2,
+              hash: '1337',
+              created: fileCreated2,
+              linkedFileData: {
+                provider: 'references-provider',
+              },
+            },
+            path: '1.bib',
+          },
+          {
+            file: {
+              _id: fileId3,
+              hash: '21',
+              created: fileCreated3,
+              linkedFileData: {
+                provider: 'project_output_file',
+                build_id: '1234-abc',
+                clsiServerId: 'server-1',
+                source_project_id: otherProjectId,
+                source_output_file_path: 'foo/bar.txt',
+              },
+            },
+            path: 'bar.txt',
+          },
+        ]
+        const docs = []
+        this.request.yields(null, { statusCode: 200 })
+        const projectId = new ObjectId()
+        const projectHistoryId = 99
+        this.handler.resyncProjectHistory(
+          projectId,
+          projectHistoryId,
+          docs,
+          files,
+          {},
+          () => {
+            this.request.should.have.been.calledWith({
+              url: `${this.settings.apis.documentupdater.url}/project/${projectId}/history/resync`,
+              method: 'POST',
+              json: {
+                docs: [],
+                files: [
+                  {
+                    file: fileId1,
+                    _hash: '42',
+                    path: '1.png',
+                    url: undefined,
+                    createdBlob: true,
+                    metadata: undefined,
+                  },
+                  {
+                    file: fileId2,
+                    _hash: '1337',
+                    path: '1.bib',
+                    url: undefined,
+                    createdBlob: true,
+                    metadata: {
+                      importedAt: fileCreated2,
+                      provider: 'references-provider',
+                    },
+                  },
+                  {
+                    file: fileId3,
+                    _hash: '21',
+                    path: 'bar.txt',
+                    url: undefined,
+                    createdBlob: true,
+                    metadata: {
+                      importedAt: fileCreated3,
+                      provider: 'project_output_file',
+                      source_project_id: otherProjectId,
+                      source_output_file_path: 'foo/bar.txt',
+                      // build_id and clsiServerId are omitted
+                    },
+                  },
+                ],
+                projectHistoryId,
+              },
+              timeout: 6 * 60 * 1000,
+            })
+            done()
+          }
+        )
+      })
+      it('should flag files with missing hashes', function (done) {
+        const fileId1 = new ObjectId()
+        const fileId2 = new ObjectId()
+        const fileId3 = new ObjectId()
+        const fileCreated2 = new Date()
+        const fileCreated3 = new Date()
+        const otherProjectId = new ObjectId().toString()
+        const files = [
+          { file: { _id: fileId1, hash: '42' }, path: '1.png' },
+          {
+            file: {
+              _id: fileId2,
+              created: fileCreated2,
+              linkedFileData: {
+                provider: 'references-provider',
+              },
+            },
+            path: '1.bib',
+          },
+          {
+            file: {
+              _id: fileId3,
+              hash: '21',
+              created: fileCreated3,
+              linkedFileData: {
+                provider: 'project_output_file',
+                build_id: '1234-abc',
+                clsiServerId: 'server-1',
+                source_project_id: otherProjectId,
+                source_output_file_path: 'foo/bar.txt',
+              },
+            },
+            path: 'bar.txt',
+          },
+        ]
+        const docs = []
+        this.request.yields(null, { statusCode: 200 })
+        const projectId = new ObjectId()
+        const projectHistoryId = 99
+        this.handler.resyncProjectHistory(
+          projectId,
+          projectHistoryId,
+          docs,
+          files,
+          {},
+          err => {
+            err.should.match(/found file with missing hash/)
+            this.request.should.not.have.been.called
+            done()
+          }
+        )
+      })
+    })
+  })
+
+  describe('appendToDocument', function () {
+    describe('successfully', function () {
+      beforeEach(function () {
+        this.body = {
+          rev: 1,
+        }
+        this.request.callsArgWith(1, null, { statusCode: 200 }, this.body)
+        this.handler.appendToDocument(
+          this.project_id,
+          this.doc_id,
+          this.user_id,
+          this.lines,
+          this.source,
+          this.callback
+        )
+      })
+
+      it('should append to the document in the document updater', function () {
+        this.request
+          .calledWith({
+            url: `${this.settings.apis.documentupdater.url}/project/${this.project_id}/doc/${this.doc_id}/append`,
+            json: {
+              lines: this.lines,
+              source: this.source,
+              user_id: this.user_id,
+            },
+            method: 'POST',
+            timeout: 30 * 1000,
+          })
+          .should.equal(true)
+      })
+
+      it('should call the callback with no error', function () {
+        this.callback.calledWith(null).should.equal(true)
+      })
+    })
+
+    describe('when the document updater API returns an error', function () {
+      beforeEach(function () {
+        this.request.callsArgWith(
+          1,
+          new Error('something went wrong'),
+          null,
+          null
+        )
+        this.handler.appendToDocument(
+          this.project_id,
+          this.doc_id,
+          this.user_id,
+          this.lines,
+          this.source,
+          this.callback
+        )
+      })
+
+      it('should return an error to the callback', function () {
+        this.callback
+          .calledWith(sinon.match.instanceOf(Error))
+          .should.equal(true)
+      })
+    })
+
+    describe('when the document updater returns a failure error code', function () {
+      beforeEach(function () {
+        this.request.callsArgWith(1, null, { statusCode: 500 }, '')
+        this.handler.appendToDocument(
+          this.project_id,
+          this.doc_id,
+          this.user_id,
+          this.lines,
+          this.source,
+          this.callback
+        )
+      })
+
+      it('should return the callback with an error', function () {
+        this.callback
+          .calledWith(
+            sinon.match
+              .instanceOf(Error)
+              .and(
+                sinon.match.has(
+                  'message',
+                  'document updater returned a failure status code: 500'
+                )
+              )
+          )
+          .should.equal(true)
       })
     })
   })

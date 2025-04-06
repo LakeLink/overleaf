@@ -1,4 +1,4 @@
-const { ObjectId } = require('mongodb')
+const { ObjectId } = require('mongodb-legacy')
 const SandboxedModule = require('sandboxed-module')
 const assert = require('assert')
 const moment = require('moment')
@@ -49,9 +49,6 @@ describe('UserGetter', function () {
       requires: {
         '../Helpers/Mongo': { normalizeQuery, normalizeMultiQuery },
         '../../infrastructure/mongodb': this.Mongo,
-        '@overleaf/metrics': {
-          timeAsyncMethod: sinon.stub(),
-        },
         '@overleaf/settings': (this.settings = {
           reconfirmNotificationDays: 14,
         }),
@@ -393,8 +390,8 @@ describe('UserGetter', function () {
             .toDate()
           const confirmed2 = moment()
             .subtract(maxConfirmationMonths, 'months')
-            .add(15, 'days')
-            .toDate() // expires in 15 days
+            .add(30, 'days')
+            .toDate() // expires in 30 days and reconfirmNotificationDays is set to 14
           const lastDayToReconfirm2 = moment(confirmed2)
             .add(maxConfirmationMonths, 'months')
             .toDate()
@@ -948,6 +945,50 @@ describe('UserGetter', function () {
         )
       })
 
+      it('should flag to show notification if v2 shows as reconfirmation upcoming but v1 does not', function (done) {
+        const email = 'abc123@test.com'
+        const { maxConfirmationMonths } = institutionNonSSO
+
+        const datePastReconfirmation = moment()
+          .subtract(maxConfirmationMonths, 'months')
+          .add(3, 'day')
+          .toDate()
+
+        const dateNotPastReconfirmation = moment().add(1, 'month').toDate()
+
+        const affiliationsData = [
+          {
+            email,
+            licence: 'free',
+            institution: institutionNonSSO,
+            last_day_to_reconfirm: dateNotPastReconfirmation,
+          },
+        ]
+        const user = {
+          _id: '12390i',
+          email,
+          emails: [
+            {
+              email,
+              confirmedAt: datePastReconfirmation,
+              default: true,
+            },
+          ],
+        }
+        this.getUserAffiliations.resolves(affiliationsData)
+        this.UserGetter.promises.getUser = sinon.stub().resolves(user)
+        this.UserGetter.getUserFullEmails(
+          this.fakeUser._id,
+          (error, fullEmails) => {
+            expect(error).to.not.exist
+            expect(
+              fullEmails[0].affiliation.inReconfirmNotificationPeriod
+            ).to.equal(true)
+            done()
+          }
+        )
+      })
+
       describe('cachedLastDayToReconfirm', function () {
         const email = 'abc123@test.com'
         const confirmedAt = new Date('2019-07-11T18:25:01.639Z')
@@ -1008,6 +1049,45 @@ describe('UserGetter', function () {
           )
         })
       })
+    })
+  })
+
+  describe('getUserConfirmedEmails', function () {
+    beforeEach(function () {
+      this.fakeUser = {
+        emails: [
+          {
+            email: 'email1@foo.bar',
+            reversedHostname: 'rab.oof',
+            confirmedAt: new Date(),
+          },
+          { email: 'email2@foo.bar', reversedHostname: 'rab.oof' },
+          {
+            email: 'email3@foo.bar',
+            reversedHostname: 'rab.oof',
+            confirmedAt: new Date(),
+          },
+        ],
+      }
+      this.UserGetter.promises.getUser = sinon.stub().resolves(this.fakeUser)
+    })
+
+    it('should get user', async function () {
+      const projection = { emails: 1 }
+      await this.UserGetter.promises.getUserConfirmedEmails(this.fakeUser._id)
+
+      this.UserGetter.promises.getUser
+        .calledWith(this.fakeUser._id, projection)
+        .should.equal(true)
+    })
+
+    it('should return only confirmed emails', async function () {
+      const confirmedEmails =
+        await this.UserGetter.promises.getUserConfirmedEmails(this.fakeUser._id)
+
+      expect(confirmedEmails.length).to.equal(2)
+      expect(confirmedEmails[0].email).to.equal('email1@foo.bar')
+      expect(confirmedEmails[1].email).to.equal('email3@foo.bar')
     })
   })
 

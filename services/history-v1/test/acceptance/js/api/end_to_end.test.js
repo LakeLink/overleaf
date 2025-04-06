@@ -4,7 +4,7 @@ const BPromise = require('bluebird')
 const { expect } = require('chai')
 const HTTPStatus = require('http-status')
 const fetch = require('node-fetch')
-const fs = BPromise.promisifyAll(require('fs'))
+const fs = BPromise.promisifyAll(require('node:fs'))
 
 const cleanup = require('../storage/support/cleanup')
 const fixtures = require('../storage/support/fixtures')
@@ -161,7 +161,7 @@ describe('overleaf ot', function () {
             .then(() => projectId)
         })
 
-        .tap(projectId => {
+        .then(projectId => {
           // Fetch empty file blob
           return client.apis.Project.getProjectBlob({
             project_id: projectId,
@@ -212,7 +212,12 @@ describe('overleaf ot', function () {
         // edit the main file
         .then(projectId => {
           const change = new Change(
-            [Operation.editFile('main.tex', TextOperation.fromJSON(['hello']))],
+            [
+              Operation.editFile(
+                'main.tex',
+                TextOperation.fromJSON({ textOperation: ['hello'] })
+              ),
+            ],
             new Date()
           )
           return basicAuthClient.apis.ProjectImport.importChanges1({
@@ -263,7 +268,7 @@ describe('overleaf ot', function () {
             [
               Operation.editFile(
                 'main.tex',
-                TextOperation.fromJSON([1, -4, 'i world'])
+                TextOperation.fromJSON({ textOperation: [1, -4, 'i world'] })
               ),
             ],
             new Date()

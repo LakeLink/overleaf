@@ -1,20 +1,41 @@
 import classNames from 'classnames'
+import React from 'react'
+import { bsVersion } from '@/features/utils/bootstrap-5'
+import unfilledIconTypes from '../../../fonts/material-symbols/unfilled-symbols.mjs'
 
-type IconOwnProps = {
-  type: string
+export type AvailableUnfilledIcon = (typeof unfilledIconTypes)[number]
+
+type BaseIconProps = React.ComponentProps<'i'> & {
   accessibilityLabel?: string
+  modifier?: string
+  size?: '2x'
 }
 
-type IconProps = IconOwnProps &
-  Omit<React.ComponentProps<'i'>, keyof IconOwnProps>
+type FilledIconProps = BaseIconProps & {
+  type: string
+  unfilled?: false
+}
+
+type UnfilledIconProps = BaseIconProps & {
+  type: AvailableUnfilledIcon
+  unfilled: true
+}
+
+type IconProps = FilledIconProps | UnfilledIconProps
 
 function MaterialIcon({
   type,
   className,
   accessibilityLabel,
+  modifier,
+  size,
+  unfilled,
   ...rest
 }: IconProps) {
-  const iconClassName = classNames('material-symbols-rounded', className)
+  const iconClassName = classNames('material-symbols', className, modifier, {
+    [`size-${size}`]: size,
+    unfilled,
+  })
 
   return (
     <>
@@ -22,7 +43,9 @@ function MaterialIcon({
         {type}
       </span>
       {accessibilityLabel && (
-        <span className="sr-only">{accessibilityLabel}</span>
+        <span className={bsVersion({ bs5: 'visually-hidden', bs3: 'sr-only' })}>
+          {accessibilityLabel}
+        </span>
       )}
     </>
   )

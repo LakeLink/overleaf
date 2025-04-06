@@ -1,5 +1,6 @@
 const mongoose = require('../infrastructure/Mongoose')
 const { Schema } = mongoose
+const { ObjectId } = Schema
 
 const MIN_NAME_LENGTH = 3
 const MAX_NAME_LENGTH = 200
@@ -92,6 +93,11 @@ const VersionSchema = new Schema(
       type: Date,
       default: Date.now,
     },
+    author: { type: ObjectId, ref: 'User' },
+    comment: {
+      type: String,
+      required: false,
+    },
   },
   { _id: false }
 )
@@ -124,6 +130,14 @@ const SplitTestSchema = new Schema(
       type: Date,
       required: false,
     },
+    requiredCohortSize: {
+      type: Number,
+      required: false,
+    },
+    expectedUplift: {
+      type: Number,
+      required: false,
+    },
     ticketUrl: {
       type: String,
       required: false,
@@ -145,6 +159,7 @@ const SplitTestSchema = new Schema(
       type: Date,
       required: false,
     },
+    archivedBy: { type: ObjectId, ref: 'User' },
     badgeInfo: {
       type: BadgeInfoSchema,
       required: false,

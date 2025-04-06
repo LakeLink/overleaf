@@ -4,6 +4,7 @@ import fetchMock from 'fetch-mock'
 import { renderWithProjectListContext } from '../../helpers/render-with-context'
 import AddAffiliation from '../../../../../../frontend/js/features/project-list/components/add-affiliation'
 import { Affiliation } from '../../../../../../types/affiliation'
+import getMeta from '@/utils/meta'
 
 describe('Add affiliation widget', function () {
   const validateNonExistence = () => {
@@ -13,17 +14,15 @@ describe('Add affiliation widget', function () {
   }
 
   beforeEach(function () {
-    window.metaAttributesCache = new Map()
     fetchMock.reset()
   })
 
   afterEach(function () {
-    window.metaAttributesCache = new Map()
     fetchMock.reset()
   })
 
   it('renders the component', async function () {
-    window.metaAttributesCache.set('ol-ExposedSettings', { isOverleaf: true })
+    Object.assign(getMeta('ol-ExposedSettings'), { isOverleaf: true })
     window.metaAttributesCache.set('ol-userAffiliations', [])
 
     renderWithProjectListContext(<AddAffiliation />)
@@ -32,14 +31,14 @@ describe('Add affiliation widget', function () {
     await waitFor(() => expect(fetchMock.called('/api/project')))
 
     screen.getByText(/are you affiliated with an institution/i)
-    const addAffiliationLink = screen.getByRole('link', {
+    const addAffiliationLink = screen.getByRole('button', {
       name: /add affiliation/i,
     })
     expect(addAffiliationLink.getAttribute('href')).to.equal('/user/settings')
   })
 
   it('does not render when `isOverleaf` is `false`', async function () {
-    window.metaAttributesCache.set('ol-ExposedSettings', { isOverleaf: false })
+    Object.assign(getMeta('ol-ExposedSettings'), { isOverleaf: false })
     window.metaAttributesCache.set('ol-userAffiliations', [])
 
     renderWithProjectListContext(<AddAffiliation />)
@@ -51,7 +50,7 @@ describe('Add affiliation widget', function () {
   })
 
   it('does not render when there no projects', async function () {
-    window.metaAttributesCache.set('ol-ExposedSettings', { isOverleaf: true })
+    Object.assign(getMeta('ol-ExposedSettings'), { isOverleaf: true })
     window.metaAttributesCache.set('ol-userAffiliations', [])
 
     renderWithProjectListContext(<AddAffiliation />, {
@@ -65,7 +64,7 @@ describe('Add affiliation widget', function () {
   })
 
   it('does not render when there are affiliations', async function () {
-    window.metaAttributesCache.set('ol-ExposedSettings', { isOverleaf: true })
+    Object.assign(getMeta('ol-ExposedSettings'), { isOverleaf: true })
     window.metaAttributesCache.set('ol-userAffiliations', [{} as Affiliation])
 
     renderWithProjectListContext(<AddAffiliation />)

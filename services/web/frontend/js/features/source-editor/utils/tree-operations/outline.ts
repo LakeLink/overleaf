@@ -3,6 +3,8 @@ import { SyntaxNode, SyntaxNodeRef } from '@lezer/common'
 import { NodeIntersectsChangeFn, ProjectionItem } from './projection'
 import * as tokens from '../../lezer-latex/latex.terms.mjs'
 import { getEnvironmentArguments, getEnvironmentName } from './environments'
+import { PartialFlatOutline } from '@/features/ide-react/context/outline-context'
+import { texOrPdfString } from './commands'
 
 export type Outline = {
   line: number
@@ -15,8 +17,8 @@ export type Outline = {
  * A projection of a part of the file outline, typically a (sub)section heading
  */
 export class FlatOutlineItem extends ProjectionItem {
-  level = 0
-  title = ''
+  readonly level: number = 0
+  readonly title: string = ''
 }
 
 export type FlatOutline = FlatOutlineItem[]
@@ -87,6 +89,15 @@ const getEntryText = (state: EditorState, node: SyntaxNodeRef): string => {
       return false
     }
 
+    // Handle the texorpdfstring command
+    if (token.type.is('UnknownCommand')) {
+      const pdfString = texOrPdfString(state, token.node, 'pdf')
+      if (pdfString) {
+        titleParts.push(pdfString)
+        return false
+      }
+    }
+
     // Only add text from leaf nodes
     if (token.node.firstChild) {
       return true
@@ -114,11 +125,9 @@ export const enterNode = (
       // This should already be in `items`
       return
     }
-    const name =
-      command.getChild('OptionalArgument')?.getChild('ShortOptionalArg') ??
-      command.getChild('SectioningArgument')?.getChild('LongArg')
+    const name = command.getChild('SectioningArgument')?.getChild('LongArg')
 
-    if (name == null || command == null) {
+    if (!name) {
       return
     }
 
@@ -140,7 +149,7 @@ export const enterNode = (
       return state.doc.sliceString(ctrlSeq.from + 1, ctrlSeq.to)
     }
 
-    const nestingLevel = parent?.type.is('$SectioningCommand')
+    const nestingLevel = parent?.type.is('$Section')
       ? getNestingLevel(parent.type.id)
       : getNestingLevel(getCommandName())
 
@@ -187,14 +196,13 @@ const flatItemToOutline = (item: {
   title: string
   line: number
   level: number
-}): Outline => {
-  const { title, line, level } = item
-  return { title, line, level }
-}
+}): Outline => ({
+  title: item.title,
+  line: item.line,
+  level: item.level,
+})
 
-export const nestOutline = (
-  flatOutline: { title: string; line: number; level: number }[]
-): Outline[] => {
+export const nestOutline = (flatOutline: PartialFlatOutline): Outline[] => {
   const parentStack: Outline[] = []
   const outline = []
 

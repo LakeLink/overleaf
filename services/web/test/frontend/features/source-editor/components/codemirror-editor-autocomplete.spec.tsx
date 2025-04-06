@@ -1,26 +1,20 @@
-import { FC } from 'react'
 import { Folder } from '../../../../../types/folder'
 import { docId, mockDocContent } from '../helpers/mock-doc'
-import { Metadata } from '../../../../../types/metadata'
 import { mockScope } from '../helpers/mock-scope'
 import { EditorProviders } from '../../../helpers/editor-providers'
 import CodeMirrorEditor from '../../../../../frontend/js/features/source-editor/components/codemirror-editor'
 import { activeEditorLine } from '../helpers/active-editor-line'
-import { User } from '../../../../../types/user'
-
-const Container: FC = ({ children }) => (
-  <div style={{ width: 785, height: 785 }}>{children}</div>
-)
+import { TestContainer } from '../helpers/test-container'
+import { FC } from 'react'
+import { MetadataContext } from '@/features/ide-react/context/metadata-context'
+import { ReferencesContext } from '@/features/ide-react/context/references-context'
 
 describe('autocomplete', { scrollBehavior: false }, function () {
   beforeEach(function () {
     window.metaAttributesCache.set('ol-preventCompileOnLoad', true)
+    window.metaAttributesCache.set('ol-showSymbolPalette', true)
     cy.interceptEvents()
-    cy.interceptSpelling()
-  })
-
-  afterEach(function () {
-    window.metaAttributesCache = new Map()
+    cy.interceptMetadata()
   })
 
   it('opens autocomplete on matched text', function () {
@@ -48,6 +42,7 @@ describe('autocomplete', { scrollBehavior: false }, function () {
               {
                 _id: 'test-file-in-folder',
                 name: 'example.png',
+                hash: '42',
               },
             ],
             folders: [],
@@ -57,50 +52,26 @@ describe('autocomplete', { scrollBehavior: false }, function () {
           {
             _id: 'test-image-file',
             name: 'frog.jpg',
+            hash: '21',
+          },
+          {
+            _id: 'uppercase-extension-image-file',
+            name: 'frog.JPG',
+            hash: '22',
           },
         ],
       },
     ]
 
-    const metadataManager: { metadata: { state: Metadata } } = {
-      metadata: {
-        state: {
-          documents: {
-            [docId]: {
-              labels: ['fig:frog'],
-              // TODO: add tests for packages and referencesKeys autocompletions
-              packages: {
-                foo: [
-                  {
-                    caption: 'a caption',
-                    meta: 'foo-cmd',
-                    score: 0.1,
-                    snippet: 'a caption{$1}',
-                  },
-                ],
-              },
-            },
-          },
-          references: [],
-          fileTreeData: rootFolder[0],
-        },
-      },
-    }
-
     const scope = mockScope()
-    scope.$root._references.keys = ['foo']
     scope.project.rootFolder = rootFolder
 
     cy.mount(
-      <Container>
-        <EditorProviders
-          scope={scope}
-          metadataManager={metadataManager}
-          rootFolder={rootFolder as any}
-        >
+      <TestContainer>
+        <EditorProviders scope={scope} rootFolder={rootFolder as any}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     cy.get('.cm-editor').as('editor')
@@ -111,7 +82,8 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     cy.findAllByRole('listbox').should('have.length', 0)
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     // single backslash
     cy.get('@line').type('\\')
@@ -161,7 +133,7 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     cy.get('@line')
       // .type('{tab}') // Tab not supported in Cypress
       .type('{rightArrow}{rightArrow}')
-      .type('fr')
+    cy.get('@line').type('fr')
 
     // select option from autocomplete
     // disabled as selector not working (Cypress bug?)
@@ -176,7 +148,7 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     cy.contains('\\includegraphics[width=0.3\\textwidth]{frog.jpg}')
 
     // start a new line and select an "includegraphics" command completion
-    cy.get('@line').type('{rightArrow}{Enter}')
+    cy.get('@line').type('{Enter}')
     activeEditorLine().type('\\includegr')
     cy.contains('\\includegraphics[]{}').click()
 
@@ -190,12 +162,12 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     cy.contains('\\includegraphics[]{test-folder/example.png}')
 
     activeEditorLine()
-      .type(`${'{leftArrow}'.repeat('test-folder/example.png'.length)}fr`)
+      .type(`${'{leftArrow}'.repeat('test-folder/example.png}'.length)}fr`)
       .type('{ctrl+ }')
 
     cy.findAllByRole('listbox').should('have.length', 1)
-    cy.findByRole('listbox').contains('frog.jpg').click()
-    activeEditorLine().should('have.text', '\\includegraphics[]{frog.jpg}')
+    cy.findByRole('listbox').contains('frog.JPG').click()
+    activeEditorLine().should('have.text', '\\includegraphics[]{frog.JPG}')
   })
 
   it('opens autocomplete on begin environment', function () {
@@ -223,6 +195,7 @@ describe('autocomplete', { scrollBehavior: false }, function () {
               {
                 _id: 'test-file-in-folder',
                 name: 'example.png',
+                hash: '42',
               },
             ],
             folders: [],
@@ -232,49 +205,20 @@ describe('autocomplete', { scrollBehavior: false }, function () {
           {
             _id: 'test-image-file',
             name: 'frog.jpg',
+            hash: '43',
           },
         ],
       },
     ]
 
-    const metadataManager: { metadata: { state: Metadata } } = {
-      metadata: {
-        state: {
-          documents: {
-            [docId]: {
-              labels: ['fig:frog'],
-              // TODO: add tests for packages and referencesKeys autocompletions
-              packages: {
-                foo: [
-                  {
-                    caption: 'a caption',
-                    meta: 'foo-cmd',
-                    score: 0.1,
-                    snippet: 'a caption{$1}',
-                  },
-                ],
-              },
-            },
-          },
-          references: [],
-          fileTreeData: rootFolder[0],
-        },
-      },
-    }
-
     const scope = mockScope()
-    scope.$root._references.keys = ['foo']
 
     cy.mount(
-      <Container>
-        <EditorProviders
-          scope={scope}
-          metadataManager={metadataManager}
-          rootFolder={rootFolder as any}
-        >
+      <TestContainer>
+        <EditorProviders scope={scope} rootFolder={rootFolder as any}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     cy.get('.cm-editor').as('editor')
@@ -282,7 +226,8 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     cy.contains('\\section{Results}')
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     // ---- Basic autocomplete of environments
     cy.get('@line').type('\\begin{itemi')
@@ -318,13 +263,14 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     cy.get('.cm-line').eq(26).contains('\\end{align}')
 
     // ---- Start typing a begin command
-    cy.get('.cm-line').eq(28).click().as('line')
+    cy.get('.cm-line').eq(28).as('line')
+    cy.get('@line').click()
     cy.get('@line').type('\\begin{{}ab')
     cy.findAllByRole('option').as('options')
-    cy.get('@options').should('have.length', 4)
+    cy.get('@options').should('have.length', 5)
 
-    // ---- The environment being typed should not appear in the list
-    cy.get('@options').contains('\\begin{ab}').should('not.exist')
+    // ---- The environment being typed should appear in the list
+    cy.get('@options').contains('\\begin{ab}')
 
     // ---- A new environment used elsewhere in the doc should appear next
     cy.get('@options')
@@ -355,42 +301,32 @@ describe('autocomplete', { scrollBehavior: false }, function () {
       },
     ]
 
-    const metadataManager: { metadata: { state: Metadata } } = {
-      metadata: {
-        state: {
-          documents: {
-            [docId]: {
-              labels: [],
-              packages: {
-                foo: [
-                  {
-                    caption: 'a caption',
-                    meta: 'foo-cmd',
-                    score: 0.1,
-                    snippet: 'a caption{$1}',
-                  },
-                ],
-              },
-            },
-          },
-          references: [],
-          fileTreeData: rootFolder[0],
-        },
-      },
+    const metadata = {
+      commands: [],
+      labels: new Set<string>(),
+      packageNames: new Set(['foo']),
+    }
+
+    const MetadataProvider: FC = ({ children }) => {
+      return (
+        <MetadataContext.Provider value={metadata}>
+          {children}
+        </MetadataContext.Provider>
+      )
     }
 
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders
           scope={scope}
-          metadataManager={metadataManager}
           rootFolder={rootFolder as any}
+          providers={{ MetadataProvider }}
         >
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     cy.get('.cm-editor').as('editor')
@@ -399,7 +335,8 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     cy.findAllByRole('listbox').should('have.length', 0)
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     // a usepackage command
     cy.get('@line').type('\\usepackage')
@@ -437,34 +374,31 @@ describe('autocomplete', { scrollBehavior: false }, function () {
       },
     ]
 
-    const metadataManager: { metadata: { state: Metadata } } = {
-      metadata: {
-        state: {
-          documents: {
-            [docId]: {
-              labels: [],
-              packages: {},
-            },
-          },
-          references: [],
-          fileTreeData: rootFolder[0],
-        },
-      },
+    const scope = mockScope()
+
+    const ReferencesProvider: FC = ({ children }) => {
+      return (
+        <ReferencesContext.Provider
+          value={{
+            referenceKeys: new Set(['ref-1', 'ref-2', 'ref-3']),
+            indexAllReferences: cy.stub(),
+          }}
+        >
+          {children}
+        </ReferencesContext.Provider>
+      )
     }
 
-    const scope = mockScope()
-    scope.$root._references.keys = ['ref-1', 'ref-2', 'ref-3']
-
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders
           scope={scope}
-          metadataManager={metadataManager}
+          providers={{ ReferencesProvider }}
           rootFolder={rootFolder as any}
         >
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     cy.get('.cm-editor').as('editor')
@@ -473,7 +407,8 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     cy.findAllByRole('listbox').should('have.length', 0)
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     // a cite command with no opening brace
     cy.get('@line').type('\\cite')
@@ -487,7 +422,7 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     cy.get('@line').contains('\\cite{ref-2}')
 
     // start typing another reference
-    cy.get('@line').type(', re')
+    cy.get('@line').type('{leftArrow}, re')
 
     // autocomplete open again
     cy.findAllByRole('listbox').contains('ref-3').click()
@@ -510,30 +445,15 @@ describe('autocomplete', { scrollBehavior: false }, function () {
       },
     ]
 
-    const metadataManager: { metadata: { state: Metadata } } = {
-      metadata: {
-        state: {
-          documents: {},
-          references: [],
-          fileTreeData: rootFolder[0],
-        },
-      },
-    }
-
     const scope = mockScope()
-    scope.$root._references.keys = ['foo']
     scope.project.rootFolder = rootFolder
 
     cy.mount(
-      <Container>
-        <EditorProviders
-          scope={scope}
-          metadataManager={metadataManager}
-          rootFolder={rootFolder as any}
-        >
+      <TestContainer>
+        <EditorProviders scope={scope} rootFolder={rootFolder as any}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     cy.get('.cm-editor').as('editor')
@@ -544,7 +464,8 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     cy.findAllByRole('listbox').should('have.length', 0)
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     // single backslash
     cy.get('@line').type('\\')
@@ -566,15 +487,16 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     cy.get('@line').type('\\frac')
 
@@ -589,9 +511,11 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     cy.get('@line').should('contain.text', '\\frac{\\textbf{}}{}')
 
     // go to new line
-    cy.get('@line').click().type('{enter}')
+    cy.get('@line').click()
+    cy.get('@line').type('{enter}')
 
-    cy.get('.cm-line').eq(17).click().as('line')
+    cy.get('.cm-line').eq(17).as('line')
+    cy.get('@line').click()
     cy.get('@line').type('\\frac')
 
     // select completion
@@ -609,15 +533,16 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     // type some commands
     // note: '{{}' is a single opening brace
@@ -643,15 +568,16 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     // type some commands
     // note: '{{}' is a single opening brace
@@ -677,17 +603,18 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     cy.get('.cm-editor').as('editor')
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     // a new command, then the start of the command on a new blank line
     cy.get('@line').type('\\foo[bar]{{}baz}{{}zap}')
@@ -696,7 +623,8 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     cy.get('@editor').trigger('keydown', { key: 'Enter' })
 
     // put the cursor on the new line to type in
-    cy.get('.cm-line').eq(17).click().as('line')
+    cy.get('.cm-line').eq(17).as('line')
+    cy.get('@line').click()
 
     // the start of the command
     cy.get('@line').type('\\foo')
@@ -714,17 +642,18 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     cy.get('.cm-editor').as('editor')
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     // a new command, then the start of the command on a new blank line
     cy.get('@line').type('$\\somemathcommand$')
@@ -733,7 +662,8 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     cy.get('@editor').trigger('keydown', { key: 'Enter' })
 
     // put the cursor on the new line to type in
-    cy.get('.cm-line').eq(17).click().as('line')
+    cy.get('.cm-line').eq(17).as('line')
+    cy.get('@line').click()
 
     // the start of the command
     cy.get('@line').type('hello \\somema')
@@ -748,17 +678,18 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     cy.get('.cm-editor').as('editor')
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     // a new command, then the start of the command on a new blank line
     cy.get('@line').type('\\newcommand{{}\\foo}[1]{{}#1}')
@@ -767,7 +698,8 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     cy.get('@editor').trigger('keydown', { key: 'Enter' })
 
     // put the cursor on the new line to type in
-    cy.get('.cm-line').eq(17).click().as('line')
+    cy.get('.cm-line').eq(17).as('line')
+    cy.get('@line').click()
 
     // the start of the command
     cy.get('@line').type('\\fo')
@@ -781,55 +713,42 @@ describe('autocomplete', { scrollBehavior: false }, function () {
   })
 
   it('displays unique completions for commands', function () {
-    const metadataManager: { metadata: { state: Metadata } } = {
-      metadata: {
-        state: {
-          documents: {
-            [docId]: {
-              labels: [],
-              packages: {
-                amsmath: [
-                  {
-                    caption: '\\label{}',
-                    meta: 'amsmath-cmd',
-                    score: 1,
-                    snippet: '\\label{$1}',
-                  },
-                ],
-              },
-            },
-          },
-          references: [],
-          fileTreeData: {
-            _id: 'root-folder-id',
-            name: 'rootFolder',
-            docs: [
-              {
-                _id: docId,
-                name: 'main.tex',
-              },
-            ],
-            folders: [],
-            fileRefs: [],
-          },
-        },
-      },
-    }
-
     const scope = mockScope()
 
+    const metadata = {
+      commands: [
+        {
+          caption: '\\label{}', // label{} is also included in top-hundred-snippets
+          meta: 'amsmath-cmd',
+          score: 1,
+          snippet: '\\label{$1}',
+        },
+      ],
+      labels: new Set<string>(),
+      packageNames: new Set<string>('amsmath'),
+    }
+
+    const MetadataProvider: FC = ({ children }) => {
+      return (
+        <MetadataContext.Provider value={metadata}>
+          {children}
+        </MetadataContext.Provider>
+      )
+    }
+
     cy.mount(
-      <Container>
-        <EditorProviders scope={scope} metadataManager={metadataManager}>
+      <TestContainer>
+        <EditorProviders scope={scope} providers={{ MetadataProvider }}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     cy.get('.cm-editor').as('editor')
 
     // put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     // start typing a command
     cy.get('@line').type('\\label')
@@ -840,60 +759,76 @@ describe('autocomplete', { scrollBehavior: false }, function () {
   it('displays symbol completions in autocomplete when the feature is enabled', function () {
     const scope = mockScope()
 
-    const createUser = (values: Partial<User>): User => ({
+    window.metaAttributesCache.set('ol-showSymbolPalette', true)
+    const user = {
       id: '123abd',
       email: 'testuser@example.com',
-      ...values,
-    })
-
-    const testSymbolAutocomplete = (user: User) => {
-      cy.mount(
-        <Container>
-          <EditorProviders user={user} scope={scope}>
-            <CodeMirrorEditor />
-          </EditorProviders>
-        </Container>
-      )
-      // put the cursor on a blank line to type in
-      cy.get('.cm-line').eq(16).click().as('line')
-
-      // type the name of a symbol
-      cy.get('@line').type(' \\alpha')
-
-      cy.findAllByRole('listbox').should('have.length', 1)
     }
+    cy.mount(
+      <TestContainer>
+        <EditorProviders user={user} scope={scope}>
+          <CodeMirrorEditor />
+        </EditorProviders>
+      </TestContainer>
+    )
+    // put the cursor on a blank line to type in
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
-    // when the feature is not enabled, the symbol completion must not appear
-    testSymbolAutocomplete(createUser({ features: { symbolPalette: false } }))
+    // type the name of a symbol
+    cy.get('@line').type(' \\alpha')
 
-    cy.findAllByRole('option', {
-      name: /^\\alpha\s+Greek$/,
-    }).should('have.length', 0)
-
-    // when the feature is enabled, the symbol completion must appear
-    testSymbolAutocomplete(createUser({ features: { symbolPalette: true } }))
+    cy.findAllByRole('listbox').should('have.length', 1)
 
     // the symbol completion should exist
     cy.findAllByRole('option', {
-      name: /^\\alpha\s+Greek$/,
+      name: /^\\alpha\s+𝛼\s+Greek$/,
     }).should('have.length', 1)
+  })
 
-    cy.get('body').should('contain', 'Lowercase Greek letter alpha')
+  it('does not display symbol completions in autocomplete when the feature is disabled', function () {
+    const scope = mockScope()
+
+    window.metaAttributesCache.set('ol-showSymbolPalette', false)
+    const user = {
+      id: '123abd',
+      email: 'testuser@example.com',
+    }
+    cy.mount(
+      <TestContainer>
+        <EditorProviders user={user} scope={scope}>
+          <CodeMirrorEditor />
+        </EditorProviders>
+      </TestContainer>
+    )
+    // put the cursor on a blank line to type in
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
+
+    // type the name of a symbol
+    cy.get('@line').type(' \\alpha')
+
+    cy.findAllByRole('listbox').should('have.length', 1)
+
+    cy.findAllByRole('option', {
+      name: /^\\alpha\s+𝛼\s+Greek$/,
+    }).should('have.length', 0)
   })
 
   it('displays environment completion when typing up to closing brace', function () {
     const scope = mockScope()
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // Put the cursor on a blank line to type in
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
 
     // Type \begin{itemize}.
     // Note: '{{}' is a single opening brace
@@ -908,15 +843,16 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     const scope = mockScope(mockDocContent('\\begin{}'))
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // Put the cursor on a blank line above target line
-    cy.get('.cm-line').eq(20).click().as('line')
+    cy.get('.cm-line').eq(20).as('line')
+    cy.get('@line').click()
 
     // Move to the position between the braces then type 'itemize'
     cy.get('@line').type(`{downArrow}${'{rightArrow}'.repeat(7)}itemize`, {
@@ -930,15 +866,16 @@ describe('autocomplete', { scrollBehavior: false }, function () {
     const scope = mockScope(mockDocContent('\\begin{'))
 
     cy.mount(
-      <Container>
+      <TestContainer>
         <EditorProviders scope={scope}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // Put the cursor on a blank line above target line
-    cy.get('.cm-line').eq(20).click().as('line')
+    cy.get('.cm-line').eq(20).as('line')
+    cy.get('@line').click()
 
     // Move to the position after the opening brace then type 'itemize}'
     cy.get('@line').type(`{downArrow}${'{rightArrow}'.repeat(7)}itemize}`, {
@@ -972,77 +909,82 @@ describe('autocomplete', { scrollBehavior: false }, function () {
       },
     ]
 
-    const metadataManager: { metadata: { state: Metadata } } = {
-      metadata: {
-        state: {
-          documents: {},
-          references: [],
-          fileTreeData: rootFolder[0],
-        },
-      },
-    }
-
     const scope = mockScope()
-    scope.$root._references.keys = ['foo']
     scope.project.rootFolder = rootFolder
 
     cy.mount(
-      <Container>
-        <EditorProviders
-          scope={scope}
-          metadataManager={metadataManager}
-          rootFolder={rootFolder as any}
-        >
+      <TestContainer>
+        <EditorProviders scope={scope} rootFolder={rootFolder as any}>
           <CodeMirrorEditor />
         </EditorProviders>
-      </Container>
+      </TestContainer>
     )
 
     // Put the cursor on a blank line and type
-    cy.get('.cm-line').eq(16).click().as('line')
+    cy.get('.cm-line').eq(16).as('line')
+    cy.get('@line').click()
     cy.get('@line').type('\\include{e', { delay: 100 })
     cy.findAllByRole('option').contains('example.tex').click()
     activeEditorLine().contains('\\include{example')
-    activeEditorLine().type('{}}{Enter}')
+    activeEditorLine().type('}{Enter}')
 
     activeEditorLine().type('\\include{s', { delay: 100 })
     cy.findAllByRole('option').contains('sometext.txt').click()
-    activeEditorLine().contains('\\include{sometext.txt')
-    activeEditorLine().type('{}}{Enter}')
+    activeEditorLine().should('have.text', '\\include{sometext.txt}')
+    activeEditorLine().type('{Enter}')
 
     activeEditorLine().type('\\inclu', { delay: 100 })
     cy.contains('\\include{}').click()
     cy.contains('example.tex').click()
-    activeEditorLine().contains('\\include{example}')
-    activeEditorLine().type('{rightArrow}{Enter}')
+    activeEditorLine().should('have.text', '\\include{example}')
+    activeEditorLine().type('{Enter}')
 
     activeEditorLine().type('\\inclu', { delay: 100 })
     cy.findAllByRole('option').contains('\\include{}').click()
     cy.findAllByRole('option').contains('sometext.txt').click()
-    activeEditorLine().contains('\\include{sometext.txt}')
-    activeEditorLine().type('{rightArrow}{Enter}')
+    activeEditorLine().should('have.text', '\\include{sometext.txt}')
+    activeEditorLine().type('{Enter}')
 
     activeEditorLine().click().as('line')
     activeEditorLine().type('\\input{e', { delay: 100 })
     cy.findAllByRole('option').contains('example.tex').click()
-    activeEditorLine().contains('\\input{example')
-    activeEditorLine().type('{}}{Enter}')
+    activeEditorLine().should('have.text', '\\input{example}')
+    activeEditorLine().type('{Enter}')
 
     activeEditorLine().click().as('line')
     activeEditorLine().type('\\input{s', { delay: 100 })
     cy.findAllByRole('option').contains('sometext.txt').click()
-    activeEditorLine().contains('\\input{sometext.txt')
-    activeEditorLine().type('{}}{Enter}')
+    activeEditorLine().should('have.text', '\\input{sometext.txt}')
+    activeEditorLine().type('{Enter}')
 
     activeEditorLine().type('\\inpu', { delay: 100 })
     cy.findAllByRole('option').contains('\\input{}').click()
     cy.findAllByRole('option').contains('example.tex').click()
-    activeEditorLine().contains('\\input{example}')
-    activeEditorLine().type('{rightArrow}{Enter}')
+    activeEditorLine().should('have.text', '\\input{example}')
+    activeEditorLine().type('{Enter}')
 
     activeEditorLine().type('\\inpu', { delay: 100 })
     cy.findAllByRole('option').contains('\\input{}').click()
     cy.findAllByRole('option').contains('sometext.txt').click()
-    activeEditorLine().contains('\\input{sometext.txt}')
+    activeEditorLine().should('have.text', '\\input{sometext.txt}')
+  })
+
+  it('excludes the current command from completions', function () {
+    const scope = mockScope(mockDocContent(''))
+
+    cy.mount(
+      <TestContainer>
+        <EditorProviders scope={scope}>
+          <CodeMirrorEditor />
+        </EditorProviders>
+      </TestContainer>
+    )
+
+    cy.get('.cm-line').eq(21).type('\\fff \\ff')
+
+    cy.findAllByRole('listbox').should('have.length', 1)
+    cy.findAllByRole('option').contains('\\fff').click()
+
+    cy.get('.cm-line').eq(21).should('have.text', '\\fff \\fff')
   })
 })

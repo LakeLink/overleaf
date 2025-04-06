@@ -1,5 +1,8 @@
 import { CompletionContext } from '@codemirror/autocomplete'
-import { createCommandApplier, createRequiredParameterApplier } from './apply'
+import {
+  extendOverUnpairedClosingBrace,
+  extendRequiredParameter,
+} from './apply'
 import { Folder } from '../../../../../../../types/folder'
 import { Completions } from './types'
 import { metadataState } from '../../../extensions/language'
@@ -34,40 +37,40 @@ export function buildIncludeCompletions(
       completions.includes.push({
         type: 'file',
         label: path,
-        apply: createRequiredParameterApplier(removeTexExtension(path)),
+        apply: removeTexExtension(path),
+        extend: extendRequiredParameter,
       })
 
       // \include{path}
       completions.commands.push({
         type: 'cmd',
         label: `\\include{${path}}`,
-        apply: createCommandApplier(`\\include{${removeTexExtension(path)}}`),
+        apply: `\\include{${removeTexExtension(path)}}`,
+        extend: extendOverUnpairedClosingBrace,
       })
 
       // \input{path}
       completions.commands.push({
         type: 'cmd',
         label: `\\input{${path}}`,
-        apply: createCommandApplier(`\\input{${removeTexExtension(path)}}`),
+        apply: `\\input{${removeTexExtension(path)}}`,
+        extend: extendOverUnpairedClosingBrace,
       })
     }
 
     // TODO: a better list of graphics extensions?
-    if (/\.(eps|jpe?g|gif|png|tiff?|pdf|svg)$/.test(path)) {
+    if (/\.(eps|jpe?g|gif|png|tiff?|pdf|svg)$/i.test(path)) {
       // path parameter for \includegraphics{path}
       completions.graphics.push({
         type: 'file',
         label: path,
-        apply: createRequiredParameterApplier(path), // TODO: remove extension?
+        extend: extendRequiredParameter,
       })
 
-      const label = `\\includegraphics{${path}}`
-
-      // \includegraphics{path}
       completions.commands.push({
         type: 'cmd',
-        label,
-        apply: createCommandApplier(label),
+        label: `\\includegraphics{${path}}`,
+        extend: extendOverUnpairedClosingBrace,
       })
     }
 
@@ -77,7 +80,7 @@ export function buildIncludeCompletions(
       completions.bibliographies.push({
         type: 'bib',
         label,
-        apply: createRequiredParameterApplier(label),
+        extend: extendRequiredParameter,
       })
     }
   }

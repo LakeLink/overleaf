@@ -1,14 +1,25 @@
-import type { Extension } from '@codemirror/state'
+import { Compartment, type Extension } from '@codemirror/state'
 import CodeMirror, { CodeMirrorVim } from './bundle'
+import { ViewPlugin } from '@codemirror/view'
 
-export const thirdPartyExtensions = (): Extension => {
-  const extensions: Extension[] = []
+const thirdPartyExtensionsConf = new Compartment()
 
+const dispatchEvent = (extensions: Extension[]) => {
   window.dispatchEvent(
     new CustomEvent('UNSTABLE_editor:extensions', {
       detail: { CodeMirror, CodeMirrorVim, extensions },
     })
   )
+}
+
+/**
+ * A custom extension that allows additional CodeMirror extensions to be provided by external code,
+ * e.g. browser extensions.
+ */
+export const thirdPartyExtensions = (): Extension => {
+  const extensions: Extension[] = []
+
+  dispatchEvent(extensions)
 
   Object.defineProperty(window, 'UNSTABLE_editorHelp', {
     writable: false,
@@ -38,5 +49,25 @@ window.addEventListener("UNSTABLE_editor:extensions", function(evt) {
 });`,
   })
 
-  return extensions
+  return [thirdPartyExtensionsConf.of(extensions), extensionLoaded]
 }
+
+const extensionLoaded = ViewPlugin.define(view => {
+  const listener = () => {
+    const extensions: Extension[] = []
+
+    dispatchEvent(extensions)
+
+    view.dispatch({
+      effects: thirdPartyExtensionsConf.reconfigure(extensions),
+    })
+  }
+
+  window.addEventListener('editor:extension-loaded', listener)
+
+  return {
+    destroy() {
+      window.removeEventListener('editor:extension-loaded', listener)
+    },
+  }
+})

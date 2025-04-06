@@ -1,23 +1,23 @@
-const Metrics = require('@overleaf/metrics')
-Metrics.initialize('clsi')
+// Metrics must be initialized before importing anything else
+require('@overleaf/metrics/initialize')
 
 const CompileController = require('./app/js/CompileController')
 const ContentController = require('./app/js/ContentController')
 const Settings = require('@overleaf/settings')
 const logger = require('@overleaf/logger')
 logger.initialize('clsi')
-if (Settings.sentry.dsn != null) {
-  logger.initializeErrorReporting(Settings.sentry.dsn)
-}
+const Metrics = require('@overleaf/metrics')
 
 const smokeTest = require('./test/smoke/js/SmokeTests')
 const ContentTypeMapper = require('./app/js/ContentTypeMapper')
 const Errors = require('./app/js/Errors')
+const { createOutputZip } = require('./app/js/OutputController')
 
-const Path = require('path')
+const Path = require('node:path')
 
-Metrics.open_sockets.monitor(logger)
+Metrics.open_sockets.monitor(true)
 Metrics.memory.monitor(logger)
+Metrics.leaked_sockets.monitor(logger)
 
 const ProjectPersistenceManager = require('./app/js/ProjectPersistenceManager')
 const OutputCacheManager = require('./app/js/OutputCacheManager')
@@ -128,26 +128,6 @@ const ForbidSymlinks = require('./app/js/StaticServerForbidSymlinks')
 // create a static server which does not allow access to any symlinks
 // avoids possible mismatch of root directory between middleware check
 // and serving the files
-const staticCompileServer = ForbidSymlinks(
-  express.static,
-  Settings.path.compilesDir,
-  {
-    setHeaders(res, path, stat) {
-      if (Path.basename(path) === 'output.pdf') {
-        // Calculate an etag in the same way as nginx
-        // https://github.com/tj/send/issues/65
-        const etag = (path, stat) =>
-          `"${Math.ceil(+stat.mtime / 1000).toString(16)}` +
-          '-' +
-          Number(stat.size).toString(16) +
-          '"'
-        res.set('Etag', etag(path, stat))
-      }
-      res.set('Content-Type', ContentTypeMapper.map(path))
-    },
-  }
-)
-
 const staticOutputServer = ForbidSymlinks(
   express.static,
   Settings.path.outputDir,
@@ -166,6 +146,20 @@ const staticOutputServer = ForbidSymlinks(
       res.set('Content-Type', ContentTypeMapper.map(path))
     },
   }
+)
+
+// This needs to be before GET /project/:project_id/build/:build_id/output/*
+app.get(
+  '/project/:project_id/build/:build_id/output/output.zip',
+  bodyParser.json(),
+  createOutputZip
+)
+
+// This needs to be before GET /project/:project_id/user/:user_id/build/:build_id/output/*
+app.get(
+  '/project/:project_id/user/:user_id/build/:build_id/output/output.zip',
+  bodyParser.json(),
+  createOutputZip
 )
 
 app.get(
@@ -198,32 +192,6 @@ app.get(
     staticOutputServer(req, res, next)
   }
 )
-
-app.get(
-  '/project/:project_id/user/:user_id/output/*',
-  function (req, res, next) {
-    // for specific user get the path to the top level file
-    logger.warn(
-      { url: req.url },
-      'direct request for file in compile directory'
-    )
-    req.url = `/${req.params.project_id}-${req.params.user_id}/${req.params[0]}`
-    staticCompileServer(req, res, next)
-  }
-)
-
-app.get('/project/:project_id/output/*', function (req, res, next) {
-  logger.warn({ url: req.url }, 'direct request for file in compile directory')
-  if (req.query?.build?.match(OutputCacheManager.BUILD_REGEX)) {
-    // for specific build get the path from the OutputCacheManager (e.g. .clsi/buildId)
-    req.url =
-      `/${req.params.project_id}/` +
-      OutputCacheManager.path(req.query.build, `/${req.params[0]}`)
-  } else {
-    req.url = `/${req.params.project_id}/${req.params[0]}`
-  }
-  staticCompileServer(req, res, next)
-})
 
 app.get('/oops', function (req, res, next) {
   logger.error({ err: 'hello' }, 'test error')
@@ -299,8 +267,8 @@ app.use(function (error, req, res, next) {
   }
 })
 
-const net = require('net')
-const os = require('os')
+const net = require('node:net')
+const os = require('node:os')
 
 let STATE = 'up'
 
@@ -329,7 +297,10 @@ const loadTcpServer = net.createServer(function (socket) {
     const freeLoadPercentage = Math.round(
       (freeLoad / availableWorkingCpus) * 100
     )
-    if (freeLoadPercentage <= 0) {
+    if (
+      Settings.internal.load_balancer_agent.allow_maintenance &&
+      freeLoadPercentage <= 0
+    ) {
       // When its 0 the server is set to drain implicitly.
       // Drain will move new projects to different servers.
       // Drain will keep existing projects assigned to the same server.
@@ -337,7 +308,11 @@ const loadTcpServer = net.createServer(function (socket) {
       socket.write(`maint, 0%\n`, 'ASCII')
     } else {
       // Ready will cancel the maint state.
-      socket.write(`up, ready, ${freeLoadPercentage}%\n`, 'ASCII')
+      socket.write(`up, ready, ${Math.max(freeLoadPercentage, 1)}%\n`, 'ASCII')
+      if (freeLoadPercentage <= 0) {
+        // This metric records how often we would have gone into maintenance mode.
+        Metrics.inc('clsi-prevented-maint')
+      }
     }
     socket.end()
   } else {
@@ -366,8 +341,8 @@ loadHttpServer.post('/state/maint', function (req, res, next) {
   res.sendStatus(204)
 })
 
-const port = Settings.internal?.clsi?.port || 3013
-const host = Settings.internal?.clsi?.host || 'localhost'
+const port = Settings.internal.clsi.port
+const host = Settings.internal.clsi.host
 
 const loadTcpPort = Settings.internal.load_balancer_agent.load_port
 const loadHttpPort = Settings.internal.load_balancer_agent.local_port

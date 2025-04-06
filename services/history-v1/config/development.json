@@ -8,8 +8,7 @@
     "gcs": {
       "unsignedUrls": "true",
       "endpoint": {
-        "apiEndpoint": "fake-gcs:9090",
-        "apiScheme": "http",
+        "apiEndpoint": "http://fake-gcs:9090",
         "projectId": "fake"
       }
     }
@@ -23,6 +22,18 @@
   },
   "zipStore": {
     "bucket": "overleaf-development-zips"
+  },
+  "backupStore": {
+    "chunksBucket":"overleaf-development-history-chunks",
+    "deksBucket":"overleaf-development-history-deks",
+    "globalBlobsBucket":"overleaf-development-history-global-blobs",
+    "projectBlobsBucket":"overleaf-development-history-project-blobs"
+  },
+  "backupPersistor": {
+    "keyEncryptionKeys": "[{\"key\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\",\"salt\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\"}]",
+    "s3SSEC": {
+      "ca": "[\"/certs/public.crt\"]"
+    }
   },
   "useDeleteObjects": "false",
   "mongo": {

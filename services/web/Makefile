@@ -4,9 +4,10 @@ BUILD_NUMBER ?= local
 BRANCH_NAME ?= $(shell git rev-parse --abbrev-ref HEAD)
 PROJECT_NAME = web
 BUILD_DIR_NAME = $(shell pwd | xargs basename | tr -cd '[a-zA-Z0-9_.\-]')
+PWD = $(shell pwd)
 
-export SHARELATEX_CONFIG ?= /overleaf/services/web/test/acceptance/config/settings.test.saas.js
-export BASE_CONFIG ?= ${SHARELATEX_CONFIG}
+export OVERLEAF_CONFIG ?= /overleaf/services/web/test/acceptance/config/settings.test.saas.js
+export BASE_CONFIG ?= ${OVERLEAF_CONFIG}
 
 CFG_SAAS=/overleaf/services/web/test/acceptance/config/settings.test.saas.js
 CFG_SERVER_CE=/overleaf/services/web/test/acceptance/config/settings.test.server-ce.js
@@ -16,7 +17,7 @@ DOCKER_COMPOSE := BUILD_NUMBER=$(BUILD_NUMBER) \
 	BRANCH_NAME=$(BRANCH_NAME) \
 	PROJECT_NAME=$(PROJECT_NAME) \
 	MOCHA_GREP=${MOCHA_GREP} \
-	docker-compose ${DOCKER_COMPOSE_FLAGS}
+	docker compose ${DOCKER_COMPOSE_FLAGS}
 
 MODULE_DIRS := $(shell find modules -mindepth 1 -maxdepth 1 -type d -not -name '.git' )
 MODULE_MAKEFILES := $(MODULE_DIRS:=/Makefile)
@@ -45,9 +46,7 @@ clean:
 	-COMPOSE_PROJECT_NAME=acceptance_modules_merged_saas_4_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down --rmi local
 	-COMPOSE_PROJECT_NAME=acceptance_modules_merged_server_ce_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down --rmi local
 	-COMPOSE_PROJECT_NAME=acceptance_modules_merged_server_pro_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down --rmi local
-	-COMPOSE_PROJECT_NAME=karma_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down --rmi local
-	-COMPOSE_PROJECT_NAME=karma_test_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down --rmi local
-	-COMPOSE_PROJECT_NAME=frontend_test_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down --rmi local
+	-COMPOSE_PROJECT_NAME=test_frontend_ct_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down --rmi local
 	-COMPOSE_PROJECT_NAME=tar_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down --rmi local
 
 clean_ci:
@@ -60,7 +59,7 @@ clean_ci:
 # Tests
 #
 
-test: test_unit test_karma test_acceptance test_frontend test_frontend_ct
+test: test_unit test_acceptance test_frontend test_frontend_ct
 
 test_module: test_unit_module test_acceptance_module
 
@@ -69,18 +68,20 @@ test_module: test_unit_module test_acceptance_module
 #
 
 test_unit: test_unit_all
+test_unit_all: export COMPOSE_PROJECT_NAME=unit_test_all_$(BUILD_DIR_NAME)
 test_unit_all:
-	COMPOSE_PROJECT_NAME=unit_test_all_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) run --rm test_unit npm run test:unit:all
-	COMPOSE_PROJECT_NAME=unit_test_all_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
+	$(DOCKER_COMPOSE) run --rm test_unit npm run test:unit:all
+	$(DOCKER_COMPOSE) down -v -t 0
 
+test_unit_all_silent: export COMPOSE_PROJECT_NAME=unit_test_all_$(BUILD_DIR_NAME)
 test_unit_all_silent:
-	COMPOSE_PROJECT_NAME=unit_test_all_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) run --rm test_unit npm run test:unit:all:silent
-	COMPOSE_PROJECT_NAME=unit_test_all_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
+	$(DOCKER_COMPOSE) run --rm test_unit npm run test:unit:all:silent
+	$(DOCKER_COMPOSE) down -v -t 0
 
+test_unit_app: export COMPOSE_PROJECT_NAME=unit_test_$(BUILD_DIR_NAME)
 test_unit_app:
-	COMPOSE_PROJECT_NAME=unit_test_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
-	COMPOSE_PROJECT_NAME=unit_test_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) run --name unit_test_$(BUILD_DIR_NAME) --rm test_unit
-	COMPOSE_PROJECT_NAME=unit_test_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
+	$(DOCKER_COMPOSE) run --name unit_test_$(BUILD_DIR_NAME) --rm test_unit
+	$(DOCKER_COMPOSE) down -v -t 0
 
 TEST_SUITES = $(sort $(filter-out \
 	$(wildcard test/unit/src/helpers/*), \
@@ -103,7 +104,6 @@ test_unit_app_parallel_gnu_make: $(TEST_SUITES)
 test_unit_app_parallel_gnu_make_docker: export COMPOSE_PROJECT_NAME = \
 	unit_test_parallel_make_$(BUILD_DIR_NAME)
 test_unit_app_parallel_gnu_make_docker:
-	$(DOCKER_COMPOSE) down -v -t 0
 	$(DOCKER_COMPOSE) run --rm test_unit \
 		make test_unit_app_parallel_gnu_make --output-sync -j $(J)
 	$(DOCKER_COMPOSE) down -v -t 0
@@ -115,56 +115,53 @@ test_unit_modules: $(TEST_UNIT_MODULES)
 test_unit_module:
 	$(MAKE) modules/$(MODULE_NAME)/test_unit
 
-#
-# Karma frontend tests
-#
-
-test_karma: build_test_karma test_karma_run
-
-test_karma_run:
-	COMPOSE_PROJECT_NAME=karma_test_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
-	COMPOSE_PROJECT_NAME=karma_test_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) run --rm test_karma
-	COMPOSE_PROJECT_NAME=karma_test_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
-
-test_karma_build_run: build_test_karma test_karma_run
 
 #
 # Frontend tests
 #
 
 test_frontend:
-	COMPOSE_PROJECT_NAME=frontend_test_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
 	COMPOSE_PROJECT_NAME=frontend_test_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) run --rm test_frontend
 	COMPOSE_PROJECT_NAME=frontend_test_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
 
 #
 # Frontend component tests in Cypress
 #
-
-test_frontend_ct:
-	COMPOSE_PROJECT_NAME=frontend_test_ct_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
-	COMPOSE_PROJECT_NAME=frontend_test_ct_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) run --rm test_frontend_ct
-	COMPOSE_PROJECT_NAME=frontend_test_ct_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
+# Local development: use $ make test_frontend_ct
+#
+TEST_FRONTEND_CT_VARIANTS = \
+	test_frontend_ct \
+	test_frontend_ct_core_other \
+	test_frontend_ct_core_features \
+	test_frontend_ct_modules \
+	test_frontend_ct_editor_other \
+	test_frontend_ct_editor_visual \
 
 # Note: The below cypress targets are for CI only
 build_test_frontend_ct:
-	COMPOSE_PROJECT_NAME=frontend_test_ct_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) build test_frontend_ct
-	# Note: The 2nd build should use the cache from the 1st build.
-	COMPOSE_PROJECT_NAME=frontend_test_ct_modules_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) build test_frontend_ct
+	docker run --rm --volume /dev/shm:/dev/shm --user root $(IMAGE_CI) bash -ec 'tar -cC / overleaf | tar -xC /dev/shm'
 
-test_frontend_ct_core: export CYPRESS_RESULTS=./cypress/results/core
-test_frontend_ct_core: export CYPRESS_SPEC_PATTERN=./test/frontend/**/*.spec.{js,ts,tsx}
-test_frontend_ct_core:
-	COMPOSE_PROJECT_NAME=frontend_test_ct_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
-	COMPOSE_PROJECT_NAME=frontend_test_ct_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) run --rm test_frontend_ct
-	COMPOSE_PROJECT_NAME=frontend_test_ct_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
+test_frontend_ct_core_other: export CYPRESS_RESULTS=./cypress/results/core
+test_frontend_ct_core_other: export CYPRESS_SPEC_PATTERN=./test/frontend/**/*.spec.{js,jsx,ts,tsx}
+test_frontend_ct_core_other: export CYPRESS_EXCLUDE_SPEC_PATTERN=./test/frontend/features/**/*.spec.{js,jsx,ts,tsx}
+
+test_frontend_ct_core_features: export CYPRESS_RESULTS=./cypress/results/core
+test_frontend_ct_core_features: export CYPRESS_SPEC_PATTERN=./test/frontend/features/**/*.spec.{js,jsx,ts,tsx}
+test_frontend_ct_core_features: export CYPRESS_EXCLUDE_SPEC_PATTERN=./test/frontend/features/source-editor/**/*.spec.{js,jsx,ts,tsx}
 
 test_frontend_ct_modules: export CYPRESS_RESULTS=./cypress/results/modules
-test_frontend_ct_modules: export CYPRESS_SPEC_PATTERN=./modules/**/test/frontend/**/*.spec.{js,ts,tsx}
-test_frontend_ct_modules:
-	COMPOSE_PROJECT_NAME=frontend_test_ct_modules_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
-	COMPOSE_PROJECT_NAME=frontend_test_ct_modules_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) run --rm test_frontend_ct
-	COMPOSE_PROJECT_NAME=frontend_test_ct_modules_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
+test_frontend_ct_modules: export CYPRESS_SPEC_PATTERN=./modules/**/test/frontend/**/*.spec.{js,jsx,ts,tsx}
+
+test_frontend_ct_editor_other: export CYPRESS_RESULTS=./cypress/results/editor_other
+test_frontend_ct_editor_other: export CYPRESS_SPEC_PATTERN=./test/frontend/features/source-editor/**/*.spec.{js,jsx,ts,tsx}
+test_frontend_ct_editor_other: export CYPRESS_EXCLUDE_SPEC_PATTERN=./test/frontend/features/source-editor/components/codemirror-editor-visual*.spec.{js,jsx,ts,tsx}
+
+test_frontend_ct_editor_visual: export CYPRESS_RESULTS=./cypress/results/editor_visual
+test_frontend_ct_editor_visual: export CYPRESS_SPEC_PATTERN=./test/frontend/features/source-editor/components/codemirror-editor-visual*.spec.{js,jsx,ts,tsx}
+
+$(TEST_FRONTEND_CT_VARIANTS):
+	COMPOSE_PROJECT_NAME=$@_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) run --rm test_frontend_ct
+	COMPOSE_PROJECT_NAME=$@_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
 
 #
 # Acceptance tests
@@ -182,14 +179,13 @@ TEST_ACCEPTANCE_APP :=  \
 
 test_acceptance_app: $(TEST_ACCEPTANCE_APP)
 test_acceptance_app_saas: export COMPOSE_PROJECT_NAME=acceptance_test_saas_$(BUILD_DIR_NAME)
-test_acceptance_app_saas: export SHARELATEX_CONFIG=$(CFG_SAAS)
+test_acceptance_app_saas: export OVERLEAF_CONFIG=$(CFG_SAAS)
 test_acceptance_app_server_ce: export COMPOSE_PROJECT_NAME=acceptance_test_server_ce_$(BUILD_DIR_NAME)
-test_acceptance_app_server_ce: export SHARELATEX_CONFIG=$(CFG_SERVER_CE)
+test_acceptance_app_server_ce: export OVERLEAF_CONFIG=$(CFG_SERVER_CE)
 test_acceptance_app_server_pro: export COMPOSE_PROJECT_NAME=acceptance_test_server_pro_$(BUILD_DIR_NAME)
-test_acceptance_app_server_pro: export SHARELATEX_CONFIG=$(CFG_SERVER_PRO)
+test_acceptance_app_server_pro: export OVERLEAF_CONFIG=$(CFG_SERVER_PRO)
 
 $(TEST_ACCEPTANCE_APP):
-	$(DOCKER_COMPOSE) down -v -t 0
 	$(DOCKER_COMPOSE) run --rm test_acceptance
 	$(DOCKER_COMPOSE) down -v -t 0
 
@@ -199,8 +195,8 @@ $(TEST_ACCEPTANCE_APP):
 #  add a dependency on each modules Makefile and cross-link that to the
 #  template at the very top of this file.
 # Example: `web$ make modules/server-ce-scripts/test_acceptance_server_ce`
-# Description: Run the acceptance tests of the server-ce-scripts module in a
-#               Server CE Environment.
+# Description: Run the acceptance tests of the server-ce-scripts module in an
+#               Overleaf Community Edition Environment.
 # Break down:
 #  Target: modules/server-ce-scripts/test_acceptance_server_ce
 #    -> depends on modules/server-ce-scripts/Makefile
@@ -257,13 +253,13 @@ test_acceptance_module_maybe_in_server_pro: export BASE_CONFIG=$(CFG_SERVER_PRO)
 # We get the full list of modules and check for a matching module entry.
 # Either the grep will find and emit the module, or exits with code 1, which
 #  we handle with a fallback to a noop make target.
-# Run the node command in a docker-compose container which provides the needed
+# Run the node command in a docker compose container which provides the needed
 #  npm dependencies (from disk in dev-env or from the CI image in CI).
 # Pick the test_unit service which is very light-weight -- the test_acceptance
 #  service would start mongo/redis.
 $(TEST_ACCEPTANCE_MODULE_MAYBE_IN): test_acceptance_module_maybe_in_%:
 	$(MAKE) $(shell \
-		SHARELATEX_CONFIG=$(BASE_CONFIG) \
+		OVERLEAF_CONFIG=$(BASE_CONFIG) \
 		$(DOCKER_COMPOSE) run --rm test_unit \
 		node test/acceptance/getModuleTargets test_acceptance_$* \
 		| grep -e /$(MODULE_NAME)/ || echo test_acceptance_module_noop LABEL=$* \
@@ -287,7 +283,7 @@ TEST_ACCEPTANCE_MODULES_MERGED_INNER = $(MODULE_DIRS:=/test_acceptance_merged_in
 $(TEST_ACCEPTANCE_MODULES_MERGED_INNER): %/test_acceptance_merged_inner: %/Makefile
 test_acceptance_modules_merged_inner:
 	$(MAKE) $(shell \
-		SHARELATEX_CONFIG=$(BASE_CONFIG) \
+		OVERLEAF_CONFIG=$(BASE_CONFIG) \
 		node test/acceptance/getModuleTargets test_acceptance_merged_inner \
 	)
 
@@ -310,7 +306,7 @@ TEST_ACCEPTANCE_MODULES_MERGED_INNER_SPLIT = \
 # Finally we check with grep for any targets in a batch and print a fallback if none were found.
 $(TEST_ACCEPTANCE_MODULES_MERGED_INNER_SPLIT):
 	$(MAKE) $(shell \
-		SHARELATEX_CONFIG=$(BASE_CONFIG) \
+		OVERLEAF_CONFIG=$(BASE_CONFIG) \
 		node test/acceptance/getModuleTargets test_acceptance_merged_inner \
 		| tail -n+$(START) | head -n 10 \
 		| grep -e . || echo no_more_targets \
@@ -337,7 +333,6 @@ TEST_ACCEPTANCE_MODULES_MERGED_VARIANTS = \
 	test_acceptance_modules_merged_server_pro \
 
 $(TEST_ACCEPTANCE_MODULES_MERGED_VARIANTS):
-	$(DOCKER_COMPOSE) down -v -t 0
 	$(DOCKER_COMPOSE) run --rm test_acceptance make test_acceptance_modules_merged_inner
 	$(DOCKER_COMPOSE) down -v -t 0
 
@@ -359,7 +354,6 @@ test_acceptance_modules_merged_saas_4: export COMPOSE_PROJECT_NAME = \
 $(TEST_ACCEPTANCE_MODULES_MERGED_SPLIT_SAAS): export BASE_CONFIG = $(CFG_SAAS)
 
 $(TEST_ACCEPTANCE_MODULES_MERGED_SPLIT_SAAS): test_acceptance_modules_merged_saas_%:
-	$(DOCKER_COMPOSE) down -v -t 0
 	$(DOCKER_COMPOSE) run --rm test_acceptance make test_acceptance_modules_merged_inner_$*
 	$(DOCKER_COMPOSE) down -v -t 0
 
@@ -393,56 +387,13 @@ WITH_NODE_MODULES_PATH = \
 
 $(WITH_NODE_MODULES_PATH): export PATH=$(NODE_MODULES_PATH)
 
-lint: lint_backend
-lint_backend:
-	npx eslint \
-		'app.{js,ts,tsx}' \
-		'app/**/*.{js,ts,tsx}' \
-		'modules/*/index.{js,ts,tsx}' \
-		'modules/*/app/**/*.{js,ts,tsx}' \
-		--max-warnings=0
+lint: lint_eslint
+lint_eslint:
+	npm run lint
 
-lint: lint_frontend
-lint_frontend:
-	npx eslint \
-		'frontend/**/*.{js,ts,tsx}' \
-		'modules/**/frontend/**/*.{js,ts,tsx}' \
-		--max-warnings=0
-
-lint: lint_test
-lint_test: lint_test_app
-lint_test_app: lint_test_app_unit
-lint_test_app_unit:
-	npx eslint \
-		'test/unit/**/*.{js,ts,tsx}' \
-		--max-warnings=0
-
-lint_test_app: lint_test_app_rest
-lint_test_app_rest:
-	npx eslint \
-		'test/**/*.{js,ts,tsx}' \
-		--ignore-pattern 'test/unit/**/*.{js,ts,tsx}' \
-		--max-warnings=0
-
-lint_test: lint_test_modules
-lint_test_modules:
-	npx eslint \
-		'modules/*/test/**/*.{js,ts,tsx}' \
-		--max-warnings=0
-
-lint: lint_misc
-# migrations, scripts, webpack config, karma config
-lint_misc:
-	npx eslint . \
-		--ignore-pattern 'app.{js,ts,tsx}' \
-		--ignore-pattern 'app/**/*.{js,ts,tsx}' \
-		--ignore-pattern 'modules/*/app/**/*.{js,ts,tsx}' \
-		--ignore-pattern 'modules/*/index.{js,ts,tsx}' \
-		--ignore-pattern 'frontend/**/*.{js,ts,tsx}' \
-		--ignore-pattern 'modules/**/frontend/**/*.{js,ts,tsx}' \
-		--ignore-pattern 'test/**/*.{js,ts,tsx}' \
-		--ignore-pattern 'modules/*/test/**/*.{js,ts,tsx}' \
-		--max-warnings=0
+lint: lint_stylelint
+lint_stylelint:
+	npm run lint:styles
 
 lint: lint_pug
 lint_pug:
@@ -451,6 +402,10 @@ lint_pug:
 lint: lint_locales
 lint_locales:
 	bin/lint_locales
+
+lint: check_extracted_translations
+check_extracted_translations:
+	bin/check_extracted_translations
 
 sort_locales:
 	 node scripts/translations/sort.js
@@ -462,12 +417,20 @@ lint: lint_flag_res_send_usage
 lint_flag_res_send_usage:
 	bin/lint_flag_res_send_usage
 
+lint: lint_overleafModuleImports
+lint_overleafModuleImports:
+	node scripts/check_overleafModuleImports.mjs
+
 lint: typecheck_frontend
 typecheck_frontend:
-	npx tsc --noEmit
+	npm run --silent type-check
+
+lint: typecheck_backend
+typecheck_backend:
+	npm run --silent type-check:backend
 
 lint_in_docker:
-	$(RUN_LINT_FORMAT) make lint -j --output-sync
+	$(RUN_LINT_FORMAT) make lint -j2 --output-sync
 
 format: format_js
 format_js:
@@ -484,14 +447,32 @@ format_styles_fix:
 	npm run --silent format:styles:fix
 
 format_in_docker:
-	$(RUN_LINT_FORMAT) make format -j --output-sync
+	$(RUN_LINT_FORMAT) make format -j2 --output-sync
+
+SHELLCHECK_OPTS = \
+	--shell=bash \
+	--external-sources
+SHELLCHECK_COLOR := $(if $(CI),--color=never,--color)
+SHELLCHECK_FILES := { git ls-files "*.sh" -z; git grep -Plz "\A\#\!.*bash"; } | sort -zu
+
+shellcheck:
+	@$(SHELLCHECK_FILES) | xargs -0 -r docker run --rm -v $(PWD):/mnt -w /mnt \
+		koalaman/shellcheck:stable $(SHELLCHECK_OPTS) $(SHELLCHECK_COLOR)
+
+shellcheck_fix:
+	@$(SHELLCHECK_FILES) | while IFS= read -r -d '' file; do \
+		diff=$$(docker run --rm -v $(PWD):/mnt -w /mnt koalaman/shellcheck:stable $(SHELLCHECK_OPTS) --format=diff "$$file" 2>/dev/null); \
+		if [ -n "$$diff" ] && ! echo "$$diff" | patch -p1 >/dev/null 2>&1; then echo "\033[31m$$file\033[0m"; \
+		elif [ -n "$$diff" ]; then echo "$$file"; \
+		else echo "\033[2m$$file\033[0m"; fi \
+	done
 
 #
 # Build & publish
 #
 
 IMAGE_CI ?= ci/$(PROJECT_NAME):$(BRANCH_NAME)-$(BUILD_NUMBER)
-IMAGE_REPO ?= gcr.io/overleaf-ops/$(PROJECT_NAME)
+IMAGE_REPO ?= us-east1-docker.pkg.dev/overleaf-ops/ol-docker/$(PROJECT_NAME)
 IMAGE_REPO_BRANCH ?= $(IMAGE_REPO):$(BRANCH_NAME)
 IMAGE_REPO_MAIN ?= $(IMAGE_REPO):main
 IMAGE_REPO_FINAL ?= $(IMAGE_REPO_BRANCH)-$(BUILD_NUMBER)
@@ -531,24 +512,42 @@ build_webpack_once:
 		--file Dockerfile \
 		../..
 
+build_pug:
+	docker build \
+		--build-arg SENTRY_RELEASE \
+		--cache-from $(IMAGE_CI)-dev \
+		--tag $(IMAGE_CI)-pug \
+		--target pug \
+		--file Dockerfile \
+		../..
+
 build:
 	docker build \
 		--build-arg SENTRY_RELEASE \
 		--cache-from $(IMAGE_CI)-webpack \
+		--cache-from $(IMAGE_CI)-pug \
 		--cache-from $(IMAGE_REPO_FINAL) \
 		--tag $(IMAGE_REPO_FINAL) \
+		--target app \
 		--file Dockerfile \
 		../..
 
-build_test_karma:
-	COMPOSE_PROJECT_NAME=karma_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) build test_karma
-
 publish:
-	docker push $(DOCKER_REPO)/$(PROJECT_NAME):$(BRANCH_NAME)-$(BUILD_NUMBER)
+	docker push $(IMAGE_REPO_FINAL)
 
 tar:
 	COMPOSE_PROJECT_NAME=tar_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) run --rm tar
 	COMPOSE_PROJECT_NAME=tar_$(BUILD_DIR_NAME) $(DOCKER_COMPOSE) down -v -t 0
+
+build_storybook:
+	npm run lezer-latex:generate
+	npm run build-storybook
+	if [ -n "$(BRANCH_NAME)" ]; then \
+	  echo "Renaming storybook-static -> $(BRANCH_NAME)."; \
+	  d=$$(dirname "$(BRANCH_NAME)"); \
+	  mkdir -p "storybook-output/$$d"; \
+	  mv storybook-static "storybook-output/$$d/$$(basename "$(BRANCH_NAME)")/"; \
+	fi
 
 MODULE_TARGETS = \
 	$(TEST_ACCEPTANCE_MODULES_SAAS) \
@@ -565,7 +564,8 @@ $(MODULE_TARGETS):
 	$(MODULE_TARGETS) \
 	compile_modules compile_modules_full clean_ci \
 	test test_module test_unit test_unit_app \
-	test_unit_modules test_unit_module test_karma test_karma_run \
-	test_karma_build_run test_frontend test_acceptance test_acceptance_app \
-	test_acceptance_modules test_acceptance_module ci format format_fix lint \
-	build build_test_karma publish tar
+	test_unit_modules test_unit_module test_frontend \
+	test_acceptance test_acceptance_app test_acceptance_modules \
+	test_acceptance_module ci format format_fix lint \
+	shellcheck shellcheck_fix \
+	build publish tar

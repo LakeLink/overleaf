@@ -4,7 +4,6 @@ const metrics = require('@overleaf/metrics')
 const Settings = require('@overleaf/settings')
 const nodemailer = require('nodemailer')
 const sesTransport = require('nodemailer-ses-transport')
-const mandrillTransport = require('nodemailer-mandrill-transport')
 const OError = require('@overleaf/o-error')
 const { RateLimiter } = require('../../infrastructure/RateLimiter')
 const _ = require('lodash')
@@ -37,13 +36,8 @@ function getClient() {
         'sendgridApiKey configuration option is deprecated, use SMTP instead'
       )
     } else if (emailParameters.MandrillApiKey) {
-      logger.debug('using mandril for email')
-      client = nodemailer.createTransport(
-        mandrillTransport({
-          auth: {
-            apiKey: emailParameters.MandrillApiKey,
-          },
-        })
+      throw new OError(
+        'MandrillApiKey configuration option is deprecated, use SMTP instead'
       )
     } else {
       logger.debug('using smtp for email')
@@ -65,16 +59,20 @@ function getClient() {
     )
     client = {
       async sendMail(options) {
-        logger.debug({ options }, 'Would send email if enabled.')
+        logger.info({ options }, 'Would send email if enabled.')
       },
     }
   }
   return client
 }
 
-async function sendEmail(options) {
+async function sendEmail(options, emailType) {
   try {
     const canContinue = await checkCanSendEmail(options)
+    metrics.inc('email_status', {
+      status: canContinue ? 'sent' : 'rate_limited',
+      path: emailType,
+    })
     if (!canContinue) {
       logger.debug(
         {
@@ -100,6 +98,12 @@ async function sendEmail(options) {
     if (EMAIL_SETTINGS.textEncoding != null) {
       sendMailOptions.textEncoding = EMAIL_SETTINGS.textEncoding
     }
+    if (options.category) {
+      // category support for sendgrid
+      sendMailOptions.headers = {
+        'X-SMTPAPI': JSON.stringify({ category: options.category }),
+      }
+    }
     await client.sendMail(sendMailOptions)
   } catch (err) {
     throw new OError('error sending message').withCause(err)
@@ -112,7 +116,7 @@ async function checkCanSendEmail(options) {
     return true
   }
   try {
-    await rateLimiter.consume(options.sendingUser_id)
+    await rateLimiter.consume(options.sendingUser_id, 1, { method: 'userId' })
   } catch (err) {
     if (err instanceof Error) {
       throw err

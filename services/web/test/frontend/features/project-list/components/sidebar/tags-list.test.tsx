@@ -8,7 +8,6 @@ import { renderWithProjectListContext } from '../../helpers/render-with-context'
 describe('<TagsList />', function () {
   beforeEach(async function () {
     global.localStorage.clear()
-    window.metaAttributesCache = new Map()
     window.metaAttributesCache.set('ol-tags', [
       {
         _id: 'abc123def456',
@@ -21,6 +20,7 @@ describe('<TagsList />', function () {
         project_ids: [projectsData[0].id, projectsData[1].id],
       },
     ])
+    window.metaAttributesCache.set('ol-ExposedSettings', { isOverleaf: true })
 
     fetchMock.post('/tag', {
       _id: 'eee888eee888',
@@ -42,9 +42,9 @@ describe('<TagsList />', function () {
   })
 
   it('displays the tags list', function () {
-    screen.getByRole('heading', {
-      name: 'Organize Projects',
-    })
+    const header = screen.getByTestId('organize-projects')
+    expect(header.textContent).to.equal('Organize Tags')
+
     screen.getByRole('button', {
       name: 'New Tag',
     })
@@ -159,14 +159,12 @@ describe('<TagsList />', function () {
   describe('Edit modal', function () {
     beforeEach(async function () {
       const tag1Button = screen.getByText('Tag 1')
-
-      const editButton = within(
+      const dropdownToggle = within(
         tag1Button.closest('li') as HTMLElement
-      ).getByRole('button', {
-        name: 'Edit',
-      })
-
-      await fireEvent.click(editButton)
+      ).getByTestId('tag-dropdown-toggle')
+      await fireEvent.click(dropdownToggle)
+      const editMenuItem = await screen.findByRole('menuitem', { name: 'Edit' })
+      await fireEvent.click(editMenuItem)
     })
 
     it('modal is open', async function () {
@@ -251,15 +249,15 @@ describe('<TagsList />', function () {
 
   describe('Delete modal', function () {
     beforeEach(async function () {
-      const tag1Button = screen.getByText('Another tag')
-
-      const deleteButton = within(
+      const tag1Button = screen.getByText('Tag 1')
+      const dropdownToggle = within(
         tag1Button.closest('li') as HTMLElement
-      ).getByRole('button', {
+      ).getByTestId('tag-dropdown-toggle')
+      await fireEvent.click(dropdownToggle)
+      const deleteMenuItem = await screen.findByRole('menuitem', {
         name: 'Delete',
       })
-
-      await fireEvent.click(deleteButton)
+      await fireEvent.click(deleteMenuItem)
     })
 
     it('modal is open', async function () {

@@ -1,7 +1,5 @@
 import {
   EditorView,
-  highlightSpecialChars,
-  keymap,
   rectangularSelection,
   tooltips,
   crosshairCursor,
@@ -9,9 +7,8 @@ import {
   highlightActiveLineGutter,
 } from '@codemirror/view'
 import { EditorState, Extension } from '@codemirror/state'
-import { foldGutter, indentOnInput } from '@codemirror/language'
-import { history, historyKeymap, defaultKeymap } from '@codemirror/commands'
-import { lintKeymap } from '@codemirror/lint'
+import { foldGutter, indentOnInput, indentUnit } from '@codemirror/language'
+import { history } from '@codemirror/commands'
 import { language } from './language'
 import { lineWrappingIndentation } from './line-wrapping-indentation'
 import { theme } from './theme'
@@ -25,131 +22,145 @@ import { editable } from './editable'
 import { autoPair } from './auto-pair'
 import { phrases } from './phrases'
 import { spelling } from './spelling'
-import { shortcuts } from './shortcuts'
 import { symbolPalette } from './symbol-palette'
-import { trackChanges } from './track-changes'
 import { search } from './search'
 import { filterCharacters } from './filter-characters'
 import { keybindings } from './keybindings'
 import { bracketMatching, bracketSelection } from './bracket-matching'
 import { verticalOverflow } from './vertical-overflow'
-import { exceptionLogger } from './exception-logger'
 import { thirdPartyExtensions } from './third-party-extensions'
 import { lineNumbers } from './line-numbers'
 import { highlightActiveLine } from './highlight-active-line'
 import importOverleafModules from '../../../../macros/import-overleaf-module.macro'
-// import { emptyLineFiller } from './empty-line-filler'
+import { emptyLineFiller } from './empty-line-filler'
 import { goToLinePanel } from './go-to-line'
-import { parserWatcher } from './wait-for-parser'
 import { drawSelection } from './draw-selection'
 import { visual } from './visual/visual'
-import { scrollOneLine } from './scroll-one-line'
-import { foldingKeymap } from './folding-keymap'
 import { inlineBackground } from './inline-background'
-import { fontLoad } from './font-load'
 import { indentationMarkers } from './indentation-markers'
 import { codemirrorDevTools } from '../languages/latex/codemirror-dev-tools'
+import { keymaps } from './keymaps'
+import { shortcuts } from './shortcuts'
+import { effectListeners } from './effect-listeners'
+import { highlightSpecialChars } from './highlight-special-chars'
+import { toolbarPanel } from './toolbar/toolbar-panel'
+import { breadcrumbPanel } from './breadcrumbs-panel'
+import { geometryChangeEvent } from './geometry-change-event'
+import { docName } from './doc-name'
+import { fileTreeItemDrop } from './file-tree-item-drop'
+import { mathPreview } from './math-preview'
+import { ranges } from './ranges'
+import { trackDetachedComments } from './track-detached-comments'
+import { reviewTooltip } from './review-tooltip'
 
-const ignoredDefaultKeybindings = new Set([
-  // NOTE: disable "Mod-Enter" as it's used for "Compile"
-  'Mod-Enter',
-  // Disable Alt+Arrow as we have special behaviour on Windows / Linux
-  'Alt-ArrowLeft',
-  'Alt-ArrowRight',
-  // This keybinding causes issues on some keyboard layouts where \ is entered
-  // using AltGr. Windows treats Ctrl-Alt as AltGr, so trying to insert a \
-  // with Ctrl-Alt would trigger this keybinding, rather than inserting a \
-  'Mod-Alt-\\',
-])
-
-const ignoredDefaultMacKeybindings = new Set([
-  // We replace these with our custom visual-line versions
-  'Mod-Backspace',
-  'Mod-Delete',
-])
-
-const moduleExtensions: Array<() => Extension> = importOverleafModules(
-  'sourceEditorExtensions'
-).map((item: { import: { extension: Extension } }) => item.import.extension)
+const moduleExtensions: Array<(options: Record<string, any>) => Extension> =
+  importOverleafModules('sourceEditorExtensions').map(
+    (item: { import: { extension: Extension } }) => item.import.extension
+  )
 
 export const createExtensions = (options: Record<string, any>): Extension[] => [
   lineNumbers(),
-  highlightSpecialChars(),
+  highlightSpecialChars(options.visual.visual),
+  // The built-in extension that manages the history stack,
+  // configured to increase the maximum delay between adjacent grouped edits
   history({ newGroupDelay: 250 }),
+  // The built-in extension that displays buttons for folding code in a gutter element,
+  // configured with custom openText and closeText symbols.
   foldGutter({
     openText: '▾',
     closedText: '▸',
   }),
   drawSelection(),
+  // A built-in facet that is set to true to allow multiple selections.
+  // This makes the editor more like a code editor than Google Docs or Microsoft Word,
+  // which only have single selections.
   EditorState.allowMultipleSelections.of(true),
+  // A built-in extension that enables soft line wrapping.
   EditorView.lineWrapping,
+  // A built-in extension that re-indents input if the language defines an indentOnInput field in its language data.
   indentOnInput(),
   lineWrappingIndentation(options.visual.visual),
   indentationMarkers(options.visual.visual),
   bracketMatching(),
   bracketSelection(),
+  // A built-in extension that enables rectangular selections, created by dragging a new selection while holding down Alt.
   rectangularSelection(),
+  // A built-in extension that turns the pointer into a crosshair while Alt is pressed.
   crosshairCursor(),
+  // A built-in extension that shows where dragged content will be dropped.
   dropCursor(),
+  // A built-in extension that is used for configuring tooltip behaviour,
+  // configured so that the tooltip parent is the document body,
+  // to avoid cutting off tooltips which overflow the editor.
   tooltips({
     parent: document.body,
-  }),
-  keymap.of([
-    ...defaultKeymap.filter(
-      // We only filter on keys, so if the keybinding doesn't have a key,
-      // allow it
-      item => {
-        if (item.key && ignoredDefaultKeybindings.has(item.key)) {
-          return false
-        }
-        if (item.mac && ignoredDefaultMacKeybindings.has(item.mac)) {
-          return false
-        }
-        return true
+    tooltipSpace(view) {
+      const { top, bottom } = view.scrollDOM.getBoundingClientRect()
+
+      return {
+        top,
+        left: 0,
+        bottom,
+        right: window.innerWidth,
       }
-    ),
-    ...historyKeymap,
-    ...lintKeymap,
-  ]),
-  foldingKeymap(),
+    },
+  }),
+  keymaps,
   goToLinePanel(),
   filterCharacters(),
 
-  // `autoComplete` needs to be before `keybindings` so that arrow key handling
+  // NOTE: `autoComplete` needs to be before `keybindings` so that arrow key handling
   // in the autocomplete pop-up takes precedence over Vim/Emacs key bindings
-  autoComplete(options.settings),
+  autoComplete({
+    enabled: options.settings.autoComplete,
+    projectFeatures: options.projectFeatures,
+    referencesSearchMode: options.settings.referencesSearchMode,
+  }),
 
-  // `keybindings` needs to be before `language` so that Vim/Emacs bindings take
+  // NOTE: `keybindings` needs to be before `language` so that Vim/Emacs bindings take
   // precedence over language-specific keyboard shortcuts
   keybindings(),
 
-  annotations(), // NOTE: must be before `language`
-  language(options.currentDoc, options.metadata, options.settings),
+  docName(options.docName),
+
+  // NOTE: `annotations` needs to be before `language`
+  annotations(),
+  language(options.docName, options.metadata, options.settings),
+  indentUnit.of('    '), // 4 spaces
   theme(options.theme),
   realtime(options.currentDoc, options.handleError),
   cursorPosition(options.currentDoc),
-  scrollPosition(options.currentDoc),
+  scrollPosition(options.currentDoc, options.visual),
   cursorHighlights(),
   autoPair(options.settings),
   editable(),
   search(),
   phrases(options.phrases),
-  parserWatcher(),
   spelling(options.spelling),
-  shortcuts(),
+  shortcuts,
   symbolPalette(),
-  // TODO: re-enable this once incompatibility with @codemirror/view is fixed
-  // emptyLineFiller(), // NOTE: must be before `trackChanges`
-  trackChanges(options.currentDoc, options.changeManager),
-  visual(options.currentDoc, options.visual),
+  // NOTE: `emptyLineFiller` needs to be before `trackChanges`,
+  // so the decorations are added in the correct order.
+  emptyLineFiller(),
+  ranges(),
+  trackDetachedComments(options.currentDoc),
+  visual(options.visual),
+  mathPreview(options.settings.mathPreview),
+  reviewTooltip(),
+  toolbarPanel(),
+  breadcrumbPanel(options.settings.enableNewEditor),
   verticalOverflow(),
   highlightActiveLine(options.visual.visual),
+  // The built-in extension that highlights the active line in the gutter.
   highlightActiveLineGutter(),
-  scrollOneLine(),
-  fontLoad(),
   inlineBackground(options.visual.visual),
   codemirrorDevTools(),
-  exceptionLogger(),
-  moduleExtensions.map(extension => extension()),
+  // Send exceptions to Sentry
+  EditorView.exceptionSink.of(options.handleException),
+  // CodeMirror extensions provided by modules
+  moduleExtensions.map(extension => extension(options)),
   thirdPartyExtensions(),
+  effectListeners(),
+  geometryChangeEvent(),
+  fileTreeItemDrop(),
 ]
