@@ -118,6 +118,7 @@ export function ChangeToGroupModal() {
   const { modal: contactModal, showModal: showContactModal } =
     useContactUsModal({ autofillProjectUrl: false })
   const groupPlans = getMeta('ol-groupPlans')
+  const showGroupDiscount = getMeta('ol-showGroupDiscount')
   const personalSubscription = getMeta('ol-subscription') as RecurlySubscription
   const [error, setError] = useState(false)
   const [inflight, setInflight] = useState(false)
@@ -155,15 +156,9 @@ export function ChangeToGroupModal() {
     !groupPlans ||
     !groupPlans.plans ||
     !groupPlans.sizes ||
-    !groupPlans.sizesForHighDenominationCurrencies ||
     !groupPlanToChangeToCode
   )
     return null
-
-  const isUsingCOP = personalSubscription.recurly?.currency === 'COP'
-  const groupPlanSizes = isUsingCOP
-    ? groupPlans.sizesForHighDenominationCurrencies
-    : groupPlans.sizes
 
   return (
     <>
@@ -178,6 +173,11 @@ export function ChangeToGroupModal() {
         <OLModalHeader closeButton>
           <OLModalTitle className="lh-sm">
             {t('customize_your_group_subscription')}
+            {showGroupDiscount && (
+              <p className="group-subscription-modal-title-discount">
+                {t('save_x_or_more', { percentage: '10%' })}
+              </p>
+            )}
           </OLModalTitle>
         </OLModalHeader>
 
@@ -247,7 +247,7 @@ export function ChangeToGroupModal() {
                       value={groupPlanToChangeToSize}
                       onChange={e => setGroupPlanToChangeToSize(e.target.value)}
                     >
-                      {groupPlanSizes.map(size => (
+                      {groupPlans.sizes.map(size => (
                         <option key={`size-option-${size}`}>{size}</option>
                       ))}
                     </OLFormSelect>
@@ -265,20 +265,9 @@ export function ChangeToGroupModal() {
                         setGroupPlanToChangeToUsage('enterprise')
                       }
                     }}
-                    label={
-                      <Trans
-                        i18nKey="license_for_educational_purposes_confirmation"
-                        values={{ percent: educationalPercentDiscount }}
-                        shouldUnescape
-                        tOptions={{ interpolation: { escapeValue: true } }}
-                        components={[
-                          /* eslint-disable-next-line react/jsx-key */
-                          <strong />,
-                          /* eslint-disable-next-line react/jsx-key */
-                          <br />,
-                        ]}
-                      />
-                    }
+                    label={t(
+                      'apply_educational_discount_description_with_group_discount'
+                    )}
                   />
                 </form>
               </div>
@@ -343,6 +332,7 @@ export function ChangeToGroupModal() {
               }
               onClick={upgrade}
               isLoading={inflight}
+              loadingLabel={t('processing_uppercase') + '…'}
               bs3Props={{
                 loading: inflight
                   ? t('processing_uppercase') + '…'
@@ -358,7 +348,7 @@ export function ChangeToGroupModal() {
               onClick={showContactModal}
             >
               {t('need_more_than_x_licenses', {
-                x: isUsingCOP ? 20 : 50,
+                x: 20,
               })}{' '}
               {t('please_get_in_touch')}
             </OLButton>

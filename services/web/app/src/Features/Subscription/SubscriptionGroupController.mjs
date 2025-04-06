@@ -8,8 +8,6 @@ import SessionManager from '../Authentication/SessionManager.js'
 import UserAuditLogHandler from '../User/UserAuditLogHandler.js'
 import { expressify } from '@overleaf/promise-utils'
 import Modules from '../../infrastructure/Modules.js'
-import SplitTestHandler from '../SplitTests/SplitTestHandler.js'
-import ErrorController from '../Errors/ErrorController.js'
 import UserGetter from '../User/UserGetter.js'
 import { Subscription } from '../../models/Subscription.js'
 import { isProfessionalGroupPlan } from './PlansHelper.mjs'
@@ -18,6 +16,7 @@ import {
   ManuallyCollectedError,
   PendingChangeError,
   InactiveError,
+  SubtotalLimitExceededError,
 } from './Errors.js'
 import RecurlyClient from './RecurlyClient.js'
 
@@ -205,6 +204,13 @@ async function previewAddSeatsSubscriptionChange(req, res) {
       return res.status(422).end()
     }
 
+    if (error instanceof SubtotalLimitExceededError) {
+      return res.status(422).json({
+        code: 'subtotal_limit_exceeded',
+        adding: req.body.adding,
+      })
+    }
+
     logger.err(
       { error },
       'error trying to preview "add seats" subscription change'
@@ -237,6 +243,13 @@ async function createAddSeatsSubscriptionChange(req, res) {
       error instanceof InactiveError
     ) {
       return res.status(422).end()
+    }
+
+    if (error instanceof SubtotalLimitExceededError) {
+      return res.status(422).json({
+        code: 'subtotal_limit_exceeded',
+        adding: req.body.adding,
+      })
     }
 
     logger.err(
@@ -273,20 +286,6 @@ async function submitForm(req, res) {
   res.sendStatus(204)
 }
 
-async function flexibleLicensingSplitTest(req, res, next) {
-  const { variant } = await SplitTestHandler.promises.getAssignment(
-    req,
-    res,
-    'flexible-group-licensing'
-  )
-
-  if (variant !== 'enabled') {
-    return ErrorController.notFound(req, res)
-  }
-
-  next()
-}
-
 async function subscriptionUpgradePage(req, res) {
   try {
     const userId = SessionManager.getLoggedInUserId(req.session)
@@ -311,6 +310,10 @@ async function subscriptionUpgradePage(req, res) {
       return res.redirect(
         '/user/subscription/group/manually-collected-subscription'
       )
+    }
+
+    if (error instanceof SubtotalLimitExceededError) {
+      return res.redirect('/user/subscription/group/subtotal-limit-exceeded')
     }
 
     if (error instanceof PendingChangeError || error instanceof InactiveError) {
@@ -370,12 +373,26 @@ async function manuallyCollectedSubscription(req, res) {
   }
 }
 
+async function subtotalLimitExceeded(req, res) {
+  try {
+    const userId = SessionManager.getLoggedInUserId(req.session)
+    const subscription =
+      await SubscriptionLocator.promises.getUsersSubscription(userId)
+
+    res.render('subscriptions/subtotal-limit-exceeded', {
+      groupName: subscription.teamName,
+    })
+  } catch (error) {
+    logger.err({ error }, 'error trying to render subtotal limit exceeded page')
+    return res.render('/user/subscription')
+  }
+}
+
 export default {
   removeUserFromGroup: expressify(removeUserFromGroup),
   removeSelfFromGroup: expressify(removeSelfFromGroup),
   addSeatsToGroupSubscription: expressify(addSeatsToGroupSubscription),
   submitForm: expressify(submitForm),
-  flexibleLicensingSplitTest: expressify(flexibleLicensingSplitTest),
   previewAddSeatsSubscriptionChange: expressify(
     previewAddSeatsSubscriptionChange
   ),
@@ -386,4 +403,5 @@ export default {
   upgradeSubscription: expressify(upgradeSubscription),
   missingBillingInformation: expressify(missingBillingInformation),
   manuallyCollectedSubscription: expressify(manuallyCollectedSubscription),
+  subtotalLimitExceeded: expressify(subtotalLimitExceeded),
 }

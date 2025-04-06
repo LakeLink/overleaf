@@ -38,6 +38,7 @@ import { useFileTreePathContext } from '@/features/file-tree/contexts/file-tree-
 import { useUserSettingsContext } from '@/shared/context/user-settings-context'
 import { useFeatureFlag } from '@/shared/context/split-test-context'
 import { useEditorManagerContext } from '@/features/ide-react/context/editor-manager-context'
+import { CompileResponseData } from '../../../../types/compile'
 import {
   PdfScrollPosition,
   usePdfScrollPosition,
@@ -167,10 +168,10 @@ export const LocalCompileProvider: FC = ({ children }) => {
     useState(false)
 
   // the id of the CLSI server which ran the compile
-  const [clsiServerId, setClsiServerId] = useState()
+  const [clsiServerId, setClsiServerId] = useState<string>()
 
   // data received in response to a compile request
-  const [data, setData] = useState<Record<string, any>>()
+  const [data, setData] = useState<CompileResponseData>()
 
   // the rootDocId used in the most recent compile request, which may not be the
   // same as the project rootDocId. This is used to calculate correct paths when
@@ -383,7 +384,8 @@ export const LocalCompileProvider: FC = ({ children }) => {
         const outputFiles = new Map()
 
         for (const outputFile of data.outputFiles) {
-          outputFiles.set(outputFile.path, outputFile)
+          // Use a shadow-copy, we will update it in place and append to .url.
+          outputFiles.set(outputFile.path, { ...outputFile })
         }
 
         // set the PDF context
@@ -391,14 +393,7 @@ export const LocalCompileProvider: FC = ({ children }) => {
           setPdfFile(handleOutputFiles(outputFiles, projectId, data))
         }
 
-        setFileList(
-          buildFileList(
-            outputFiles,
-            data.clsiServerId,
-            data.compileGroup,
-            data.outputFilesArchive
-          )
-        )
+        setFileList(buildFileList(outputFiles, data))
 
         // handle log files
         // asynchronous (TODO: cancel on new compile?)

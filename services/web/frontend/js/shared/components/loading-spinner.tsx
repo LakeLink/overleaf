@@ -4,7 +4,6 @@ import OLSpinner, {
   OLSpinnerSize,
 } from '@/features/ui/components/ol/ol-spinner'
 import { isBootstrap5 } from '@/features/utils/bootstrap-5'
-import { setTimeout } from '@/utils/window'
 import classNames from 'classnames'
 
 function LoadingSpinner({
@@ -25,7 +24,13 @@ function LoadingSpinner({
   const [show, setShow] = useState(false)
 
   useEffect(() => {
-    const timer = setTimeout(() => {
+    // Ensure that spinner is displayed immediately if delay is 0
+    if (delay === 0) {
+      setShow(true)
+      return
+    }
+
+    const timer = window.setTimeout(() => {
       setShow(true)
     }, delay)
 

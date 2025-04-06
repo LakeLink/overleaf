@@ -180,6 +180,10 @@ const rateLimiters = {
     points: 1,
     duration: 60,
   }),
+  sendConfirmation: new RateLimiter('send-confirmation', {
+    points: 1,
+    duration: 60,
+  }),
   sendChatMessage: new RateLimiter('send-chat-message', {
     points: 100,
     duration: 60,
@@ -218,7 +222,7 @@ async function initialize(webRouter, privateApiRouter, publicApiRouter) {
   webRouter.post(
     '/login',
     RateLimiterMiddleware.rateLimit(overleafLoginRateLimiter), // rate limit IP (20 / 60s)
-    RateLimiterMiddleware.loginRateLimitEmail, // rate limit email (10 / 120s)
+    RateLimiterMiddleware.loginRateLimitEmail(), // rate limit email (10 / 120s)
     CaptchaMiddleware.validateCaptcha('login'),
     AuthenticationController.passportLogin
   )
@@ -243,7 +247,7 @@ async function initialize(webRouter, privateApiRouter, publicApiRouter) {
     webRouter.post(
       '/login/legacy',
       RateLimiterMiddleware.rateLimit(overleafLoginRateLimiter), // rate limit IP (20 / 60s)
-      RateLimiterMiddleware.loginRateLimitEmail, // rate limit email (10 / 120s)
+      RateLimiterMiddleware.loginRateLimitEmail(), // rate limit email (10 / 120s)
       CaptchaMiddleware.validateCaptcha('login'),
       AuthenticationController.passportLogin
     )
@@ -335,6 +339,28 @@ async function initialize(webRouter, privateApiRouter, publicApiRouter) {
     RateLimiterMiddleware.rateLimit(rateLimiters.confirmEmail),
     UserEmailsController.confirm
   )
+
+  webRouter.post(
+    '/user/emails/send-confirmation-code',
+    AuthenticationController.requireLogin(),
+    RateLimiterMiddleware.rateLimit(rateLimiters.sendConfirmation),
+    UserEmailsController.sendExistingSecondaryEmailConfirmationCode
+  )
+
+  webRouter.post(
+    '/user/emails/resend-confirmation-code',
+    AuthenticationController.requireLogin(),
+    RateLimiterMiddleware.rateLimit(rateLimiters.resendConfirmation),
+    UserEmailsController.resendExistingSecondaryEmailConfirmationCode
+  )
+
+  webRouter.post(
+    '/user/emails/confirm-code',
+    AuthenticationController.requireLogin(),
+    RateLimiterMiddleware.rateLimit(rateLimiters.confirmEmail),
+    UserEmailsController.checkExistingEmailConfirmationCode
+  )
+
   webRouter.post(
     '/user/emails/resend_confirmation',
     AuthenticationController.requireLogin(),

@@ -201,7 +201,12 @@ describe('backup script', function () {
         textOperation: [newContentString.length, ' even more'], // Keep existing content, append ' even more'
       })
       const additionalEditOp = Operation.editFile('main.tex', additionalTextOp)
-      const additionalChange = new Change([additionalEditOp], new Date(), [])
+      const firstTimestamp = new Date()
+      const additionalChange = new Change(
+        [additionalEditOp],
+        firstTimestamp,
+        []
+      )
 
       // add the nonbmp file
       const blobStore = new BlobStore(historyId)
@@ -222,7 +227,12 @@ describe('backup script', function () {
         'non_bmp.txt',
         File.fromHash(testFiles.NON_BMP_TXT_HASH)
       )
-      const additionalChange2 = new Change([addNonBmpFileOp], new Date(), [])
+      const secondTimestamp = new Date()
+      const additionalChange2 = new Change(
+        [addNonBmpFileOp],
+        secondTimestamp,
+        []
+      )
 
       await persistChanges(
         historyId,
@@ -242,10 +252,11 @@ describe('backup script', function () {
       expect(afterChangeResult.backupStatus.lastBackedUpAt)
         .to.be.an.instanceOf(Date)
         .and.to.deep.equal(result1.backupStatus.lastBackedUpAt)
-      // but it should update the pendingChangeAt timestamp
+      // but it should update the pendingChangeAt timestamp to the timestamp of the
+      // first change which modified the project
       expect(afterChangeResult.backupStatus.pendingChangeAt)
         .to.be.an.instanceOf(Date)
-        .and.to.be.greaterThan(result1.backupStatus.lastBackedUpAt)
+        .and.to.deep.equal(firstTimestamp)
 
       // Second backup
       const { stdout: stdout2 } = await runBackupScript([
@@ -410,12 +421,18 @@ describe('backup script', function () {
   })
 
   describe('with complex project content', function () {
+    let beforeInitializationTimestamp
+    let afterInitializationTimestamp
+
     beforeEach(async function () {
       // Create initial project
       await projectsCollection.insertOne(project)
 
       // Initialize project in chunk store
+      // bracket the initialisation with two timestamps to check the pendingChangeAt field
+      beforeInitializationTimestamp = new Date()
       await ChunkStore.initializeProject(historyId)
+      afterInitializationTimestamp = new Date()
 
       const blobStore = new BlobStore(historyId)
 
@@ -528,6 +545,14 @@ describe('backup script', function () {
       )
     })
 
+    it('persistChanges should set the pendingChangeAt field to the time of snapshot initialisation', async function () {
+      const result = await getBackupStatus(projectId)
+      expect(result.backupStatus.pendingChangeAt).to.be.an.instanceOf(Date)
+      expect(result.backupStatus.pendingChangeAt)
+        .to.be.greaterThan(beforeInitializationTimestamp)
+        .and.to.be.lessThan(afterInitializationTimestamp)
+    })
+
     it('should backup all chunks and blobs from a complex project history', async function () {
       // Run backup script
       const { stdout } = await runBackupScript(['--projectId', projectId])
@@ -585,6 +610,40 @@ describe('backup script', function () {
         expect(JSON.parse(chunkContent)).to.deep.equal(rawHistory)
       }
     })
+
+    it('should throw an error if downloading a blob fails', async function () {
+      const blobStore = new BlobStore(historyId)
+      const blob = await blobStore.putFile(
+        testFiles.path('null_characters.txt')
+      )
+      const change = new Change(
+        [Operation.addFile('broken-file', File.fromHash(blob.getHash()))],
+        new Date(),
+        []
+      )
+      // Persist all changes
+      await persistChanges(historyId, [change], limitsToPersistImmediately, 53)
+
+      // Delete the blob from the underlying storage to simulate a failure
+      const bucket = config.get('blobStore.projectBucket')
+      const key = makeProjectKey(historyId, blob.getHash())
+      await persistor.deleteObject(bucket, key)
+
+      // Run backup script - it should fail because the blob is missing
+      let result
+      try {
+        result = await runBackupScript(['--projectId', projectId])
+        expect.fail('Backup script should have failed')
+      } catch (err) {
+        expect(err).to.exist
+        expect(result).to.not.exist
+      }
+
+      // Verify that backup did not complete
+      const newBackupStatus = await getBackupStatus(projectId)
+      expect(newBackupStatus.backupStatus.lastBackedUpVersion).to.equal(50) // backup fails on final chunk
+      expect(newBackupStatus.currentEndVersion).to.equal(54) // backup is incomplete due to missing blob
+    })
   })
 })
 
@@ -617,8 +676,7 @@ async function runBackupScript(args) {
     result = { stdout, stderr, status: code }
   }
   if (result.status !== 0) {
-    console.log(result)
+    throw new Error('backup failed')
   }
-  expect(result.status).to.equal(0)
   return result
 }

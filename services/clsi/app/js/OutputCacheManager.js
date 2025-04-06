@@ -98,12 +98,11 @@ module.exports = OutputCacheManager = {
   CONTENT_SUBDIR: 'content',
   CACHE_SUBDIR: 'generated-files',
   ARCHIVE_SUBDIR: 'archived-logs',
-  // build id is HEXDATE-HEXRANDOM from Date.now()and RandomBytes
-  // for backwards compatibility, make the randombytes part optional
-  BUILD_REGEX: /^[0-9a-f]+(-[0-9a-f]+)?$/,
-  CONTENT_REGEX: /^[0-9a-f]+(-[0-9a-f]+)?$/,
+  // build id is HEXDATE-HEXRANDOM from Date.now() and RandomBytes
+  BUILD_REGEX: /^[0-9a-f]+-[0-9a-f]+$/,
+  CONTENT_REGEX: /^[0-9a-f]+-[0-9a-f]+$/,
   CACHE_LIMIT: 2, // maximum number of cache directories
-  CACHE_AGE: 60 * 60 * 1000, // up to one hour old
+  CACHE_AGE: 90 * 60 * 1000, // up to 90 minutes old
 
   init,
   queueDirOperation: callbackify(queueDirOperation),
@@ -137,7 +136,11 @@ module.exports = OutputCacheManager = {
     outputDir,
     callback
   ) {
-    OutputCacheManager.generateBuildId(function (err, buildId) {
+    const getBuildId = cb => {
+      if (request.buildId) return cb(null, request.buildId)
+      OutputCacheManager.generateBuildId(cb)
+    }
+    getBuildId(function (err, buildId) {
       if (err) {
         return callback(err)
       }
@@ -245,7 +248,7 @@ module.exports = OutputCacheManager = {
           { err, directory: cacheDir },
           'error creating cache directory'
         )
-        callback(err, outputFiles)
+        callback(err)
       } else {
         // copy all the output files into the new cache directory
         const results = []
@@ -263,7 +266,6 @@ module.exports = OutputCacheManager = {
               return cb()
             }
             // copy other files into cache directory if valid
-            const newFile = _.clone(file)
             const src = Path.join(compileDir, file.path)
             const dst = Path.join(cacheDir, file.path)
             OutputCacheManager._checkIfShouldCopy(
@@ -279,8 +281,8 @@ module.exports = OutputCacheManager = {
                   if (err) {
                     return cb(err)
                   }
-                  newFile.build = buildId // attach a build id if we cached the file
-                  results.push(newFile)
+                  file.build = buildId
+                  results.push(file)
                   cb()
                 })
               }
@@ -288,8 +290,7 @@ module.exports = OutputCacheManager = {
           },
           function (err) {
             if (err) {
-              // pass back the original files if we encountered *any* error
-              callback(err, outputFiles)
+              callback(err)
               // clean up the directory we just created
               fs.rm(cacheDir, { force: true, recursive: true }, function (err) {
                 if (err) {
@@ -301,7 +302,7 @@ module.exports = OutputCacheManager = {
               })
             } else {
               // pass back the list of new files in the cache
-              callback(err, results)
+              callback(null, results)
               // let file expiry run in the background, expire all previous files if per-user
               cleanupDirectory(outputDir, {
                 keep: buildId,

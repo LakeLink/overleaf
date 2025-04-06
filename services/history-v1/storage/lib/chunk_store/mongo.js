@@ -55,6 +55,35 @@ async function getChunkForVersion(projectId, version) {
 }
 
 /**
+ * Get the metadata for the chunk that contains the given version before the endTime.
+ */
+async function getFirstChunkBeforeTimestamp(projectId, timestamp) {
+  assert.mongoId(projectId, 'bad projectId')
+  assert.date(timestamp, 'bad timestamp')
+
+  const recordActive = await getChunkForVersion(projectId, 0)
+  if (recordActive && recordActive.endTimestamp <= timestamp) {
+    return recordActive
+  }
+
+  // fallback to deleted chunk
+  const recordDeleted = await mongodb.chunks.findOne(
+    {
+      projectId: new ObjectId(projectId),
+      state: 'deleted',
+      startVersion: 0,
+      updatedAt: { $lte: timestamp }, // indexed for state=deleted
+      endTimestamp: { $lte: timestamp },
+    },
+    { sort: { updatedAt: -1 } }
+  )
+  if (recordDeleted) {
+    return chunkFromRecord(recordDeleted)
+  }
+  throw new Chunk.BeforeTimestampNotFoundError(projectId, timestamp)
+}
+
+/**
  * Get the metadata for the chunk that contains the version that was current at
  * the given timestamp.
  */
@@ -83,6 +112,39 @@ async function getChunkForTimestamp(projectId, timestamp) {
     return chunk
   }
 
+  return chunkFromRecord(record)
+}
+
+/**
+ * Get the metadata for the chunk that contains the version that was current before
+ * the given timestamp.
+ */
+async function getLastActiveChunkBeforeTimestamp(projectId, timestamp) {
+  assert.mongoId(projectId, 'bad projectId')
+  assert.date(timestamp, 'bad timestamp')
+
+  const record = await mongodb.chunks.findOne(
+    {
+      projectId: new ObjectId(projectId),
+      state: 'active',
+      $or: [
+        {
+          endTimestamp: {
+            $lte: timestamp,
+          },
+        },
+        {
+          endTimestamp: null,
+        },
+      ],
+    },
+    // We use the index on the startVersion for sorting records. This assumes
+    // that timestamps go up with each version.
+    { sort: { startVersion: -1 } }
+  )
+  if (record == null) {
+    throw new Chunk.BeforeTimestampNotFoundError(projectId, timestamp)
+  }
   return chunkFromRecord(record)
 }
 
@@ -137,7 +199,13 @@ async function insertPendingChunk(projectId, chunk) {
 /**
  * Record that a new chunk was created.
  */
-async function confirmCreate(projectId, chunk, chunkId, mongoOpts = {}) {
+async function confirmCreate(
+  projectId,
+  chunk,
+  chunkId,
+  earliestChangeTimestamp,
+  mongoOpts = {}
+) {
   assert.mongoId(projectId, 'bad projectId')
   assert.instance(chunk, Chunk, 'bad chunk')
   assert.mongoId(chunkId, 'bad chunkId')
@@ -166,13 +234,23 @@ async function confirmCreate(projectId, chunk, chunkId, mongoOpts = {}) {
   if (result.matchedCount === 0) {
     throw new OError('pending chunk not found', { projectId, chunkId })
   }
-  await updateProjectRecord(projectId, chunk, mongoOpts)
+  await updateProjectRecord(
+    projectId,
+    chunk,
+    earliestChangeTimestamp,
+    mongoOpts
+  )
 }
 
 /**
  * Write the metadata to the project record
  */
-async function updateProjectRecord(projectId, chunk, mongoOpts = {}) {
+async function updateProjectRecord(
+  projectId,
+  chunk,
+  earliestChangeTimestamp,
+  mongoOpts = {}
+) {
   // record the end version against the project
   await mongodb.projects.updateOne(
     {
@@ -189,7 +267,7 @@ async function updateProjectRecord(projectId, chunk, mongoOpts = {}) {
       // be cleared every time a backup is completed.
       $min: {
         'overleaf.backup.pendingChangeAt':
-          chunk.getEndTimestamp() || new Date(),
+          earliestChangeTimestamp || chunk.getEndTimestamp() || new Date(),
       },
     },
     mongoOpts
@@ -199,7 +277,13 @@ async function updateProjectRecord(projectId, chunk, mongoOpts = {}) {
 /**
  * Record that a chunk was replaced by a new one.
  */
-async function confirmUpdate(projectId, oldChunkId, newChunk, newChunkId) {
+async function confirmUpdate(
+  projectId,
+  oldChunkId,
+  newChunk,
+  newChunkId,
+  earliestChangeTimestamp
+) {
   assert.mongoId(projectId, 'bad projectId')
   assert.mongoId(oldChunkId, 'bad oldChunkId')
   assert.instance(newChunk, Chunk, 'bad newChunk')
@@ -209,7 +293,13 @@ async function confirmUpdate(projectId, oldChunkId, newChunk, newChunkId) {
   try {
     await session.withTransaction(async () => {
       await deleteChunk(projectId, oldChunkId, { session })
-      await confirmCreate(projectId, newChunk, newChunkId, { session })
+      await confirmCreate(
+        projectId,
+        newChunk,
+        newChunkId,
+        earliestChangeTimestamp,
+        { session }
+      )
     })
   } finally {
     await session.endSession()
@@ -310,6 +400,8 @@ function chunkFromRecord(record) {
 
 module.exports = {
   getLatestChunk,
+  getFirstChunkBeforeTimestamp,
+  getLastActiveChunkBeforeTimestamp,
   getChunkForVersion,
   getChunkForTimestamp,
   getProjectChunkIds,

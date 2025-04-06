@@ -9,7 +9,6 @@ import React, {
 } from 'react'
 import { ReactScopeValueStore } from '@/features/ide-react/scope-value-store/react-scope-value-store'
 import populateLayoutScope from '@/features/ide-react/scope-adapters/layout-context-adapter'
-import populateReviewPanelScope from '@/features/ide-react/scope-adapters/review-panel-context-adapter'
 import { IdeProvider } from '@/shared/context/ide-context'
 import {
   createIdeEventEmitter,
@@ -20,7 +19,6 @@ import { useConnectionContext } from '@/features/ide-react/context/connection-co
 import { getMockIde } from '@/shared/context/mock/mock-ide'
 import { populateEditorScope } from '@/features/ide-react/scope-adapters/editor-manager-context-adapter'
 import { postJSON } from '@/infrastructure/fetch-json'
-import { populateOnlineUsersScope } from '@/features/ide-react/context/online-users-context'
 import { ReactScopeEventEmitter } from '@/features/ide-react/scope-event-emitter/react-scope-event-emitter'
 import getMeta from '@/utils/meta'
 
@@ -74,11 +72,8 @@ export function createReactScopeValueStore(projectId: string) {
   populateLayoutScope(scopeStore)
   populateProjectScope(scopeStore)
   populatePdfScope(scopeStore)
-  populateOnlineUsersScope(scopeStore)
-  populateReviewPanelScope(scopeStore)
 
   scopeStore.allowNonExistentPath('hasLintingError')
-  scopeStore.allowNonExistentPath('loadingThreads')
 
   return scopeStore
 }

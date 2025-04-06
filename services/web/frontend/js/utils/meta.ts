@@ -53,6 +53,7 @@ import { DefaultNavbarMetadata } from '@/features/ui/components/types/default-na
 import { FooterMetadata } from '@/features/ui/components/types/footer-metadata'
 export interface Meta {
   'ol-ExposedSettings': ExposedSettings
+  'ol-addonPrices': Record<string, { annual: string; monthly: string }>
   'ol-allInReconfirmNotificationPeriods': UserEmailData[]
   'ol-allowedExperiments': string[]
   'ol-allowedImageNames': AllowedImageName[]
@@ -83,6 +84,7 @@ export interface Meta {
   'ol-currentInstitutionsWithLicence': Institution[]
   'ol-currentManagedUserAdminEmail': string
   'ol-currentUrl': string
+  'ol-customerIoEnabled': boolean
   'ol-debugPdfDetach': boolean
   'ol-detachRole': 'detached' | 'detacher' | ''
   'ol-dictionariesRoot': 'string'
@@ -149,6 +151,7 @@ export interface Meta {
   'ol-managers': MinimalUser[]
   'ol-mathJaxPath': string
   'ol-maxDocLength': number
+  'ol-maxReconnectGracefullyIntervalMs': number
   'ol-memberGroupSubscriptions': MemberGroupSubscription[]
   'ol-memberOfSSOEnabledGroups': GroupSSOLinkingStatus[]
   'ol-members': MinimalUser[]
@@ -192,6 +195,7 @@ export interface Meta {
   'ol-showAiErrorAssistant': boolean
   'ol-showBrlGeoBanner': boolean
   'ol-showCouponField': boolean
+  'ol-showGroupDiscount': boolean
   'ol-showGroupsAndEnterpriseBanner': boolean
   'ol-showInrGeoBanner': boolean
   'ol-showLATAMBanner': boolean
@@ -233,7 +237,6 @@ export interface Meta {
   'ol-usersBestSubscription': ProjectDashboardSubscription | undefined
   'ol-usersEmail': string | undefined
   'ol-validationStatus': ValidationStatus
-  'ol-websiteRedesignPlansVariant': 'default' | 'light-design' | 'new-design'
   'ol-wikiEnabled': boolean
   'ol-writefullCssUrl': string
   'ol-writefullEnabled': boolean

@@ -5,7 +5,6 @@ import { useMeta } from '../hooks/use-meta'
 import { FC } from 'react'
 import { FileTreePathContext } from '@/features/file-tree/contexts/file-tree-path'
 import RangesTracker from '@overleaf/ranges-tracker'
-import { bsVersionDecorator } from '../../../.storybook/utils/with-bootstrap-switcher'
 
 const FileTreePathProvider: FC = ({ children }) => (
   <FileTreePathContext.Provider
@@ -41,9 +40,6 @@ export default {
       </div>
     ),
   ],
-  argTypes: {
-    ...bsVersionDecorator.argTypes,
-  },
 }
 
 const settings = {
@@ -57,13 +53,6 @@ const settings = {
   autoPairDelimiters: true,
   trackChanges: true,
   syntaxValidation: false,
-}
-
-const reviewPanel = {
-  resolvedComments: {},
-  formattedProjectMembers: {},
-  overview: { docsCollapsedState: { 'story-doc': false } },
-  entries: {},
 }
 
 const permissions = {
@@ -105,7 +94,6 @@ export const Latex = (args: any, { globals: { theme } }: any) => {
       overallTheme: theme === 'default-' ? '' : theme,
     },
     permissions,
-    reviewPanel,
   })
 
   useMeta({
@@ -126,7 +114,6 @@ export const Markdown = (args: any, { globals: { theme } }: any) => {
       overallTheme: theme === 'default-' ? '' : theme,
     },
     permissions,
-    reviewPanel,
   })
 
   return <SourceEditor />
@@ -144,7 +131,6 @@ export const Visual = (args: any, { globals: { theme } }: any) => {
       overallTheme: theme === 'default-' ? '' : theme,
     },
     permissions,
-    reviewPanel,
   })
   useMeta({
     'ol-showSymbolPalette': true,
@@ -166,7 +152,6 @@ export const Bibtex = (args: any, { globals: { theme } }: any) => {
       overallTheme: theme === 'default-' ? '' : theme,
     },
     permissions,
-    reviewPanel,
   })
 
   return <SourceEditor />

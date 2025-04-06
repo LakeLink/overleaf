@@ -72,7 +72,7 @@ describe('<PersonalSubscription />', function () {
         ],
       })
 
-      screen.getByText('You are currently subscribed to the', { exact: false })
+      screen.getByRole('heading', { name: /billing/i })
     })
 
     it('renders the canceled dash', function () {
@@ -89,7 +89,7 @@ describe('<PersonalSubscription />', function () {
 
       screen.getByText('No further payments will be taken.', { exact: false })
 
-      screen.getByRole('link', { name: 'View your invoices' })
+      screen.getByRole('button', { name: 'View your invoices' })
       screen.getByRole('button', { name: 'Reactivate your subscription' })
     })
 

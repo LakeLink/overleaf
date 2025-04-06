@@ -28,10 +28,34 @@ module.exports = {
     convertTrackChangesToExplicitFormat,
   },
 }
+// Forces null pendingReviewer_refs, readOnly_refs, and reviewer_refs to
+// be empty arrays to avoid errors during $pull ops
+// See https://github.com/overleaf/internal/issues/24610
+async function fixNullCollaboratorRefs(projectId) {
+  // Temporary cleanup for the case where pendingReviewer_refs is null
+  await Project.updateOne(
+    { _id: projectId, pendingReviewer_refs: { $type: 'null' } },
+    { $set: { pendingReviewer_refs: [] } }
+  ).exec()
+
+  // Temporary cleanup for the case where readOnly_refs is null
+  await Project.updateOne(
+    { _id: projectId, readOnly_refs: { $type: 'null' } },
+    { $set: { readOnly_refs: [] } }
+  ).exec()
+
+  // Temporary cleanup for the case where reviewer_refs is null
+  await Project.updateOne(
+    { _id: projectId, reviewer_refs: { $type: 'null' } },
+    { $set: { reviewer_refs: [] } }
+  ).exec()
+}
 
 async function removeUserFromProject(projectId, userId) {
   try {
     const project = await Project.findOne({ _id: projectId }).exec()
+
+    await fixNullCollaboratorRefs(projectId)
 
     // Deal with the old type of boolean value for archived
     // In order to clear it
@@ -53,6 +77,7 @@ async function removeUserFromProject(projectId, userId) {
             reviewer_refs: userId,
             readOnly_refs: userId,
             pendingEditor_refs: userId,
+            pendingReviewer_refs: userId,
             tokenAccessReadOnly_refs: userId,
             tokenAccessReadAndWrite_refs: userId,
             trashed: userId,
@@ -68,6 +93,7 @@ async function removeUserFromProject(projectId, userId) {
             readOnly_refs: userId,
             reviewer_refs: userId,
             pendingEditor_refs: userId,
+            pendingReviewer_refs: userId,
             tokenAccessReadOnly_refs: userId,
             tokenAccessReadAndWrite_refs: userId,
             archived: userId,
@@ -106,7 +132,7 @@ async function addUserIdToProject(
   addingUserId,
   userId,
   privilegeLevel,
-  { pendingEditor } = {}
+  { pendingEditor, pendingReviewer } = {}
 ) {
   const project = await ProjectGetter.promises.getProject(projectId, {
     owner_ref: 1,
@@ -133,9 +159,17 @@ async function addUserIdToProject(
     level = { readOnly_refs: userId }
     if (pendingEditor) {
       level.pendingEditor_refs = userId
+    } else if (pendingReviewer) {
+      level.pendingReviewer_refs = userId
     }
     logger.debug(
-      { privileges: 'readOnly', userId, projectId, pendingEditor },
+      {
+        privileges: 'readOnly',
+        userId,
+        projectId,
+        pendingEditor,
+        pendingReviewer,
+      },
       'adding user'
     )
   } else if (privilegeLevel === PrivilegeLevels.REVIEW) {
@@ -246,6 +280,19 @@ async function transferProjects(fromUserId, toUserId) {
     }
   ).exec()
 
+  await Project.updateMany(
+    { pendingReviewer_refs: fromUserId },
+    {
+      $addToSet: { pendingReviewer_refs: toUserId },
+    }
+  ).exec()
+  await Project.updateMany(
+    { pendingReviewer_refs: fromUserId },
+    {
+      $pull: { pendingReviewer_refs: fromUserId },
+    }
+  ).exec()
+
   // Flush in background, no need to block on this
   _flushProjects(projectIds).catch(err => {
     logger.err(
@@ -259,7 +306,7 @@ async function setCollaboratorPrivilegeLevel(
   projectId,
   userId,
   privilegeLevel,
-  { pendingEditor } = {}
+  { pendingEditor, pendingReviewer } = {}
 ) {
   // Make sure we're only updating the project if the user is already a
   // collaborator
@@ -272,6 +319,9 @@ async function setCollaboratorPrivilegeLevel(
     ],
   }
   let update
+
+  await fixNullCollaboratorRefs(projectId)
+
   switch (privilegeLevel) {
     case PrivilegeLevels.READ_AND_WRITE: {
       update = {
@@ -279,6 +329,7 @@ async function setCollaboratorPrivilegeLevel(
           readOnly_refs: userId,
           pendingEditor_refs: userId,
           reviewer_refs: userId,
+          pendingReviewer_refs: userId,
         },
         $addToSet: { collaberator_refs: userId },
       }
@@ -290,6 +341,7 @@ async function setCollaboratorPrivilegeLevel(
           readOnly_refs: userId,
           pendingEditor_refs: userId,
           collaberator_refs: userId,
+          pendingReviewer_refs: userId,
         },
         $addToSet: { reviewer_refs: userId },
       }
@@ -316,11 +368,19 @@ async function setCollaboratorPrivilegeLevel(
         $pull: { collaberator_refs: userId, reviewer_refs: userId },
         $addToSet: { readOnly_refs: userId },
       }
+
       if (pendingEditor) {
         update.$addToSet.pendingEditor_refs = userId
       } else {
         update.$pull.pendingEditor_refs = userId
       }
+
+      if (pendingReviewer) {
+        update.$addToSet.pendingReviewer_refs = userId
+      } else {
+        update.$pull.pendingReviewer_refs = userId
+      }
+
       break
     }
     default: {

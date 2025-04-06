@@ -118,10 +118,14 @@ describe('<ChangePlanModal />', function () {
       })
       fireEvent.click(buttons[0])
 
-      await screen.findByText('Are you sure you want to change plan to', {
-        exact: false,
-      })
-      screen.getByRole('button', { name: 'Change plan' })
+      const confirmModal = screen.getByRole('dialog')
+      await within(confirmModal).findByText(
+        'Are you sure you want to change plan to',
+        {
+          exact: false,
+        }
+      )
+      within(confirmModal).getByRole('button', { name: 'Change plan' })
 
       expect(
         screen.queryByText(
@@ -197,10 +201,13 @@ describe('<ChangePlanModal />', function () {
       await screen.findByText('Are you sure you want to change plan to', {
         exact: false,
       })
-      const buttonConfirm = screen.getByRole('button', { name: 'Change plan' })
+      const buttonConfirm = within(screen.getByRole('dialog')).getByRole(
+        'button',
+        { name: 'Change plan' }
+      )
       fireEvent.click(buttonConfirm)
 
-      screen.getByText('processing', { exact: false })
+      screen.getByRole('button', { name: 'Processing…' })
 
       // page is reloaded on success
       await waitFor(() => {
@@ -230,10 +237,13 @@ describe('<ChangePlanModal />', function () {
       await screen.findByText('Are you sure you want to change plan to', {
         exact: false,
       })
-      const buttonConfirm = screen.getByRole('button', { name: 'Change plan' })
+      const buttonConfirm = within(screen.getByRole('dialog')).getByRole(
+        'button',
+        { name: 'Change plan' }
+      )
       fireEvent.click(buttonConfirm)
 
-      screen.getByText('processing', { exact: false })
+      screen.getByRole('button', { name: 'Processing…' })
 
       await screen.findByText('Sorry, something went wrong. ', { exact: false })
       await screen.findByText('Please try again. ', { exact: false })
@@ -286,7 +296,7 @@ describe('<ChangePlanModal />', function () {
       })
       fireEvent.click(buttonConfirm)
 
-      screen.getByText('processing', { exact: false })
+      screen.getByRole('button', { name: 'Processing…' })
 
       // page is reloaded on success
       await waitFor(() => {
@@ -304,7 +314,7 @@ describe('<ChangePlanModal />', function () {
       })
       fireEvent.click(buttonConfirm)
 
-      screen.getByText('processing', { exact: false })
+      screen.getByRole('button', { name: 'Processing…' })
       await screen.findByText('Sorry, something went wrong. ', { exact: false })
       await screen.findByText('Please try again. ', { exact: false })
       await screen.findByText('If the problem continues please contact us.', {
@@ -322,7 +332,7 @@ describe('<ChangePlanModal />', function () {
     const standardPlanCollaboratorText = '10 collaborators per project'
     const professionalPlanCollaboratorText = 'Unlimited collaborators'
     const educationInputLabel =
-      '40% educational discountI confirm this subscription is for educational purposes (applies to students or faculty using Overleaf for teaching)'
+      'Get a total of 40% off for groups using Overleaf for teaching'
 
     let modal: HTMLElement
     async function openModal() {
@@ -368,15 +378,14 @@ describe('<ChangePlanModal />', function () {
       expect(sizeSelect.value).to.equal('10')
       const sizeOption = within(sizeSelect).getAllByRole('option')
       expect(sizeOption.length).to.equal(groupPlans.sizes.length)
-      within(modal).getByText('40% educational discount')
+      within(modal).getByText(
+        'Get a total of 40% off for groups using Overleaf for teaching'
+      )
 
       const educationalCheckbox = within(modal).getByRole(
         'checkbox'
       ) as HTMLInputElement
       expect(educationalCheckbox.checked).to.be.false
-      within(modal).getByText(
-        'I confirm this subscription is for educational purposes (applies to students or faculty using Overleaf for teaching)'
-      )
 
       within(modal).getByText(
         'Your new subscription will be billed immediately to your current payment method.'
@@ -387,7 +396,7 @@ describe('<ChangePlanModal />', function () {
       within(modal).getByRole('button', { name: 'Upgrade now' })
 
       within(modal).getByRole('button', {
-        name: 'Need more than 50 licenses? Please get in touch',
+        name: 'Need more than 20 licenses? Please get in touch',
       })
     })
 
@@ -519,7 +528,7 @@ describe('<ChangePlanModal />', function () {
       const buttonConfirm = screen.getByRole('button', { name: 'Upgrade now' })
       fireEvent.click(buttonConfirm)
 
-      screen.getByText('processing', { exact: false })
+      screen.getByRole('button', { name: 'Processing…' })
 
       // // page is reloaded on success
       await waitFor(() => {
@@ -540,7 +549,7 @@ describe('<ChangePlanModal />', function () {
       const buttonConfirm = screen.getByRole('button', { name: 'Upgrade now' })
       fireEvent.click(buttonConfirm)
 
-      screen.getByText('processing', { exact: false })
+      screen.getByRole('button', { name: 'Processing…' })
 
       await screen.findByText('Sorry, something went wrong. ', { exact: false })
       await screen.findByText('Please try again. ', { exact: false })

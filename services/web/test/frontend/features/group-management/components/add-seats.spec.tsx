@@ -1,4 +1,3 @@
-import '../../../helpers/bootstrap-5'
 import AddSeats, {
   MAX_NUMBER_OF_USERS,
 } from '@/features/group-management/components/add-seats/add-seats'
@@ -16,7 +15,7 @@ describe('<AddSeats />', function () {
 
     cy.mount(<AddSeats />)
 
-    cy.findByRole('button', { name: /add users/i })
+    cy.findByRole('button', { name: /buy licenses/i })
     cy.findByTestId('add-more-users-group-form')
   })
 
@@ -36,22 +35,22 @@ describe('<AddSeats />', function () {
     })
   })
 
-  it('shows the "Add more users" label', function () {
-    cy.findByText(/add more users/i)
+  it('shows the "Buy more licenses" label', function () {
+    cy.findByText(/buy more licenses/i)
   })
 
   it('shows the maximum supported users', function () {
     cy.findByText(
       new RegExp(
-        `your current plan supports up to ${this.totalLicenses} users`,
+        `your current plan supports up to ${this.totalLicenses} licenses`,
         'i'
       )
     )
   })
 
-  it('shows instructions on how to reduce users on a plan', function () {
+  it('shows instructions on how to reduce licenses on a plan', function () {
     cy.contains(
-      /if you want to reduce the number of users on your plan, please contact customer support/i
+      /if you want to reduce the number of licenses on your plan, please contact customer support/i
     ).within(() => {
       cy.findByRole('link', { name: /contact customer support/i }).should(
         'have.attr',
@@ -91,7 +90,7 @@ describe('<AddSeats />', function () {
 
   describe('cost summary', function () {
     beforeEach(function () {
-      cy.findByLabelText(/how many users do you want to add/i).as('input')
+      cy.findByLabelText(/how many licenses do you want to buy/i).as('input')
     })
 
     it('shows the title', function () {
@@ -104,7 +103,7 @@ describe('<AddSeats />', function () {
       afterEach(function () {
         cy.findByTestId('cost-summary').within(() => {
           cy.findByText(
-            /enter the number of users you’d like to add to see the cost breakdown/i
+            /enter the number of licenses you’d like to add to see the cost breakdown/i
           )
         })
       })
@@ -140,7 +139,7 @@ describe('<AddSeats />', function () {
         this.numberOfUsersExceedingMaxLimit = MAX_NUMBER_OF_USERS + 1
 
         cy.get('@input').type(this.numberOfUsersExceedingMaxLimit.toString())
-        cy.findByRole('button', { name: /add users/i }).should('not.exist')
+        cy.findByRole('button', { name: /buy licenses/i }).should('not.exist')
         cy.findByRole('button', { name: /send request/i }).as('sendRequestBtn')
       })
 
@@ -148,7 +147,7 @@ describe('<AddSeats />', function () {
         cy.findByTestId('cost-summary').should('not.exist')
         cy.findByRole('alert').should(
           'contain.text',
-          `If you want more than ${MAX_NUMBER_OF_USERS} users on your plan, we need to add them for you. Just click Send request below and we’ll be happy to help.`
+          `If you want more than ${MAX_NUMBER_OF_USERS} licenses on your plan, we need to add them for you. Just click Send request below and we’ll be happy to help.`
         )
       })
 
@@ -238,7 +237,7 @@ describe('<AddSeats />', function () {
           },
         }
 
-        cy.findByRole('button', { name: /add users/i }).as('addUsersBtn')
+        cy.findByRole('button', { name: /buy licenses/i }).as('addUsersBtn')
         cy.findByRole('button', { name: /send request/i }).should('not.exist')
       })
 
@@ -252,14 +251,14 @@ describe('<AddSeats />', function () {
         cy.findByTestId('cost-summary').within(() => {
           cy.contains(
             new RegExp(
-              `you’re adding ${this.adding} users to your plan giving you a total of ${this.body.change.addOn.quantity} users`,
+              `you’re adding ${this.adding} licenses to your plan giving you a total of ${this.body.change.addOn.quantity} licenses`,
               'i'
             )
           )
 
           cy.findByTestId('plan').within(() => {
             cy.findByText(
-              `${this.body.nextInvoice.plan.name} x ${this.adding} Seats`
+              `${this.body.nextInvoice.plan.name} x ${this.adding} Licenses`
             )
             cy.findByTestId('price').should(
               'have.text',
@@ -288,7 +287,7 @@ describe('<AddSeats />', function () {
           })
 
           cy.findByText(
-            /we’ll charge you now for the cost of your additional users based on the remaining months of your current subscription/i
+            /we’ll charge you now for the cost of your additional licenses based on the remaining months of your current subscription/i
           )
           cy.findByText(
             /after that, we’ll bill you \$1,000\.00 \(\$895\.00 \+ \$105\.00 tax\) annually on December 1, unless you cancel/i
@@ -343,9 +342,9 @@ describe('<AddSeats />', function () {
           makeRequest(204, this.adding.toString())
           cy.findByTestId('title').should(
             'contain.text',
-            'You’ve added more user(s)'
+            'You’ve added more license(s)'
           )
-          cy.findByText(/you’ve added more user\(s\) to your subscription/i)
+          cy.findByText(/you’ve added more license\(s\) to your subscription/i)
           cy.findByRole('link', { name: /invite people/i }).should(
             'have.attr',
             'href',

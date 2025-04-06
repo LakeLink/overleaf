@@ -350,7 +350,7 @@ async function projectListPage(req, res, next) {
     'getUSGovBanner',
     userEmails,
     hasPaidAffiliation,
-    inactiveTutorials.includes('us-gov-banner')
+    inactiveTutorials
   )
 
   const usGovBanner = (usGovBannerHooksResponse &&
@@ -407,15 +407,6 @@ async function projectListPage(req, res, next) {
       individualSubscription?.recurlySubscription_id !== ''
   } catch (error) {
     logger.error({ err: error }, 'Failed to get individual subscription')
-  }
-
-  try {
-    await SplitTestHandler.promises.getAssignment(req, res, 'paywall-cta')
-  } catch (error) {
-    logger.error(
-      { err: error },
-      'failed to get "paywall-cta" split test assignment'
-    )
   }
 
   // Get the user's assignment for the DS unified nav split test, which

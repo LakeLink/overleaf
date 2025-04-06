@@ -1,4 +1,3 @@
-import '../../../helpers/bootstrap-5'
 import UpgradeSubscription from '@/features/group-management/components/upgrade-subscription/upgrade-subscription'
 import { SubscriptionChangePreview } from '../../../../../types/subscription/subscription-change-preview'
 
@@ -57,8 +56,8 @@ describe('<UpgradeSubscription />', function () {
     })
   })
 
-  it('shows the "Add more users to my plan" label', function () {
-    cy.findByText(/add more users to my plan/i).should(
+  it('shows the "Add more licenses to my plan" label', function () {
+    cy.findByText(/add more licenses to my plan/i).should(
       'have.attr',
       'href',
       '/user/subscription/group/add-users'
@@ -127,7 +126,7 @@ describe('<UpgradeSubscription />', function () {
     })
 
     it('shows total users', function () {
-      cy.findByText(/you have 2 users on your subscription./i)
+      cy.findByText(/you have 2 licenses on your subscription./i)
     })
   })
 

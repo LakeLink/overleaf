@@ -38,9 +38,6 @@ function formatGroupPlansDataForDash() {
   return {
     plans: [...groupPlanModalOptions.plan_codes],
     sizes: [...groupPlanModalOptions.sizes],
-    sizesForHighDenominationCurrencies: [
-      ...groupPlanModalOptions.sizesForHighDenominationCurrencies,
-    ],
     usages: [...groupPlanModalOptions.usages],
     priceByUsageTypeAndSize: JSON.parse(JSON.stringify(GroupPlansData)),
   }
@@ -49,16 +46,15 @@ function formatGroupPlansDataForDash() {
 async function userSubscriptionPage(req, res) {
   const user = SessionManager.getSessionUser(req.session)
 
-  await SplitTestHandler.promises.getAssignment(req, res, 'ai-add-on')
-
   await SplitTestHandler.promises.getAssignment(req, res, 'pause-subscription')
 
-  const { variant: flexibleLicensingVariant } =
-    await SplitTestHandler.promises.getAssignment(
-      req,
-      res,
-      'flexible-group-licensing'
-    )
+  const groupPricingDiscount = await SplitTestHandler.promises.getAssignment(
+    req,
+    res,
+    'group-discount-10'
+  )
+
+  const showGroupDiscount = groupPricingDiscount.variant === 'enabled'
 
   const results =
     await SubscriptionViewModelBuilder.promises.buildUsersSubscriptionViewModel(
@@ -144,7 +140,6 @@ async function userSubscriptionPage(req, res) {
           (managedUsersResults?.[0] === true ||
             groupSSOResults?.[0] === true) &&
           isGroupAdmin &&
-          flexibleLicensingVariant === 'enabled' &&
           plan?.canUseFlexibleLicensing
         )
       }
@@ -172,6 +167,7 @@ async function userSubscriptionPage(req, res) {
     managedGroupSubscriptions,
     managedInstitutions,
     managedPublishers,
+    showGroupDiscount,
     currentInstitutionsWithLicence,
     canUseFlexibleLicensing:
       personalSubscription?.plan?.canUseFlexibleLicensing,
@@ -454,30 +450,6 @@ async function previewSubscription(req, res, next) {
   res.render('subscriptions/preview-change', { changePreview })
 }
 
-function updateSubscription(req, res, next) {
-  const origin = req && req.query ? req.query.origin : null
-  const user = SessionManager.getSessionUser(req.session)
-  const planCode = req.body.plan_code
-  if (planCode == null) {
-    const err = new Error('plan_code is not defined')
-    logger.warn(
-      { userId: user._id, err, planCode, origin, body: req.body },
-      '[Subscription] error in updateSubscription form'
-    )
-    return next(err)
-  }
-  logger.debug({ planCode, userId: user._id }, 'updating subscription')
-  SubscriptionHandler.updateSubscription(user, planCode, null, function (err) {
-    if (err) {
-      OError.tag(err, 'something went wrong updating subscription', {
-        user_id: user._id,
-      })
-      return next(err)
-    }
-    res.redirect('/user/subscription')
-  })
-}
-
 function cancelPendingSubscriptionChange(req, res, next) {
   const user = SessionManager.getSessionUser(req.session)
   logger.debug({ userId: user._id }, 'canceling pending subscription change')
@@ -649,7 +621,7 @@ async function getRecommendedCurrency(req, res) {
     ip = req.query.ip
   }
   const currencyLookup = await GeoIpLookup.promises.getCurrencyCode(ip)
-  const countryCode = currencyLookup.countryCode
+  let countryCode = currencyLookup.countryCode
   const recommendedCurrency = currencyLookup.currencyCode
 
   let currency = null
@@ -658,6 +630,13 @@ async function getRecommendedCurrency(req, res) {
     currency = queryCurrency
   } else if (recommendedCurrency) {
     currency = recommendedCurrency
+  }
+
+  const queryCountryCode = req.query.countryCode?.toUpperCase()
+
+  // only enable countryCode testing flag on staging or dev environments
+  if (queryCountryCode && process.env.NODE_ENV !== 'production') {
+    countryCode = queryCountryCode
   }
 
   return {
@@ -795,7 +774,6 @@ module.exports = {
   canceledSubscription: expressify(canceledSubscription),
   cancelV1Subscription,
   previewSubscription: expressify(previewSubscription),
-  updateSubscription,
   cancelPendingSubscriptionChange,
   updateAccountEmailAddress,
   reactivateSubscription,

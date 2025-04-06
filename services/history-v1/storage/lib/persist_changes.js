@@ -65,6 +65,9 @@ async function persistChanges(projectId, allChanges, limits, clientEndVersion) {
 
   const blobStore = new BlobStore(projectId)
 
+  const earliestChangeTimestamp =
+    allChanges.length > 0 ? allChanges[0].getTimestamp() : null
+
   let currentChunk
 
   /**
@@ -77,12 +80,6 @@ async function persistChanges(projectId, allChanges, limits, clientEndVersion) {
 
   let originalEndVersion
   let changesToPersist
-
-  /**
-   * It's only useful to log validation errors once per flush. When we enforce
-   * content hash validation, it will stop the flush right away anyway.
-   */
-  let validationErrorLogged = false
 
   limits = limits || {}
   _.defaults(limits, {
@@ -128,22 +125,7 @@ async function persistChanges(projectId, allChanges, limits, clientEndVersion) {
       for (const operation of change.iterativelyApplyTo(currentSnapshot, {
         strict: true,
       })) {
-        try {
-          await validateContentHash(operation)
-        } catch (err) {
-          // Temporary: skip validation errors
-          if (err instanceof InvalidChangeError) {
-            if (!validationErrorLogged) {
-              logger.warn(
-                { err, projectId },
-                'content snapshot mismatch (ignored)'
-              )
-              validationErrorLogged = true
-            }
-          } else {
-            throw err
-          }
-        }
+        await validateContentHash(operation)
       }
 
       chunk.pushChanges([change])
@@ -220,7 +202,12 @@ async function persistChanges(projectId, allChanges, limits, clientEndVersion) {
 
     checkElapsedTime(timer)
 
-    await chunkStore.update(projectId, originalEndVersion, currentChunk)
+    await chunkStore.update(
+      projectId,
+      originalEndVersion,
+      currentChunk,
+      earliestChangeTimestamp
+    )
   }
 
   async function createNewChunksAsNeeded() {
@@ -234,7 +221,7 @@ async function persistChanges(projectId, allChanges, limits, clientEndVersion) {
       if (changesPushed) {
         checkElapsedTime(timer)
         currentChunk = chunk
-        await chunkStore.create(projectId, chunk)
+        await chunkStore.create(projectId, chunk, earliestChangeTimestamp)
       } else {
         throw new Error('failed to fill empty chunk')
       }

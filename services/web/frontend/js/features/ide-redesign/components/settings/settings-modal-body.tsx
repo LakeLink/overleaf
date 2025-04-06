@@ -10,6 +10,9 @@ import {
   TabPane,
 } from 'react-bootstrap-5'
 import { useTranslation } from 'react-i18next'
+import EditorSettings from './editor-settings/editor-settings'
+import AppearanceSettings from './appearance-settings/appearance-settings'
+import CompilerSettings from './compiler-settings/compiler-settings'
 
 export type SettingsEntry = SettingsLink | SettingsTab
 
@@ -18,7 +21,6 @@ type SettingsTab = {
   key: string
   component: ReactElement
   title: string
-  subtitle: string
 }
 
 type SettingsLink = {
@@ -33,32 +35,22 @@ export const SettingsModalBody = () => {
   const settingsTabs: SettingsEntry[] = useMemo(
     () => [
       {
-        key: 'general',
-        title: t('general'),
-        subtitle: t('general_settings'),
-        icon: 'settings',
-        component: <div>General</div>,
-      },
-      {
         key: 'editor',
         title: t('editor'),
-        subtitle: t('editor_settings'),
         icon: 'code',
-        component: <div>Editor</div>,
+        component: <EditorSettings />,
       },
       {
-        key: 'pdf',
-        title: t('pdf'),
-        subtitle: t('pdf_settings'),
+        key: 'compiler',
+        title: t('compiler'),
         icon: 'picture_as_pdf',
-        component: <div>PDF</div>,
+        component: <CompilerSettings />,
       },
       {
-        key: 'interface',
-        title: t('interface'),
-        subtitle: t('interface_settings'),
-        icon: 'web_asset',
-        component: <div>Interface</div>,
+        key: 'appearance',
+        title: t('appearance'),
+        icon: 'brush',
+        component: <AppearanceSettings />,
       },
       {
         key: 'account_settings',
@@ -89,13 +81,12 @@ export const SettingsModalBody = () => {
             <SettingsNavLink entry={entry} key={entry.key} />
           ))}
         </Nav>
-        <TabContent>
+        <TabContent className="ide-settings-tab-content">
           {settingsTabs
             .filter(t => 'component' in t)
-            .map(({ key, component, subtitle }) => (
+            .map(({ key, component }) => (
               <TabPane eventKey={key} key={key}>
-                <p className="ide-settings-tab-subtitle">{subtitle}</p>
-                <div className="ide-settings-tab-content">{component}</div>
+                {component}
               </TabPane>
             ))}
         </TabContent>

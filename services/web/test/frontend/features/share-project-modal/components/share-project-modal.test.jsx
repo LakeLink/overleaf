@@ -101,6 +101,7 @@ describe('<ShareProjectModal/>', function () {
     fetchMock.get('/user/contacts', { contacts })
     window.metaAttributesCache.set('ol-user', { allowedFreeTrial: true })
     window.metaAttributesCache.set('ol-showUpgradePrompt', true)
+    window.metaAttributesCache.set('ol-isReviewerRoleEnabled', true)
   })
 
   afterEach(function () {
@@ -637,8 +638,9 @@ describe('<ShareProjectModal/>', function () {
       },
     })
 
-    const privilegesElement = screen.getByDisplayValue('Can edit')
-    fireEvent.change(privilegesElement, { target: { value: 'readOnly' } })
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('add-collaborator-select'))
+    await user.click(screen.getByText('Viewer'))
 
     const submitButton = screen.getByRole('button', { name: 'Invite' })
     await userEvent.click(submitButton)
@@ -690,9 +692,53 @@ describe('<ShareProjectModal/>', function () {
     })
 
     await screen.findByText('Add more editors')
-    expect(screen.getByRole('option', { name: 'Can edit' }).disabled).to.be.true
-    expect(screen.getByRole('option', { name: 'Can view' }).disabled).to.be
-      .false
+
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('add-collaborator-select'))
+    const editorOption = screen.getByText('Editor').closest('button')
+    const reviewerOption = screen.getByText('Reviewer').closest('button')
+    const viewerOption = screen.getByText('Viewer').closest('button')
+
+    expect(editorOption.classList.contains('disabled')).to.be.true
+    expect(reviewerOption.classList.contains('disabled')).to.be.false
+    expect(viewerOption.classList.contains('disabled')).to.be.false
+
+    screen.getByText(
+      /Upgrade to add more editors and access collaboration features like track changes and full project history/
+    )
+  })
+
+  it('counts reviewers towards the collaborator limit', async function () {
+    renderWithEditorContext(<ShareProjectModal {...modalProps} />, {
+      scope: {
+        project: {
+          ...project,
+          features: {
+            collaborators: 1,
+          },
+          members: [
+            {
+              _id: 'reviewer-id',
+              email: 'reviewer@example.com',
+              privileges: 'review',
+            },
+          ],
+        },
+      },
+    })
+
+    await screen.findByText('Add more editors')
+
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('add-collaborator-select'))
+
+    const editorOption = screen.getByText('Editor').closest('button')
+    const reviewerOption = screen.getByText('Reviewer').closest('button')
+    const viewerOption = screen.getByText('Viewer').closest('button')
+
+    expect(editorOption.classList.contains('disabled')).to.be.true
+    expect(reviewerOption.classList.contains('disabled')).to.be.false
+    expect(viewerOption.classList.contains('disabled')).to.be.false
 
     screen.getByText(
       /Upgrade to add more editors and access collaboration features like track changes and full project history/

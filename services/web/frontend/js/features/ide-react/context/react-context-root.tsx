@@ -24,6 +24,7 @@ import { SnapshotProvider } from '@/features/ide-react/context/snapshot-context'
 import { SplitTestProvider } from '@/shared/context/split-test-context'
 import { UserProvider } from '@/shared/context/user-context'
 import { UserSettingsProvider } from '@/shared/context/user-settings-context'
+import { IdeRedesignSwitcherProvider } from './ide-redesign-switcher-context'
 
 export const ReactContextRoot: FC<{ providers?: Record<string, FC> }> = ({
   children,
@@ -55,6 +56,7 @@ export const ReactContextRoot: FC<{ providers?: Record<string, FC> }> = ({
     SplitTestProvider,
     UserProvider,
     UserSettingsProvider,
+    IdeRedesignSwitcherProvider,
     ...providers,
   }
 
@@ -73,8 +75,8 @@ export const ReactContextRoot: FC<{ providers?: Record<string, FC> }> = ({
                           <Providers.DetachProvider>
                             <Providers.EditorProvider>
                               <Providers.PermissionsProvider>
-                                <Providers.ProjectSettingsProvider>
-                                  <Providers.LayoutProvider>
+                                <Providers.LayoutProvider>
+                                  <Providers.ProjectSettingsProvider>
                                     <Providers.EditorManagerProvider>
                                       <Providers.LocalCompileProvider>
                                         <Providers.DetachCompileProvider>
@@ -84,7 +86,9 @@ export const ReactContextRoot: FC<{ providers?: Record<string, FC> }> = ({
                                                 <Providers.MetadataProvider>
                                                   <Providers.OutlineProvider>
                                                     <Providers.RailProvider>
-                                                      {children}
+                                                      <Providers.IdeRedesignSwitcherProvider>
+                                                        {children}
+                                                      </Providers.IdeRedesignSwitcherProvider>
                                                     </Providers.RailProvider>
                                                   </Providers.OutlineProvider>
                                                 </Providers.MetadataProvider>
@@ -94,8 +98,8 @@ export const ReactContextRoot: FC<{ providers?: Record<string, FC> }> = ({
                                         </Providers.DetachCompileProvider>
                                       </Providers.LocalCompileProvider>
                                     </Providers.EditorManagerProvider>
-                                  </Providers.LayoutProvider>
-                                </Providers.ProjectSettingsProvider>
+                                  </Providers.ProjectSettingsProvider>
+                                </Providers.LayoutProvider>
                               </Providers.PermissionsProvider>
                             </Providers.EditorProvider>
                           </Providers.DetachProvider>

@@ -1,3 +1,4 @@
+const SplitTestHandler = require('../SplitTests/SplitTestHandler')
 const AnalyticsManager = require('../Analytics/AnalyticsManager')
 const SubscriptionEmailHandler = require('./SubscriptionEmailHandler')
 const { AI_ADD_ON_CODE } = require('./RecurlyEntities')
@@ -127,6 +128,17 @@ async function _sendSubscriptionStartedEvent(userId, eventData) {
 
   if (isTrial) {
     await SubscriptionEmailHandler.sendTrialOnboardingEmail(userId, planCode)
+    const cioAssignment = await SplitTestHandler.promises.getAssignmentForUser(
+      userId,
+      'customer-io-trial-conversion'
+    )
+    if (cioAssignment.variant === 'enabled') {
+      AnalyticsManager.setUserPropertyForUserInBackground(
+        userId,
+        'customer-io-integration',
+        true
+      )
+    }
   }
 }
 

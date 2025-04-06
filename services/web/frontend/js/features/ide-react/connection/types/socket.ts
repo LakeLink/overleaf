@@ -20,11 +20,20 @@ export type Socket = {
     arg2: any,
     callback?: (error: Error, ...data: any[]) => void
   ): void
+  emit(
+    event: string,
+    arg0: any,
+    arg1: any,
+    arg2: any,
+    arg3: any,
+    arg4: any,
+    arg5: any,
+    callback?: (error: Error, ...data: any[]) => void
+  ): void
   socket: {
     connected: boolean
     connecting: boolean
     connect(): void
-    onDisconnect(reason: string): void
     disconnect(): void
     sessionid: string
     transport?: {
@@ -33,4 +42,5 @@ export type Socket = {
     transports: string[]
   }
   disconnect(): void
+  forceDisconnectWithoutEvent(): void
 }

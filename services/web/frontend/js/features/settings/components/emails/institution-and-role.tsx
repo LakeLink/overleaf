@@ -145,11 +145,7 @@ function InstitutionAndRole({ userEmailData }: InstitutionAndRoleProps) {
               type="submit"
               disabled={!role || !department}
               isLoading={isLoading}
-              bs3Props={{
-                loading: isLoading
-                  ? `${t('saving')}…`
-                  : t('save_or_cancel-save'),
-              }}
+              loadingLabel={t('saving')}
             >
               {t('save_or_cancel-save')}
             </OLButton>

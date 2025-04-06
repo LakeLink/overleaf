@@ -1,5 +1,4 @@
 import { useCallback } from 'react'
-import { Grid, Row, Col, Button } from 'react-bootstrap'
 import moment from 'moment'
 import { useTranslation, Trans } from 'react-i18next'
 import {
@@ -14,6 +13,10 @@ import { useLocation } from '@/shared/hooks/use-location'
 import { debugConsole } from '@/utils/debugging'
 import { postJSON } from '@/infrastructure/fetch-json'
 import Notification from '@/shared/components/notification'
+import OLCard from '@/features/ui/components/ol/ol-card'
+import OLRow from '@/features/ui/components/ol/ol-row'
+import OLCol from '@/features/ui/components/ol/ol-col'
+import OLButton from '@/features/ui/components/ol/ol-button'
 import { subscriptionUpdateUrl } from '@/features/subscription/data/subscription-url'
 import * as eventTracking from '@/infrastructure/event-tracking'
 import sparkleText from '@/shared/svgs/ai-sparkle-text.svg'
@@ -47,10 +50,10 @@ function PreviewSubscriptionChange() {
       : (preview.change as PremiumSubscriptionChange).plan.name
 
   return (
-    <Grid>
-      <Row>
-        <Col md={8} mdOffset={2}>
-          <div className="card p-5">
+    <div className="container">
+      <OLRow>
+        <OLCol md={{ offset: 2, span: 8 }}>
+          <OLCard className="p-3">
             {preview.change.type === 'add-on-purchase' ? (
               <h1>
                 {t('add_add_on_to_your_plan', {
@@ -77,7 +80,7 @@ function PreviewSubscriptionChange() {
             )}
 
             {aiAddOnChange && (
-              <div className="text-small">
+              <div>
                 <Trans
                   i18nKey="add_error_assist_to_your_projects"
                   components={{
@@ -95,46 +98,46 @@ function PreviewSubscriptionChange() {
               </div>
             )}
 
-            <div className="payment-summary-card mt-5">
+            <OLCard className="payment-summary-card mt-5">
               <h3>{t('due_today')}:</h3>
-              <Row>
-                <Col xs={9}>{changeName}</Col>
-                <Col xs={3} className="text-right">
+              <OLRow>
+                <OLCol xs={9}>{changeName}</OLCol>
+                <OLCol xs={3} className="text-end">
                   <strong>
                     {formatCurrency(
                       preview.immediateCharge.subtotal,
                       preview.currency
                     )}
                   </strong>
-                </Col>
-              </Row>
+                </OLCol>
+              </OLRow>
 
               {preview.immediateCharge.tax > 0 && (
-                <Row className="mt-1">
-                  <Col xs={9}>
+                <OLRow className="mt-1">
+                  <OLCol xs={9}>
                     {t('vat')} {preview.nextInvoice.tax.rate * 100}%
-                  </Col>
-                  <Col xs={3} className="text-right">
+                  </OLCol>
+                  <OLCol xs={3} className="text-end">
                     {formatCurrency(
                       preview.immediateCharge.tax,
                       preview.currency
                     )}
-                  </Col>
-                </Row>
+                  </OLCol>
+                </OLRow>
               )}
 
-              <Row>
-                <Col xs={9}>{t('total_today')}</Col>
-                <Col xs={3} className="text-right">
+              <OLRow className="mt-1">
+                <OLCol xs={9}>{t('total_today')}</OLCol>
+                <OLCol xs={3} className="text-end">
                   <strong>
                     {formatCurrency(
                       preview.immediateCharge.total,
                       preview.currency
                     )}
                   </strong>
-                </Col>
-              </Row>
-            </div>
+                </OLCol>
+              </OLRow>
+            </OLCard>
 
             <div className="mt-5">
               <Trans
@@ -154,65 +157,65 @@ function PreviewSubscriptionChange() {
             </div>
 
             <div className="mt-5">
-              <Button
-                bsStyle="primary"
-                bsSize="large"
+              <OLButton
+                variant="primary"
+                size="lg"
                 onClick={handlePayNowClick}
                 disabled={payNowTask.isLoading || payNowTask.isSuccess}
               >
                 {t('pay_now')}
-              </Button>
+              </OLButton>
             </div>
 
-            <div className="payment-summary-card mt-5">
+            <OLCard className="payment-summary-card mt-5">
               <h3>{t('future_payments')}:</h3>
-              <Row className="mt-1">
-                <Col xs={9}>{preview.nextInvoice.plan.name}</Col>
-                <Col xs={3} className="text-right">
+              <OLRow className="mt-1">
+                <OLCol xs={9}>{preview.nextInvoice.plan.name}</OLCol>
+                <OLCol xs={3} className="text-end">
                   {formatCurrency(
                     preview.nextInvoice.plan.amount,
                     preview.currency
                   )}
-                </Col>
-              </Row>
+                </OLCol>
+              </OLRow>
 
               {preview.nextInvoice.addOns.map(addOn => (
-                <Row className="mt-1" key={addOn.code}>
-                  <Col xs={9}>
+                <OLRow className="mt-1" key={addOn.code}>
+                  <OLCol xs={9}>
                     {addOn.name}
                     {addOn.quantity > 1 ? ` ×${addOn.quantity}` : ''}
-                  </Col>
-                  <Col xs={3} className="text-right">
+                  </OLCol>
+                  <OLCol xs={3} className="text-end">
                     {formatCurrency(addOn.amount, preview.currency)}
-                  </Col>
-                </Row>
+                  </OLCol>
+                </OLRow>
               ))}
 
               {preview.nextInvoice.tax.rate > 0 && (
-                <Row className="mt-1">
-                  <Col xs={9}>
+                <OLRow className="mt-1">
+                  <OLCol xs={9}>
                     {t('vat')} {preview.nextInvoice.tax.rate * 100}%
-                  </Col>
-                  <Col xs={3} className="text-right">
+                  </OLCol>
+                  <OLCol xs={3} className="text-end">
                     {formatCurrency(
                       preview.nextInvoice.tax.amount,
                       preview.currency
                     )}
-                  </Col>
-                </Row>
+                  </OLCol>
+                </OLRow>
               )}
 
-              <Row className="mt-1">
-                <Col xs={9}>
+              <OLRow className="mt-1">
+                <OLCol xs={9}>
                   {preview.nextPlan.annual
                     ? t('total_per_year')
                     : t('total_per_month')}
-                </Col>
-                <Col xs={3} className="text-right">
+                </OLCol>
+                <OLCol xs={3} className="text-end">
                   {formatCurrency(preview.nextInvoice.total, preview.currency)}
-                </Col>
-              </Row>
-            </div>
+                </OLCol>
+              </OLRow>
+            </OLCard>
 
             <div className="mt-5">
               <Trans
@@ -223,10 +226,10 @@ function PreviewSubscriptionChange() {
                 tOptions={{ interpolation: { escapeValue: true } }}
               />
             </div>
-          </div>
-        </Col>
-      </Row>
-    </Grid>
+          </OLCard>
+        </OLCol>
+      </OLRow>
+    </div>
   )
 }
 

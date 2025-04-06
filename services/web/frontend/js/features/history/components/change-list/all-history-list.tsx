@@ -181,7 +181,6 @@ function AllHistoryList() {
         onHide={hidePopover}
         // using scrollerRef to position the popover in the middle of the viewport
         target={scrollerRef.current}
-        // Only used in Bootstrap 5. In Bootstrap 3 this is done with CSS.
         popperConfig={{
           modifiers: [
             {
@@ -192,11 +191,9 @@ function AllHistoryList() {
             },
           ],
         }}
-        bs3Props={{ shouldUpdatePosition: true }}
       >
         <OLPopover
           id="popover-react-history-tutorial"
-          bs3Props={{ arrowOffsetTop: 10 }}
           title={
             <span>
               {t('react_history_tutorial_title')}{' '}
@@ -236,11 +233,9 @@ function AllHistoryList() {
         onHide={hidePopover}
         // using scrollerRef to position the popover in the middle of the viewport
         target={scrollerRef.current}
-        bs3Props={{ shouldUpdatePosition: true }}
       >
         <OLPopover
           id="popover-history-restore-promo"
-          bs3Props={{ arrowOffsetTop: 10 }}
           title={
             <span>
               {t('history_restore_promo_title')}

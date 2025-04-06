@@ -216,12 +216,12 @@ describe('<EmailsSection />', function () {
 
     await waitForElementToBeRemoved(() =>
       screen.getByRole('button', {
-        name: /add new email/i,
+        name: /Loading/i,
       })
     )
 
     await confirmCodeForEmail(userEmailData.email)
-    screen.getByText(userEmailData.email)
+    await screen.findByText(userEmailData.email)
   })
 
   it('fails to add add new email address', async function () {
@@ -381,8 +381,8 @@ describe('<EmailsSection />', function () {
 
     await confirmCodeForEmail(userEmailData.email)
 
-    screen.getByText(userEmailData.affiliation.role!, { exact: false })
-    screen.getByText(customDepartment, { exact: false })
+    await screen.findByText(userEmailData.affiliation.role!, { exact: false })
+    await screen.findByText(customDepartment, { exact: false })
   })
 
   it('autocompletes institution name', async function () {
@@ -528,10 +528,12 @@ describe('<EmailsSection />', function () {
       department: userEmailData.affiliation?.department,
     })
 
-    screen.getByText(userEmailData.email)
-    screen.getByText(newUniversity)
-    screen.getByText(userEmailData.affiliation.role!, { exact: false })
-    screen.getByText(userEmailData.affiliation.department!, { exact: false })
+    await screen.findByText(userEmailData.email)
+    await screen.findByText(newUniversity)
+    await screen.findByText(userEmailData.affiliation.role!, { exact: false })
+    await screen.findByText(userEmailData.affiliation.department!, {
+      exact: false,
+    })
   })
 
   it('shows country, university, role and department fields based on whether `change` was clicked or not', async function () {

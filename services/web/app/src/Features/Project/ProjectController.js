@@ -15,6 +15,7 @@ const metrics = require('@overleaf/metrics')
 const { User } = require('../../models/User')
 const SubscriptionLocator = require('../Subscription/SubscriptionLocator')
 const LimitationsManager = require('../Subscription/LimitationsManager')
+const FeaturesHelper = require('../Subscription/FeaturesHelper')
 const Settings = require('@overleaf/settings')
 const AuthorizationManager = require('../Authorization/AuthorizationManager')
 const InactiveProjectManager = require('../InactiveData/InactiveProjectManager')
@@ -337,14 +338,12 @@ const _ProjectController = {
       'external-socket-heartbeat',
       'full-project-search',
       'null-test-share-modal',
-      'paywall-cta',
       'pdf-caching-cached-url-lookup',
       'pdf-caching-mode',
       'pdf-caching-prefetch-large',
       'pdf-caching-prefetching',
       'revert-file',
       'revert-project',
-      'review-panel-redesign',
       !anonymous && 'ro-mirror-on-client',
       'track-pdf-download',
       !anonymous && 'writefull-oauth-promotion',
@@ -352,11 +351,11 @@ const _ProjectController = {
       'write-and-cite-ars',
       'default-visual-for-beginners',
       'hotjar',
-      'ai-add-on',
       'reviewer-role',
       'papers-integration',
       'editor-redesign',
       'paywall-change-compile-timeout',
+      'overleaf-assist-bundle',
     ].filter(Boolean)
 
     const getUserValues = async userId =>
@@ -577,19 +576,19 @@ const _ProjectController = {
         const pendingEditors = project.pendingEditor_refs?.length || 0
         const exceedAtLimit = planLimit > -1 && namedEditors >= planLimit
 
-        let editMode = 'edit'
+        let mode = 'edit'
         if (privilegeLevel === PrivilegeLevels.READ_ONLY) {
-          editMode = 'view'
+          mode = 'view'
         } else if (
           project.track_changes === true ||
           project.track_changes?.[userId] === true
         ) {
-          editMode = 'review'
+          mode = 'review'
         }
 
         const projectOpenedSegmentation = {
           role: privilegeLevel,
-          editMode,
+          mode,
           ownerId: project.owner_ref,
           projectId: project._id,
           namedEditors,
@@ -647,11 +646,12 @@ const _ProjectController = {
       if (userId && Features.hasFeature('saas')) {
         try {
           // exit early if the user couldnt use ai anyways, since permissions checks are expensive
-          const canEditProject =
+          const canUserWriteOrReviewProjectContent =
             privilegeLevel === PrivilegeLevels.READ_AND_WRITE ||
-            privilegeLevel === PrivilegeLevels.OWNER
+            privilegeLevel === PrivilegeLevels.OWNER ||
+            privilegeLevel === PrivilegeLevels.REVIEW
 
-          if (canEditProject) {
+          if (canUserWriteOrReviewProjectContent) {
             // check permissions for user and project owner, to see if they allow AI on the project
             const permissionsResults = await Modules.promises.hooks.fire(
               'projectAllowsCapability',
@@ -675,14 +675,13 @@ const _ProjectController = {
         subscription && !subscription.recurlySubscription_id
       const hasManuallyCollectedSubscription =
         subscription?.collectionMethod === 'manual'
-      const cannotPurchaseAddons =
+      const canPurchaseAddons = !(
         hasNonRecurlySubscription || hasManuallyCollectedSubscription
+      )
       const assistantDisabled = user.aiErrorAssistant?.enabled === false // the assistant has been manually disabled by the user
       const canUseErrorAssistant =
-        user.features?.aiErrorAssistant ||
-        (splitTestAssignments['ai-add-on']?.variant === 'enabled' &&
-          !cannotPurchaseAddons &&
-          !assistantDisabled)
+        (user.features?.aiErrorAssistant || canPurchaseAddons) &&
+        !assistantDisabled
 
       let featureUsage = {}
 
@@ -757,6 +756,23 @@ const _ProjectController = {
         chatEnabled = Features.hasFeature('chat')
       }
 
+      const isOverleafAssistBundleEnabled =
+        splitTestAssignments['overleaf-assist-bundle']?.variant === 'enabled'
+
+      let fullFeatureSet = user?.features
+      if (!anonymous) {
+        // generate users feature set including features added, or overriden via modules
+        const moduleFeatures =
+          (await Modules.promises.hooks.fire(
+            'getModuleProvidedFeatures',
+            userId
+          )) || []
+        fullFeatureSet = FeaturesHelper.computeFeatureSet([
+          user.features,
+          ...moduleFeatures,
+        ])
+      }
+
       const isPaywallChangeCompileTimeoutEnabled =
         splitTestAssignments['paywall-change-compile-timeout']?.variant ===
         'enabled'
@@ -764,6 +780,24 @@ const _ProjectController = {
       const paywallPlans =
         isPaywallChangeCompileTimeoutEnabled &&
         (await ProjectController._getPaywallPlansPrices(req, res))
+
+      const customerIoEnabled =
+        await SplitTestHandler.promises.hasUserBeenAssignedToVariant(
+          req,
+          userId,
+          'customer-io-trial-conversion',
+          'enabled',
+          true
+        )
+
+      const addonPrices =
+        isOverleafAssistBundleEnabled &&
+        (await ProjectController._getAddonPrices(req, res))
+
+      let planCode = subscription?.planCode
+      if (!planCode && !userInNonIndividualSub) {
+        planCode = 'free'
+      }
 
       res.render(template, {
         title: project.name,
@@ -781,7 +815,7 @@ const _ProjectController = {
           allowedFreeTrial,
           hasRecurlySubscription: subscription?.recurlySubscription_id != null,
           featureSwitches: user.featureSwitches,
-          features: user.features,
+          features: fullFeatureSet,
           featureUsage,
           refProviders: _.mapValues(user.refProviders, Boolean),
           writefull: {
@@ -794,6 +828,9 @@ const _ProjectController = {
           labsProgram: user.labsProgram,
           inactiveTutorials: TutorialHandler.getInactiveTutorials(user),
           isAdmin: hasAdminAccess(user),
+          planCode,
+          isMemberOfGroupSubscription: userIsMemberOfGroupSubscription,
+          hasInstitutionLicence: userHasInstitutionLicence,
         },
         userSettings: {
           mode: user.ace.mode,
@@ -808,6 +845,7 @@ const _ProjectController = {
           overallTheme: user.ace.overallTheme,
           mathPreview: user.ace.mathPreview,
           referencesSearchMode: user.ace.referencesSearchMode,
+          enableNewEditor: user.ace.enableNewEditor ?? true,
         },
         privilegeLevel,
         anonymous,
@@ -829,6 +867,8 @@ const _ProjectController = {
         editorThemes: THEME_LIST,
         legacyEditorThemes: LEGACY_THEME_LIST,
         maxDocLength: Settings.max_doc_length,
+        maxReconnectGracefullyIntervalMs:
+          Settings.maxReconnectGracefullyIntervalMs,
         brandVariation,
         allowedImageNames,
         gitBridgePublicBaseUrl: Settings.gitBridgePublicBaseUrl,
@@ -845,7 +885,6 @@ const _ProjectController = {
         metadata: { viewport: false },
         showUpgradePrompt,
         fixedSizeDocument: true,
-        useOpenTelemetry: Settings.useOpenTelemetryClient,
         hasTrackChangesFeature: Features.hasFeature('track-changes'),
         projectTags,
         usedLatex:
@@ -866,7 +905,10 @@ const _ProjectController = {
           reviewerRoleAssignment?.variant === 'enabled' ||
           Object.keys(project.reviewer_refs || {}).length > 0,
         isPaywallChangeCompileTimeoutEnabled,
+        isOverleafAssistBundleEnabled,
         paywallPlans,
+        customerIoEnabled,
+        addonPrices,
       })
       timer.done()
     } catch (err) {
@@ -897,6 +939,28 @@ const _ProjectController = {
         true
       )
       plansData[plan] = formattedPlanPrice
+    })
+    return plansData
+  },
+
+  async _getAddonPrices(req, res, addonPlans = ['assistBundle']) {
+    const plansData = {}
+
+    const locale = req.i18n.language
+    const { currency } = await SubscriptionController.getRecommendedCurrency(
+      req,
+      res
+    )
+
+    addonPlans.forEach(plan => {
+      const annualPrice = Settings.localizedAddOnsPricing[currency][plan].annual
+      const monthlyPrice =
+        Settings.localizedAddOnsPricing[currency][plan].monthly
+
+      plansData[plan] = {
+        annual: formatCurrency(annualPrice, currency, locale, true),
+        monthly: formatCurrency(monthlyPrice, currency, locale, true),
+      }
     })
     return plansData
   },
@@ -1204,6 +1268,7 @@ const ProjectController = {
   _isInPercentageRollout: _ProjectController._isInPercentageRollout,
   _refreshFeatures: _ProjectController._refreshFeatures,
   _getPaywallPlansPrices: _ProjectController._getPaywallPlansPrices,
+  _getAddonPrices: _ProjectController._getAddonPrices,
 }
 
 module.exports = ProjectController

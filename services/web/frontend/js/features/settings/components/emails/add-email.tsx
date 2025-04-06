@@ -18,8 +18,8 @@ import getMeta from '../../../../utils/meta'
 import { ReCaptcha2 } from '../../../../shared/components/recaptcha-2'
 import { useRecaptcha } from '../../../../shared/hooks/use-recaptcha'
 import OLCol from '@/features/ui/components/ol/ol-col'
-import { bsVersion } from '@/features/utils/bootstrap-5'
 import { ConfirmEmailForm } from '@/features/settings/components/emails/confirm-email-form'
+import RecaptchaConditions from '@/shared/components/recaptcha-conditions'
 
 function AddEmail() {
   const { t } = useTranslation()
@@ -153,10 +153,7 @@ function AddEmail() {
 
   const InputComponent = (
     <>
-      <label
-        htmlFor="affiliations-email"
-        className={bsVersion({ bs5: 'visually-hidden', bs3: 'sr-only' })}
-      >
+      <label htmlFor="affiliations-email" className="visually-hidden">
         {t('email')}
       </label>
       <Input
@@ -164,6 +161,15 @@ function AddEmail() {
         handleAddNewEmail={handleAddNewEmail}
       />
     </>
+  )
+  const recaptchaConditions = (
+    <OLCol>
+      <Cell>
+        <div className="affiliations-table-cell-tabbed">
+          <RecaptchaConditions />
+        </div>
+      </Cell>
+    </OLCol>
   )
 
   if (!isValidEmail(newEmail)) {
@@ -184,6 +190,7 @@ function AddEmail() {
               <AddNewEmailBtn email={newEmail} disabled />
             </Cell>
           </OLCol>
+          {recaptchaConditions}
         </Layout>
       </form>
     )
@@ -241,6 +248,7 @@ function AddEmail() {
             </Cell>
           </OLCol>
         )}
+        {recaptchaConditions}
       </Layout>
     </form>
   )

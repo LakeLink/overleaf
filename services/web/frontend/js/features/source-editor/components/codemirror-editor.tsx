@@ -10,14 +10,15 @@ import { CodeMirrorCommandTooltip } from './codemirror-command-tooltip'
 import importOverleafModules from '../../../../macros/import-overleaf-module.macro'
 import { FigureModal } from './figure-modal/figure-modal'
 import { ReviewPanelProviders } from '@/features/review-panel-new/context/review-panel-providers'
-import { ReviewPanelMigration } from '@/features/source-editor/components/review-panel/review-panel-migration'
+import { ReviewPanelNew } from '@/features/review-panel-new/components/review-panel-new'
 import ReviewTooltipMenu from '@/features/review-panel-new/components/review-tooltip-menu'
-import { useFeatureFlag } from '@/shared/context/split-test-context'
 import {
   CodeMirrorStateContext,
   CodeMirrorViewContext,
 } from './codemirror-context'
 import MathPreviewTooltip from './math-preview-tooltip'
+import Breadcrumbs from '@/features/ide-redesign/components/breadcrumbs'
+import { useIsNewEditorEnabled } from '@/features/ide-redesign/utils/new-editor-utils'
 
 // TODO: remove this when definitely no longer used
 export * from './codemirror-context'
@@ -38,7 +39,7 @@ function CodeMirrorEditor() {
 
   const isMounted = useIsMounted()
 
-  const newReviewPanel = useFeatureFlag('review-panel-redesign')
+  const newEditor = useIsNewEditorEnabled()
 
   // create the view using the initial state and intercept transactions
   const viewRef = useRef<EditorView | null>(null)
@@ -72,11 +73,12 @@ function CodeMirrorEditor() {
               <Component key={path} />
             )
           )}
+          {newEditor && <Breadcrumbs />}
           <CodeMirrorCommandTooltip />
 
           <MathPreviewTooltip />
-          {newReviewPanel && <ReviewTooltipMenu />}
-          <ReviewPanelMigration />
+          <ReviewTooltipMenu />
+          <ReviewPanelNew />
 
           {sourceEditorComponents.map(
             ({ import: { default: Component }, path }) => (

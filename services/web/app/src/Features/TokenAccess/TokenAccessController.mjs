@@ -20,7 +20,6 @@ import { getSafeAdminDomainRedirect } from '../Helpers/UrlHelper.js'
 import UserGetter from '../User/UserGetter.js'
 import Settings from '@overleaf/settings'
 import LimitationsManager from '../Subscription/LimitationsManager.js'
-import SplitTestHandler from '../SplitTests/SplitTestHandler.js'
 
 const orderedPrivilegeLevels = [
   PrivilegeLevels.NONE,
@@ -112,13 +111,6 @@ async function tokenAccessPage(req, res, next) {
       }
     }
 
-    // Populates splitTestVariants with a value for the split test name and allows
-    // Pug to read it
-    await SplitTestHandler.promises.getAssignment(
-      req,
-      res,
-      'misc-b2c-pages-bs5'
-    )
     res.render('project/token/access-react', {
       postUrl: makePostUrl(token),
     })
@@ -347,7 +339,12 @@ async function grantTokenAccessReadAndWrite(req, res, next) {
       }
     )
     AnalyticsManager.recordEventForUserInBackground(userId, 'project-joined', {
-      mode: pendingEditor ? 'read-only' : 'read-write',
+      role: pendingEditor
+        ? PrivilegeLevels.READ_ONLY
+        : PrivilegeLevels.READ_AND_WRITE,
+      ownerId: project.owner_ref.toString(),
+      source: 'link-sharing',
+      mode: pendingEditor ? 'view' : 'edit',
       projectId: project._id.toString(),
       ...(pendingEditor && { pendingEditor: true }),
     })
@@ -450,7 +447,8 @@ async function grantTokenAccessReadOnly(req, res, next) {
 
     await TokenAccessHandler.promises.addReadOnlyUserToProject(
       userId,
-      project._id
+      project._id,
+      project.owner_ref
     )
 
     return res.json({
@@ -502,7 +500,6 @@ async function sharingUpdatesConsent(req, res, next) {
     page: req.path,
     name: 'link-sharing-collaborator',
   })
-  await SplitTestHandler.promises.getAssignment(req, res, 'bs5-misc-pages-core')
   res.render('project/token/sharing-updates', {
     projectId,
   })

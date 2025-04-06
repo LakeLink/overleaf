@@ -382,8 +382,7 @@ describe('UserGetter', function () {
             }
           )
         })
-        // eslint-disable-next-line mocha/no-skipped-tests
-        it.skip('should not flag affiliations outside of notification period', function (done) {
+        it('should not flag affiliations outside of notification period', function (done) {
           const { maxConfirmationMonths } = institutionNonSSO
           const confirmed1 = new Date()
           const lastDayToReconfirm1 = moment(confirmed1)
@@ -391,8 +390,8 @@ describe('UserGetter', function () {
             .toDate()
           const confirmed2 = moment()
             .subtract(maxConfirmationMonths, 'months')
-            .add(15, 'days')
-            .toDate() // expires in 15 days
+            .add(30, 'days')
+            .toDate() // expires in 30 days and reconfirmNotificationDays is set to 14
           const lastDayToReconfirm2 = moment(confirmed2)
             .add(maxConfirmationMonths, 'months')
             .toDate()
@@ -928,6 +927,50 @@ describe('UserGetter', function () {
             {
               email,
               confirmedAt: new Date(),
+              default: true,
+            },
+          ],
+        }
+        this.getUserAffiliations.resolves(affiliationsData)
+        this.UserGetter.promises.getUser = sinon.stub().resolves(user)
+        this.UserGetter.getUserFullEmails(
+          this.fakeUser._id,
+          (error, fullEmails) => {
+            expect(error).to.not.exist
+            expect(
+              fullEmails[0].affiliation.inReconfirmNotificationPeriod
+            ).to.equal(true)
+            done()
+          }
+        )
+      })
+
+      it('should flag to show notification if v2 shows as reconfirmation upcoming but v1 does not', function (done) {
+        const email = 'abc123@test.com'
+        const { maxConfirmationMonths } = institutionNonSSO
+
+        const datePastReconfirmation = moment()
+          .subtract(maxConfirmationMonths, 'months')
+          .add(3, 'day')
+          .toDate()
+
+        const dateNotPastReconfirmation = moment().add(1, 'month').toDate()
+
+        const affiliationsData = [
+          {
+            email,
+            licence: 'free',
+            institution: institutionNonSSO,
+            last_day_to_reconfirm: dateNotPastReconfirmation,
+          },
+        ]
+        const user = {
+          _id: '12390i',
+          email,
+          emails: [
+            {
+              email,
+              confirmedAt: datePastReconfirmation,
               default: true,
             },
           ],

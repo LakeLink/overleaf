@@ -98,6 +98,7 @@ const UserSchema = new Schema(
       lineHeight: { type: String },
       mathPreview: { type: Boolean, default: true },
       referencesSearchMode: { type: String, default: 'advanced' }, // 'advanced' or 'simple'
+      enableNewEditor: { type: Boolean },
     },
     features: {
       collaborators: {
@@ -194,6 +195,7 @@ const UserSchema = new Schema(
     writefull: {
       enabled: { type: Boolean, default: null },
       autoCreatedAccount: { type: Boolean, default: false },
+      isPremium: { type: Boolean, default: false },
     },
     aiErrorAssistant: {
       enabled: { type: Boolean, default: true },

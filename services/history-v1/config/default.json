@@ -23,12 +23,14 @@
       }
     }
   },
+  "backupRPOInMS": "3600000",
   "chunkStore": {
     "historyStoreConcurrency": "4"
   },
   "zipStore": {
     "zipTimeoutMs": "360000"
   },
+  "hasProjectsWithoutHistory": false,
   "minSoftDeletionPeriodDays": "90",
   "maxDeleteKeys": "1000",
   "useDeleteObjects": "true",

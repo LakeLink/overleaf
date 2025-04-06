@@ -20,7 +20,7 @@ import CostSummary from '@/features/group-management/components/add-seats/cost-s
 import RequestStatus from '@/features/group-management/components/request-status'
 import useAsync from '@/shared/hooks/use-async'
 import getMeta from '@/utils/meta'
-import { postJSON } from '@/infrastructure/fetch-json'
+import { FetchError, postJSON } from '@/infrastructure/fetch-json'
 import { debugConsole } from '@/utils/debugging'
 import * as yup from 'yup'
 import {
@@ -30,7 +30,7 @@ import {
 import { MergeAndOverride, Nullable } from '../../../../../../types/utils'
 import { sendMB } from '../../../../infrastructure/event-tracking'
 
-export const MAX_NUMBER_OF_USERS = 50
+export const MAX_NUMBER_OF_USERS = 20
 
 type CostSummaryData = MergeAndOverride<
   SubscriptionChangePreview,
@@ -54,7 +54,8 @@ function AddSeats() {
     runAsync: runAsyncCostSummary,
     data: costSummaryData,
     reset: resetCostSummaryData,
-  } = useAsync<CostSummaryData>()
+    error: errorCostSummary,
+  } = useAsync<CostSummaryData, FetchError>()
   const {
     isLoading: isAddingSeats,
     isError: isErrorAddingSeats,
@@ -225,10 +226,10 @@ function AddSeats() {
       <RequestStatus
         variant="primary"
         icon="check_circle"
-        title={t('youve_added_more_users')}
+        title={t('youve_added_more_licenses')}
         content={
           <Trans
-            i18nKey="youve_added_x_more_users_to_your_subscription_invite_people"
+            i18nKey="youve_added_x_more_licenses_to_your_subscription_invite_people"
             components={[
               // eslint-disable-next-line jsx-a11y/anchor-has-content, react/jsx-key
               <a
@@ -280,16 +281,16 @@ function AddSeats() {
               >
                 <div className="d-grid gap-1">
                   <h4 className="fw-bold m-0 card-description-secondary">
-                    {t('add_more_users')}
+                    {t('buy_more_licenses')}
                   </h4>
                   <div>
-                    {t('your_current_plan_supports_up_to_x_users', {
+                    {t('your_current_plan_supports_up_to_x_licenses', {
                       users: totalLicenses,
                     })}
                   </div>
                   <div>
                     <Trans
-                      i18nKey="if_you_want_to_reduce_the_number_of_users_please_contact_support"
+                      i18nKey="if_you_want_to_reduce_the_number_of_licenses_please_contact_support"
                       components={[
                         // eslint-disable-next-line jsx-a11y/anchor-has-content, react/jsx-key
                         <a
@@ -307,7 +308,7 @@ function AddSeats() {
                 <div>
                   <FormGroup controlId="number-of-users-input">
                     <FormLabel>
-                      {t('how_many_users_do_you_want_to_add')}
+                      {t('how_many_licenses_do_you_want_to_buy')}
                     </FormLabel>
                     <FormControl
                       type="text"
@@ -326,6 +327,7 @@ function AddSeats() {
                 <CostSummarySection
                   isLoadingCostSummary={isLoadingCostSummary}
                   isErrorCostSummary={isErrorCostSummary}
+                  errorCostSummary={errorCostSummary}
                   shouldContactSales={shouldContactSales}
                   costSummaryData={costSummaryData}
                   totalLicenses={totalLicenses}
@@ -364,7 +366,7 @@ function AddSeats() {
                     }
                     isLoading={isAddingSeats || isSendingMailToSales}
                   >
-                    {shouldContactSales ? t('send_request') : t('add_users')}
+                    {shouldContactSales ? t('send_request') : t('buy_licenses')}
                   </Button>
                 </div>
               </form>
@@ -379,6 +381,7 @@ function AddSeats() {
 type CostSummarySectionProps = {
   isLoadingCostSummary: boolean
   isErrorCostSummary: boolean
+  errorCostSummary: Nullable<FetchError>
   shouldContactSales: boolean
   costSummaryData: Nullable<CostSummaryData>
   totalLicenses: number
@@ -387,6 +390,7 @@ type CostSummarySectionProps = {
 function CostSummarySection({
   isLoadingCostSummary,
   isErrorCostSummary,
+  errorCostSummary,
   shouldContactSales,
   costSummaryData,
   totalLicenses,
@@ -402,10 +406,10 @@ function CostSummarySection({
       <Notification
         content={
           <Trans
-            i18nKey="if_you_want_more_than_x_users_on_your_plan_we_need_to_add_them_for_you"
+            i18nKey="if_you_want_more_than_x_licenses_on_your_plan_we_need_to_add_them_for_you"
             // eslint-disable-next-line react/jsx-key
             components={[<b />]}
-            values={{ count: 50 }}
+            values={{ count: MAX_NUMBER_OF_USERS }}
             shouldUnescape
             tOptions={{ interpolation: { escapeValue: true } }}
           />
@@ -416,6 +420,24 @@ function CostSummarySection({
   }
 
   if (isErrorCostSummary) {
+    if (errorCostSummary?.data?.code === 'subtotal_limit_exceeded') {
+      return (
+        <Notification
+          type="error"
+          content={
+            <Trans
+              i18nKey="sorry_there_was_an_issue_adding_x_users_to_your_subscription"
+              // eslint-disable-next-line react/jsx-key, jsx-a11y/anchor-has-content
+              components={[<a href="/contact" rel="noreferrer noopener" />]}
+              values={{ count: errorCostSummary?.data?.adding }}
+              shouldUnescape
+              tOptions={{ interpolation: { escapeValue: true } }}
+            />
+          }
+        />
+      )
+    }
+
     return (
       <Notification type="error" content={t('generic_something_went_wrong')} />
     )

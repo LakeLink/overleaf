@@ -30,11 +30,6 @@ import { setAutoComplete } from '../extensions/auto-complete'
 import { usePhrases } from './use-phrases'
 import { setPhrases } from '../extensions/phrases'
 import { setSpellCheckLanguage } from '../extensions/spelling'
-import {
-  createChangeManager,
-  dispatchEditorEvent,
-  reviewPanelToggled,
-} from '../extensions/changes/change-manager'
 import { setKeybindings } from '../extensions/keybindings'
 import { Highlight } from '../../../../../types/highlight'
 import { EditorView } from '@codemirror/view'
@@ -46,7 +41,6 @@ import { setDocName } from '@/features/source-editor/extensions/doc-name'
 import { isValidTeXFile } from '@/main/is-valid-tex-file'
 import { captureException } from '@/infrastructure/error-reporter'
 import grammarlyExtensionPresent from '@/shared/utils/grammarly'
-import { useLayoutContext } from '@/shared/context/layout-context'
 import { debugConsole } from '@/utils/debugging'
 import { useMetadataContext } from '@/features/ide-react/context/metadata-context'
 import { useUserContext } from '@/shared/context/user-context'
@@ -56,10 +50,10 @@ import { useRangesContext } from '@/features/review-panel-new/context/ranges-con
 import { updateRanges } from '@/features/source-editor/extensions/ranges'
 import { useThreadsContext } from '@/features/review-panel-new/context/threads-context'
 import { useHunspell } from '@/features/source-editor/hooks/use-hunspell'
-import { isBootstrap5 } from '@/features/utils/bootstrap-5'
 import { Permissions } from '@/features/ide-react/types/permissions'
-import { lineHeights } from '@/shared/utils/styles'
 import { useEditorManagerContext } from '@/features/ide-react/context/editor-manager-context'
+import { useOnlineUsersContext } from '@/features/ide-react/context/online-users-context'
+import { setBreadcrumbsEnabled } from '../extensions/breadcrumbs-panel'
 
 function useCodeMirrorScope(view: EditorView) {
   const { fileTreeData } = useFileTreeData()
@@ -71,12 +65,9 @@ function useCodeMirrorScope(view: EditorView) {
   const { logEntryAnnotations, editedSinceCompileStarted, compiling } =
     useCompileContext()
 
-  const { reviewPanelOpen, miniReviewPanelVisible } = useLayoutContext()
   const { currentDocument, openDocName, trackChanges } =
     useEditorManagerContext()
   const metadata = useMetadataContext()
-
-  const [loadingThreads] = useScopeValue<boolean>('loadingThreads')
 
   const { id: userId } = useUserContext()
   const { userSettings } = useUserSettingsContext()
@@ -92,11 +83,10 @@ function useCodeMirrorScope(view: EditorView) {
     syntaxValidation,
     mathPreview,
     referencesSearchMode,
+    enableNewEditor,
   } = userSettings
 
-  const [cursorHighlights] = useScopeValue<Record<string, Highlight[]>>(
-    'onlineUserCursorHighlights'
-  )
+  const { onlineUserCursorHighlights } = useOnlineUsersContext()
 
   let [spellCheckLanguage] = useScopeValue<string>('project.spellCheckLanguage')
   // spell check is off when read-only
@@ -131,7 +121,6 @@ function useCodeMirrorScope(view: EditorView) {
     lineHeight,
     overallTheme,
     editorTheme,
-    bootstrapVersion: 3 as 3 | 5,
   })
 
   useEffect(() => {
@@ -141,7 +130,6 @@ function useCodeMirrorScope(view: EditorView) {
       lineHeight,
       overallTheme,
       editorTheme,
-      bootstrapVersion: isBootstrap5() ? 5 : 3,
     }
 
     view.dispatch(
@@ -150,7 +138,6 @@ function useCodeMirrorScope(view: EditorView) {
         fontSize,
         lineHeight,
         overallTheme,
-        bootstrapVersion: themeRef.current.bootstrapVersion,
       })
     )
 
@@ -166,12 +153,12 @@ function useCodeMirrorScope(view: EditorView) {
     syntaxValidation,
     mathPreview,
     referencesSearchMode,
+    enableNewEditor,
   })
 
   const currentDocRef = useRef({
     currentDocument,
     trackChanges,
-    loadingThreads,
   })
 
   useEffect(() => {
@@ -191,10 +178,6 @@ function useCodeMirrorScope(view: EditorView) {
   const docNameRef = useRef(openDocName)
 
   useEffect(() => {
-    currentDocRef.current.loadingThreads = loadingThreads
-  }, [view, loadingThreads])
-
-  useEffect(() => {
     currentDocRef.current.trackChanges = trackChanges
 
     if (currentDocument) {
@@ -205,12 +188,6 @@ function useCodeMirrorScope(view: EditorView) {
       }
     }
   }, [userId, currentDocument, trackChanges])
-
-  useEffect(() => {
-    if (lineHeight && fontSize) {
-      dispatchEditorEvent('line-height', lineHeights[lineHeight] * fontSize)
-    }
-  }, [lineHeight, fontSize])
 
   const spellingRef = useRef({
     spellCheckLanguage,
@@ -328,7 +305,6 @@ function useCodeMirrorScope(view: EditorView) {
           spelling: spellingRef.current,
           visual: visualRef.current,
           projectFeatures: projectFeaturesRef.current,
-          changeManager: createChangeManager(view, currentDocument),
           handleError,
           handleException,
         }),
@@ -460,6 +436,13 @@ function useCodeMirrorScope(view: EditorView) {
     settingsRef.current.referencesSearchMode = referencesSearchMode
   }, [referencesSearchMode])
 
+  useEffect(() => {
+    settingsRef.current.enableNewEditor = enableNewEditor
+    window.setTimeout(() => {
+      view.dispatch(setBreadcrumbsEnabled(enableNewEditor))
+    })
+  }, [view, enableNewEditor])
+
   const emitSyncToPdf = useScopeEventEmitter('cursor:editor:syncToPdf')
 
   // select and scroll to position on editor:gotoLine event (from synctex)
@@ -558,14 +541,14 @@ function useCodeMirrorScope(view: EditorView) {
   })
 
   useEffect(() => {
-    if (cursorHighlights && currentDocument) {
-      const items = cursorHighlights[currentDocument.doc_id]
+    if (onlineUserCursorHighlights && currentDocument) {
+      const items = onlineUserCursorHighlights[currentDocument.doc_id]
       highlightsRef.current.cursorHighlights = items
       window.setTimeout(() => {
         view.dispatch(setCursorHighlights(items))
       })
     }
-  }, [view, cursorHighlights, currentDocument])
+  }, [view, onlineUserCursorHighlights, currentDocument])
 
   useEventListener(
     'editor:focus',
@@ -573,12 +556,6 @@ function useCodeMirrorScope(view: EditorView) {
       view.focus()
     }, [view])
   )
-
-  useEffect(() => {
-    window.setTimeout(() => {
-      view.dispatch(reviewPanelToggled())
-    })
-  }, [reviewPanelOpen, miniReviewPanelVisible, view])
 }
 
 export default useCodeMirrorScope

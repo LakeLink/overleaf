@@ -5,9 +5,11 @@
 
 export default /** @type {const} */ ([
   'book_5',
+  'brush',
   'code',
   'create_new_folder',
   'description',
+  'experiment',
   'forum',
   'help',
   'image',

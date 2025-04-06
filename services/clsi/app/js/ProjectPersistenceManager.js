@@ -13,6 +13,7 @@ const CompileManager = require('./CompileManager')
 const async = require('async')
 const logger = require('@overleaf/logger')
 const oneDay = 24 * 60 * 60 * 1000
+const Metrics = require('@overleaf/metrics')
 const Settings = require('@overleaf/settings')
 const diskusage = require('diskusage')
 const { callbackify } = require('node:util')
@@ -22,31 +23,46 @@ const fs = require('node:fs')
 // projectId -> timestamp mapping.
 const LAST_ACCESS = new Map()
 
-async function refreshExpiryTimeout() {
+async function collectDiskStats() {
   const paths = [
     Settings.path.compilesDir,
     Settings.path.outputDir,
     Settings.path.clsiCacheDir,
   ]
+
+  const diskStats = {}
   for (const path of paths) {
     try {
       const stats = await diskusage.check(path)
-      const lowDisk = stats.available / stats.total < 0.1
-
-      const lowerExpiry = ProjectPersistenceManager.EXPIRY_TIMEOUT * 0.9
-      if (lowDisk && Settings.project_cache_length_ms / 2 < lowerExpiry) {
-        logger.warn(
-          {
-            stats,
-            newExpiryTimeoutInDays: (lowerExpiry / oneDay).toFixed(2),
-          },
-          'disk running low on space, modifying EXPIRY_TIMEOUT'
-        )
-        ProjectPersistenceManager.EXPIRY_TIMEOUT = lowerExpiry
-        break
-      }
+      const diskAvailablePercent = (stats.available / stats.total) * 100
+      Metrics.gauge('disk_available_percent', diskAvailablePercent, 1, {
+        path,
+      })
+      const lowDisk = diskAvailablePercent < 10
+      diskStats[path] = { stats, lowDisk }
     } catch (err) {
       logger.err({ err, path }, 'error getting disk usage')
+    }
+  }
+  return diskStats
+}
+
+async function refreshExpiryTimeout() {
+  for (const [path, { stats, lowDisk }] of Object.entries(
+    await collectDiskStats()
+  )) {
+    const lowerExpiry = ProjectPersistenceManager.EXPIRY_TIMEOUT * 0.9
+    if (lowDisk && Settings.project_cache_length_ms / 2 < lowerExpiry) {
+      logger.warn(
+        {
+          path,
+          stats,
+          newExpiryTimeoutInDays: (lowerExpiry / oneDay).toFixed(2),
+        },
+        'disk running low on space, modifying EXPIRY_TIMEOUT'
+      )
+      ProjectPersistenceManager.EXPIRY_TIMEOUT = lowerExpiry
+      break
     }
   }
 }
@@ -103,6 +119,13 @@ module.exports = ProjectPersistenceManager = {
         }
       )
     })
+
+    // Collect disk stats frequently to have them ready the next time /metrics is scraped (60s +- jitter).
+    setInterval(() => {
+      collectDiskStats().catch(err => {
+        logger.err({ err }, 'low level error collecting disk stats')
+      })
+    }, 50_000)
   },
 
   markProjectAsJustAccessed(projectId, callback) {

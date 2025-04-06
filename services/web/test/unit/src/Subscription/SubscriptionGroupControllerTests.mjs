@@ -128,6 +128,7 @@ describe('SubscriptionGroupController', function () {
       ManuallyCollectedError: class extends Error {},
       PendingChangeError: class extends Error {},
       InactiveError: class extends Error {},
+      SubtotalLimitExceededError: class extends Error {},
     }
 
     this.Controller = await esmock.strict(modulePath, {
@@ -495,6 +496,30 @@ describe('SubscriptionGroupController', function () {
 
       this.Controller.previewAddSeatsSubscriptionChange(this.req, res)
     })
+
+    it('should fail previewing "add seats" change with SubtotalLimitExceededError', function (done) {
+      this.req.body = { adding: 2 }
+      this.SubscriptionGroupHandler.promises.previewAddSeatsSubscriptionChange =
+        sinon.stub().throws(new this.Errors.SubtotalLimitExceededError())
+
+      const res = {
+        status: statusCode => {
+          statusCode.should.equal(422)
+
+          return {
+            json: data => {
+              data.should.deep.equal({
+                code: 'subtotal_limit_exceeded',
+                adding: this.req.body.adding,
+              })
+              done()
+            },
+          }
+        },
+      }
+
+      this.Controller.previewAddSeatsSubscriptionChange(this.req, res)
+    })
   })
 
   describe('createAddSeatsSubscriptionChange', function () {
@@ -524,6 +549,30 @@ describe('SubscriptionGroupController', function () {
 
           return {
             end: () => {
+              done()
+            },
+          }
+        },
+      }
+
+      this.Controller.createAddSeatsSubscriptionChange(this.req, res)
+    })
+
+    it('should fail applying "add seats" change with SubtotalLimitExceededError', function (done) {
+      this.req.body = { adding: 2 }
+      this.SubscriptionGroupHandler.promises.createAddSeatsSubscriptionChange =
+        sinon.stub().throws(new this.Errors.SubtotalLimitExceededError())
+
+      const res = {
+        status: statusCode => {
+          statusCode.should.equal(422)
+
+          return {
+            json: data => {
+              data.should.deep.equal({
+                code: 'subtotal_limit_exceeded',
+                adding: this.req.body.adding,
+              })
               done()
             },
           }
@@ -563,33 +612,6 @@ describe('SubscriptionGroupController', function () {
         },
       }
       this.Controller.submitForm(this.req, res, done)
-    })
-  })
-
-  describe('flexibleLicensingSplitTest', function () {
-    it('passes when the variant is "enabled"', function (done) {
-      const res = sinon.stub()
-      const next = () => {
-        this.ErrorController.notFound.notCalled.should.equal(true)
-        done()
-      }
-      this.SplitTestHandler.promises.getAssignment.resolves({
-        variant: 'enabled',
-      })
-      this.Controller.flexibleLicensingSplitTest(this.req, res, next, done)
-    })
-
-    it('returns error page when the variant is "default"', function (done) {
-      const res = sinon.stub()
-      const next = sinon.stub()
-      this.ErrorController.notFound = sinon.stub().callsFake(() => {
-        next.notCalled.should.equal(true)
-        done()
-      })
-      this.SplitTestHandler.promises.getAssignment.resolves({
-        variant: 'default',
-      })
-      this.Controller.flexibleLicensingSplitTest(this.req, res, next, done)
     })
   })
 
@@ -660,6 +682,21 @@ describe('SubscriptionGroupController', function () {
           url.should.equal(
             '/user/subscription/group/manually-collected-subscription'
           )
+          done()
+        },
+      }
+
+      this.Controller.subscriptionUpgradePage(this.req, res)
+    })
+
+    it('should redirect to subtotal limit exceeded page', function (done) {
+      this.SubscriptionGroupHandler.promises.getGroupPlanUpgradePreview = sinon
+        .stub()
+        .throws(new this.Errors.SubtotalLimitExceededError())
+
+      const res = {
+        redirect: url => {
+          url.should.equal('/user/subscription/group/subtotal-limit-exceeded')
           done()
         },
       }

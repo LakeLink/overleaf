@@ -216,18 +216,6 @@ module.exports = Router = {
       })
       metrics.gauge('socket-io.clients', io.sockets.clients().length)
 
-      const info = {
-        session,
-        publicId: client.publicId,
-        clientId: client.id,
-        isDebugging,
-      }
-      if (isDebugging) {
-        logger.info(info, 'client connected')
-      } else {
-        logger.debug(info, 'client connected')
-      }
-
       let user
       if (session && session.passport && session.passport.user) {
         ;({ user } = session.passport)
@@ -236,6 +224,20 @@ module.exports = Router = {
       } else {
         const anonymousAccessToken = session?.anonTokenAccess?.[projectId]
         user = { _id: 'anonymous-user', anonymousAccessToken }
+      }
+
+      const info = {
+        userId: user._id,
+        projectId,
+        transport: client.transport,
+        publicId: client.publicId,
+        clientId: client.id,
+        isDebugging,
+      }
+      if (isDebugging) {
+        logger.info(info, 'client connected')
+      } else {
+        logger.debug(info, 'client connected')
       }
 
       const connectionDetails = {
@@ -263,43 +265,66 @@ module.exports = Router = {
               )
             }
             pingTimestamp = Date.now()
-            client.emit('serverPing', ++pingId, pingTimestamp)
+            client.emit(
+              'serverPing',
+              ++pingId,
+              pingTimestamp,
+              client.transport,
+              client.id
+            )
           }, SERVER_PING_INTERVAL)
         : null
-      client.on('clientPong', function (receivedPingId, sentTimestamp) {
-        pongId = receivedPingId
-        const receivedTimestamp = Date.now()
-        if (receivedPingId !== pingId) {
-          logger.warn(
-            {
-              ...connectionDetails,
-              receivedPingId,
-              pingId,
-              sentTimestamp,
-              receivedTimestamp,
-              latency: receivedTimestamp - sentTimestamp,
-              lastPingTimestamp: pingTimestamp,
-            },
-            'received pong with wrong counter'
-          )
-        } else if (
-          receivedTimestamp - sentTimestamp >
-          SERVER_PING_LATENCY_THRESHOLD
+      client.on(
+        'clientPong',
+        function (
+          receivedPingId,
+          sentTimestamp,
+          serverTransport,
+          serverSessionId,
+          clientTransport,
+          clientSessionId
         ) {
-          logger.warn(
-            {
-              ...connectionDetails,
-              receivedPingId,
-              pingId,
-              sentTimestamp,
-              receivedTimestamp,
-              latency: receivedTimestamp - sentTimestamp,
-              lastPingTimestamp: pingTimestamp,
-            },
-            'received pong with high latency'
-          )
+          pongId = receivedPingId
+          const receivedTimestamp = Date.now()
+          if (
+            receivedPingId !== pingId ||
+            (serverSessionId && serverSessionId !== clientSessionId)
+          ) {
+            logger.warn(
+              {
+                ...connectionDetails,
+                receivedPingId,
+                pingId,
+                sentTimestamp,
+                receivedTimestamp,
+                latency: receivedTimestamp - sentTimestamp,
+                lastPingTimestamp: pingTimestamp,
+                serverTransport,
+                serverSessionId,
+                clientTransport,
+                clientSessionId,
+              },
+              'received pong with wrong counter'
+            )
+          } else if (
+            receivedTimestamp - sentTimestamp >
+            SERVER_PING_LATENCY_THRESHOLD
+          ) {
+            logger.warn(
+              {
+                ...connectionDetails,
+                receivedPingId,
+                pingId,
+                sentTimestamp,
+                receivedTimestamp,
+                latency: receivedTimestamp - sentTimestamp,
+                lastPingTimestamp: pingTimestamp,
+              },
+              'received pong with high latency'
+            )
+          }
         }
-      })
+      )
 
       if (settings.exposeHostname) {
         client.on('debug.getHostname', function (callback) {

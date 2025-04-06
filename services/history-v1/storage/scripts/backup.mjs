@@ -30,29 +30,57 @@ import {
   projectBlobsBucket,
 } from '../lib/backupPersistor.mjs'
 import { backupGenerator } from '../lib/backupGenerator.mjs'
-import { promises as fs } from 'node:fs'
+import { promises as fs, createWriteStream } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import projectKey from '../lib/project_key.js'
 import Crypto from 'node:crypto'
 import Stream from 'node:stream'
 import { EventEmitter } from 'node:events'
-import { batchedUpdate } from '@overleaf/mongo-utils/batchedUpdate.js'
+import {
+  objectIdFromInput,
+  batchedUpdate,
+  READ_PREFERENCE_SECONDARY,
+} from '@overleaf/mongo-utils/batchedUpdate.js'
 import { createGunzip } from 'node:zlib'
 import { text } from 'node:stream/consumers'
 import { fromStream as blobHashFromStream } from '../lib/blob_hash.js'
 import { NotFoundError } from '@overleaf/object-persistor/src/Errors.js'
 
+// Create a singleton promise that loads global blobs once
+let globalBlobsPromise = null
+function ensureGlobalBlobsLoaded() {
+  if (!globalBlobsPromise) {
+    globalBlobsPromise = loadGlobalBlobs()
+  }
+  return globalBlobsPromise
+}
+
 EventEmitter.defaultMaxListeners = 20
 
 logger.initialize('history-v1-backup')
 
+// Settings shared between command-line and module usage
 let DRY_RUN = false
 let RETRY_LIMIT = 3
 const RETRY_DELAY = 1000
 let CONCURRENCY = 4
 let BATCH_CONCURRENCY = 1
 let BLOB_LIMITER = pLimit(CONCURRENCY)
+let USE_SECONDARY = false
+
+/**
+ * Configure backup settings
+ * @param {Object} options Backup configuration options
+ */
+export function configureBackup(options = {}) {
+  DRY_RUN = options.dryRun || false
+  RETRY_LIMIT = options.retries || 3
+  CONCURRENCY = options.concurrency || 1
+  BATCH_CONCURRENCY = options.batchConcurrency || 1
+  BLOB_LIMITER = pLimit(CONCURRENCY)
+  USE_SECONDARY = options.useSecondary || false
+}
 
 let gracefulShutdownInitiated = false
 
@@ -61,7 +89,7 @@ process.on('SIGTERM', handleSignal)
 
 function handleSignal() {
   gracefulShutdownInitiated = true
-  console.warn('graceful shutdown initiated, draining queue')
+  logger.info({}, 'graceful shutdown initiated, draining queue')
 }
 
 async function retry(fn, times, delayMs) {
@@ -142,7 +170,7 @@ async function backupSingleBlob(projectId, historyId, blob, tmpDir, persistor) {
     )
     return
   }
-  logger.info({ blob, historyId }, 'backing up blob')
+  logger.debug({ blob, historyId }, 'backing up blob')
   const blobPath = await downloadWithRetry(historyId, blob, tmpDir)
   await backupWithRetry(historyId, blob, blobPath, persistor)
 }
@@ -156,7 +184,8 @@ async function backupBlobs(projectId, historyId, blobs, limiter, persistor) {
       limiter(backupSingleBlob, projectId, historyId, blob, tmpDir, persistor)
     )
 
-    await Promise.allSettled(blobBackupOperations)
+    // Reject if any blob backup fails
+    await Promise.all(blobBackupOperations)
   } finally {
     if (tmpDir) {
       await fs.rm(tmpDir, { recursive: true, force: true })
@@ -186,7 +215,7 @@ async function backupChunk(
     return
   }
   const key = makeChunkKey(historyId, chunkToBackup.startVersion)
-  logger.info({ chunkRecord, historyId, projectId, key }, 'backing up chunk')
+  logger.debug({ chunkRecord, historyId, projectId, key }, 'backing up chunk')
   const md5 = Crypto.createHash('md5').update(chunkBuffer)
   await chunkBackupPersistorForProject.sendStream(
     chunksBucket,
@@ -216,7 +245,7 @@ async function updateBackupStatus(
     )
     return
   }
-  logger.info(
+  logger.debug(
     { projectId, chunkRecord, startOfBackupTime },
     'setting backupVersion and lastBackedUpTimestamp'
   )
@@ -298,6 +327,7 @@ const optionDefinitions = [
     type: Boolean,
     description: 'Initialize backups for all projects.',
   },
+  { name: 'output', alias: 'o', type: String, description: 'Output file' },
   {
     name: 'start-date',
     type: String,
@@ -307,6 +337,11 @@ const optionDefinitions = [
     name: 'end-date',
     type: String,
     description: 'End date for initialization (ISO format)',
+  },
+  {
+    name: 'use-secondary',
+    type: Boolean,
+    description: 'Use secondary read preference for backup status',
   },
   {
     name: 'compare',
@@ -365,6 +400,10 @@ function handleOptions() {
     process.exit(1)
   }
 
+  if (options['use-secondary']) {
+    USE_SECONDARY = true
+  }
+
   if (
     options.compare &&
     !options.projectId &&
@@ -394,7 +433,9 @@ async function analyseBackupStatus(projectId) {
     await getBackupStatus(projectId)
   // TODO: when we have confidence that the latestChunkMetadata always matches
   // the values from the backupStatus we can skip loading it here
-  const latestChunkMetadata = await loadLatestRaw(historyId)
+  const latestChunkMetadata = await loadLatestRaw(historyId, {
+    readOnly: Boolean(USE_SECONDARY),
+  })
   if (
     currentEndVersion &&
     currentEndVersion !== latestChunkMetadata.endVersion
@@ -483,7 +524,11 @@ function makeChunkKey(projectId, startVersion) {
   return path.join(projectKey.format(projectId), projectKey.pad(startVersion))
 }
 
-async function backupProject(projectId, options) {
+export async function backupProject(projectId, options) {
+  if (gracefulShutdownInitiated) {
+    return
+  }
+  await ensureGlobalBlobsLoaded()
   // FIXME: flush the project first!
   // Let's assume the the flush happens externally and triggers this backup
   const backupStartTime = new Date()
@@ -499,7 +544,7 @@ async function backupProject(projectId, options) {
   } = await analyseBackupStatus(projectId)
 
   if (upToDate) {
-    logger.info(
+    logger.debug(
       {
         projectId,
         historyId,
@@ -535,7 +580,7 @@ async function backupProject(projectId, options) {
     return
   }
 
-  logger.info(
+  logger.debug(
     {
       projectId,
       historyId,
@@ -554,6 +599,7 @@ async function backupProject(projectId, options) {
   )
 
   let previousBackedUpVersion = lastBackedUpVersion
+  const backupVersions = [previousBackedUpVersion]
 
   for await (const {
     blobsToBackup,
@@ -585,14 +631,23 @@ async function backupProject(projectId, options) {
     )
 
     // persist the backup status in mongo for the current chunk
-    await updateBackupStatus(
-      projectId,
-      previousBackedUpVersion,
-      chunkRecord,
-      backupStartTime
-    )
+    try {
+      await updateBackupStatus(
+        projectId,
+        previousBackedUpVersion,
+        chunkRecord,
+        backupStartTime
+      )
+    } catch (err) {
+      logger.error(
+        { projectId, chunkRecord, err, backupVersions },
+        'error updating backup status'
+      )
+      throw err
+    }
 
     previousBackedUpVersion = chunkRecord.endVersion
+    backupVersions.push(previousBackedUpVersion)
 
     await cleanBackedUpBlobs(projectId, blobsToBackup)
   }
@@ -619,7 +674,6 @@ async function backupProject(projectId, options) {
 }
 
 function convertToISODate(dateStr) {
-  if (!dateStr) return undefined
   // Expecting YYYY-MM-DD format
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     throw new Error('Date must be in YYYY-MM-DD format')
@@ -627,38 +681,58 @@ function convertToISODate(dateStr) {
   return new Date(dateStr + 'T00:00:00.000Z').toISOString()
 }
 
-async function initializeProjects(options) {
-  const limiter = pLimit(BATCH_CONCURRENCY)
-
-  async function processBatch(batch) {
-    if (gracefulShutdownInitiated) {
-      throw new Error('graceful shutdown')
-    }
-    const batchOperations = batch.map(project =>
-      limiter(backupProject, project._id.toHexString(), options)
-    )
-    await Promise.allSettled(batchOperations)
-  }
+export async function initializeProjects(options) {
+  await ensureGlobalBlobsLoaded()
+  let totalErrors = 0
+  let totalProjects = 0
 
   const query = {
-    'overleaf.history.id': { $exists: true },
-    'overleaf.backup.lastBackedUpVersion': { $exists: false },
-    'overleaf.backup.pendingChangeAt': { $exists: false },
+    'overleaf.backup.lastBackedUpVersion': { $in: [null] },
   }
 
-  await batchedUpdate(
-    client.db().collection('projects'),
-    query,
-    processBatch,
-    {
-      _id: 1,
-    },
-    { readPreference: 'secondary' },
-    {
-      BATCH_RANGE_START: convertToISODate(options['start-date']),
-      BATCH_RANGE_END: convertToISODate(options['end-date']),
+  if (options['start-date'] && options['end-date']) {
+    query._id = {
+      $gte: objectIdFromInput(convertToISODate(options['start-date'])),
+      $lt: objectIdFromInput(convertToISODate(options['end-date'])),
     }
-  )
+  }
+
+  const cursor = client
+    .db()
+    .collection('projects')
+    .find(query, {
+      projection: { _id: 1 },
+      readPreference: READ_PREFERENCE_SECONDARY,
+    })
+
+  if (options.output) {
+    console.log("Writing project IDs to file: '" + options.output + "'")
+    const output = createWriteStream(options.output)
+    for await (const project of cursor) {
+      output.write(project._id.toHexString() + '\n')
+      totalProjects++
+    }
+    output.end()
+    console.log('Wrote ' + totalProjects + ' project IDs to file')
+    return
+  }
+
+  for await (const project of cursor) {
+    if (gracefulShutdownInitiated) {
+      console.warn('graceful shutdown: stopping project initialization')
+      break
+    }
+    totalProjects++
+    const projectId = project._id.toHexString()
+    try {
+      await backupProject(projectId, options)
+    } catch (err) {
+      totalErrors++
+      logger.error({ projectId, err }, 'error backing up project')
+    }
+  }
+
+  return { errors: totalErrors, projects: totalProjects }
 }
 
 async function backupPendingProjects(options) {
@@ -907,7 +981,7 @@ async function compareAllProjects(options) {
 
 async function main() {
   const options = handleOptions()
-  await loadGlobalBlobs()
+  await ensureGlobalBlobsLoaded()
   const projectId = options.projectId
 
   if (options.status) {
@@ -929,31 +1003,34 @@ async function main() {
   }
 }
 
-main()
-  .then(() => {
-    console.log(
-      gracefulShutdownInitiated ? 'Exited - graceful shutdown' : 'Completed'
-    )
-  })
-  .catch(err => {
-    console.error('Error backing up project:', err)
-    process.exit(1)
-  })
-  .finally(() => {
-    knex
-      .destroy()
-      .then(() => {
-        console.log('Postgres connection closed')
-      })
-      .catch(err => {
-        console.error('Error closing Postgres connection:', err)
-      })
-    client
-      .close()
-      .then(() => {
-        console.log('MongoDB connection closed')
-      })
-      .catch(err => {
-        console.error('Error closing MongoDB connection:', err)
-      })
-  })
+// Only run command-line interface when script is run directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main()
+    .then(() => {
+      console.log(
+        gracefulShutdownInitiated ? 'Exited - graceful shutdown' : 'Completed'
+      )
+    })
+    .catch(err => {
+      console.error('Error backing up project:', err)
+      process.exit(1)
+    })
+    .finally(() => {
+      knex
+        .destroy()
+        .then(() => {
+          console.log('Postgres connection closed')
+        })
+        .catch(err => {
+          console.error('Error closing Postgres connection:', err)
+        })
+      client
+        .close()
+        .then(() => {
+          console.log('MongoDB connection closed')
+        })
+        .catch(err => {
+          console.error('Error closing MongoDB connection:', err)
+        })
+    })
+}

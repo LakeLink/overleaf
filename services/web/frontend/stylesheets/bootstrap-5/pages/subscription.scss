@@ -37,6 +37,13 @@
  *  MODALS
  */
 
+.group-subscription-modal-title-discount {
+  @include body-base;
+
+  margin-top: var(--spacing-02);
+  margin-bottom: unset;
+}
+
 .group-subscription-modal {
   .circle {
     font-size: var(--font-size-06);
@@ -296,7 +303,8 @@
   gap: var(--spacing-04);
   margin-bottom: var(--spacing-06);
 
-  h2 {
+  h2,
+  .heading {
     @include heading-lg;
 
     margin: 0;
@@ -496,5 +504,17 @@
     &::after {
       content: none;
     }
+  }
+}
+
+.payment-summary-card {
+  @extend .card-gray;
+
+  border-radius: var(--border-radius-large);
+
+  h3 {
+    margin-top: 0;
+    margin-bottom: var(--spacing-08);
+    font-weight: 600;
   }
 }

@@ -60,6 +60,7 @@ async function getMemberIdsWithPrivilegeLevels(projectId) {
     publicAccesLevel: 1,
     pendingEditor_refs: 1,
     reviewer_refs: 1,
+    pendingReviewer_refs: 1,
   })
   if (!project) {
     throw new Errors.NotFoundError(`no project found with id ${projectId}`)
@@ -72,7 +73,8 @@ async function getMemberIdsWithPrivilegeLevels(projectId) {
     project.tokenAccessReadOnly_refs,
     project.publicAccesLevel,
     project.pendingEditor_refs,
-    project.reviewer_refs
+    project.reviewer_refs,
+    project.pendingReviewer_refs
   )
   return memberIds
 }
@@ -107,7 +109,8 @@ async function getInvitedMembersWithPrivilegeLevelsFromFields(
     [],
     null,
     [],
-    reviewerIds
+    reviewerIds,
+    []
   )
   return _loadMembers(members)
 }
@@ -128,23 +131,25 @@ async function getMemberIdPrivilegeLevel(userId, projectId) {
 }
 
 async function getInvitedEditCollaboratorCount(projectId) {
-  // Only counts invited members with readAndWrite privilege
+  // Counts invited members with editor or reviewer roles
   const members = await getMemberIdsWithPrivilegeLevels(projectId)
   return members.filter(
     m =>
       m.source === Sources.INVITE &&
-      m.privilegeLevel === PrivilegeLevels.READ_AND_WRITE
+      (m.privilegeLevel === PrivilegeLevels.READ_AND_WRITE ||
+        m.privilegeLevel === PrivilegeLevels.REVIEW)
   ).length
 }
 
 async function getInvitedPendingEditorCount(projectId) {
-  // Only counts invited members that are readonly pending editors
+  // Only counts invited members that are readonly pending editors or pending
+  // reviewers
   const members = await getMemberIdsWithPrivilegeLevels(projectId)
   return members.filter(
     m =>
       m.source === Sources.INVITE &&
       m.privilegeLevel === PrivilegeLevels.READ_ONLY &&
-      m.pendingEditor === true
+      (m.pendingEditor || m.pendingReviewer)
   ).length
 }
 
@@ -319,7 +324,8 @@ function _getMemberIdsWithPrivilegeLevelsFromFields(
   tokenAccessReadOnlyIds,
   publicAccessLevel,
   pendingEditorIds,
-  reviewerIds
+  reviewerIds,
+  pendingReviewerIds
 ) {
   const members = []
   members.push({
@@ -327,6 +333,7 @@ function _getMemberIdsWithPrivilegeLevelsFromFields(
     privilegeLevel: PrivilegeLevels.OWNER,
     source: Sources.OWNER,
   })
+
   for (const memberId of collaboratorIds || []) {
     members.push({
       id: memberId.toString(),
@@ -334,16 +341,22 @@ function _getMemberIdsWithPrivilegeLevelsFromFields(
       source: Sources.INVITE,
     })
   }
+
   for (const memberId of readOnlyIds || []) {
-    members.push({
+    const record = {
       id: memberId.toString(),
       privilegeLevel: PrivilegeLevels.READ_ONLY,
       source: Sources.INVITE,
-      ...(pendingEditorIds?.some(pe => memberId.equals(pe)) && {
-        pendingEditor: true,
-      }),
-    })
+    }
+
+    if (pendingEditorIds?.some(pe => memberId.equals(pe))) {
+      record.pendingEditor = true
+    } else if (pendingReviewerIds?.some(pr => memberId.equals(pr))) {
+      record.pendingReviewer = true
+    }
+    members.push(record)
   }
+
   if (publicAccessLevel === PublicAccessLevels.TOKEN_BASED) {
     for (const memberId of tokenAccessIds || []) {
       members.push({
@@ -360,6 +373,7 @@ function _getMemberIdsWithPrivilegeLevelsFromFields(
       })
     }
   }
+
   for (const memberId of reviewerIds || []) {
     members.push({
       id: memberId.toString(),
@@ -384,11 +398,16 @@ async function _loadMembers(members) {
           signUpDate: 1,
         })
         if (user != null) {
-          return {
+          const record = {
             user,
             privilegeLevel: member.privilegeLevel,
-            ...(member.pendingEditor && { pendingEditor: true }),
           }
+          if (member.pendingEditor) {
+            record.pendingEditor = true
+          } else if (member.pendingReviewer) {
+            record.pendingReviewer = true
+          }
+          return record
         } else {
           return null
         }
