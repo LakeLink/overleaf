@@ -400,17 +400,16 @@ const AuthenticationController = {
             }
           })
         }).then(async r => {
-          const data = await r.json()
-          if (data.error) {
-            res.json({message: data.error});
-          } else {
-            AuthenticationManager.createUserIfNotExist(data, (error, user) => {
-              if (error) {
-                res.json({message: error});
-              } else {
-                AuthenticationController.finishLogin(user, req, res, next);
-              }
-            })
+          try {
+            const data = await r.json()
+            if (data.error) {
+              res.json({message: data.error});
+            } else {
+              let user = await AuthenticationManager.promises.createUserIfNotExist(data)
+              AuthenticationController.finishLogin(user, req, res, next);
+            }
+          } catch(error) {
+            res.json({message: error});
           }
         });
         // json_body = {
