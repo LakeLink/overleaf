@@ -518,4 +518,5 @@ module.exports = {
   hashPassword: callbackify(AuthenticationManager.hashPassword),
   setUserPasswordInV2: callbackify(AuthenticationManager.setUserPasswordInV2),
   promises: AuthenticationManager,
+  createUserIfNotExist: AuthenticationManager.createUserIfNotExist
 }
