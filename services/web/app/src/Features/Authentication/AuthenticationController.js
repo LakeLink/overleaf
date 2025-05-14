@@ -371,7 +371,7 @@ const AuthenticationController = {
             querystring.stringify({
                 client_id: process.env.OAUTH_CLIENT_ID,
                 response_type: "code",
-                redirect_uri: (process.env.SHARELATEX_SITE_URL + "/oauth/callback"),
+                redirect_uri: (process.env.OVERLEAF_SITE_URL + "/oauth/callback"),
                 scope: process.env.OAUTH_SCOPE,
             }));
     },
@@ -386,7 +386,7 @@ const AuthenticationController = {
         params.append('client_id', process.env.OAUTH_CLIENT_ID)
         params.append('client_secret', process.env.OAUTH_CLIENT_SECRET)
         params.append("code", code)
-        params.append('redirect_uri', (process.env.SHARELATEX_SITE_URL + "/oauth/callback"))
+        params.append('redirect_uri', (process.env.OVERLEAF_SITE_URL + "/oauth/callback"))
 
         fetch(process.env.OAUTH_ACCESS_URL, {
           method: 'POST',
@@ -418,7 +418,7 @@ const AuthenticationController = {
         //     client_id: process.env.OAUTH_CLIENT_ID,
         //     client_secret: process.env.OAUTH_CLIENT_SECRET,
         //     "code": code,
-        //     redirect_uri: (process.env.SHARELATEX_SITE_URL + "/oauth/callback"),
+        //     redirect_uri: (process.env.OVERLEAF_SITE_URL + "/oauth/callback"),
         // }
     },
   //Patch end
