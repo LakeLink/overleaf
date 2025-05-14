@@ -1,10 +1,8 @@
 const Path = require('node:path')
-const http = require('node:http')
-const https = require('node:https')
+const os = require('node:os')
 
-http.globalAgent.keepAlive = false
-https.globalAgent.keepAlive = false
 const isPreEmptible = process.env.PREEMPTIBLE === 'TRUE'
+const CLSI_SERVER_ID = os.hostname().replace('-ctr', '')
 
 module.exports = {
   compileSizeLimit: process.env.COMPILE_SIZE_LIMIT || '7mb',
@@ -48,11 +46,26 @@ module.exports = {
       url: `http://${process.env.CLSI_HOST || '127.0.0.1'}:3013`,
       // External url prefix for output files, e.g. for requests via load-balancers.
       outputUrlPrefix: `${process.env.ZONE ? `/zone/${process.env.ZONE}` : ''}`,
+      clsiServerId: process.env.CLSI_SERVER_ID || CLSI_SERVER_ID,
+
+      downloadHost: process.env.DOWNLOAD_HOST || 'http://localhost:3013',
     },
     clsiPerf: {
       host: `${process.env.CLSI_PERF_HOST || '127.0.0.1'}:${
         process.env.CLSI_PERF_PORT || '3043'
       }`,
+    },
+    clsiCache: {
+      enabled: !!(process.env.CLSI_CACHE_SHARDS || process.env.CLSI_CACHE_HOST),
+      url: `http://${process.env.CLSI_CACHE_HOST}:3044`,
+      shards: process.env.CLSI_CACHE_SHARDS
+        ? JSON.parse(process.env.CLSI_CACHE_SHARDS)
+        : [
+            {
+              url: `http://${process.env.CLSI_CACHE_HOST}:3044`,
+              shard: 'cache',
+            },
+          ],
     },
   },
 
@@ -88,14 +101,15 @@ if (process.env.ALLOWED_COMPILE_GROUPS) {
   }
 }
 
-if (process.env.DOCKER_RUNNER) {
-  let seccompProfilePath
+if ((process.env.DOCKER_RUNNER || process.env.SANDBOXED_COMPILES) === 'true') {
   module.exports.clsi = {
-    dockerRunner: process.env.DOCKER_RUNNER === 'true',
+    dockerRunner: true,
     docker: {
       runtime: process.env.DOCKER_RUNTIME,
       image:
-        process.env.TEXLIVE_IMAGE || 'quay.io/sharelatex/texlive-full:2017.1',
+        process.env.TEXLIVE_IMAGE ||
+        process.env.TEX_LIVE_DOCKER_IMAGE ||
+        'quay.io/sharelatex/texlive-full:2017.1',
       env: {
         HOME: '/tmp',
         CLSI: 1,
@@ -121,6 +135,7 @@ if (process.env.DOCKER_RUNNER) {
     const defaultCompileGroupConfig = {
       wordcount: { 'HostConfig.AutoRemove': true },
       synctex: { 'HostConfig.AutoRemove': true },
+      'synctex-output': { 'HostConfig.AutoRemove': true },
     }
     module.exports.clsi.docker.compileGroupConfig = Object.assign(
       defaultCompileGroupConfig,
@@ -131,6 +146,7 @@ if (process.env.DOCKER_RUNNER) {
     process.exit(1)
   }
 
+  let seccompProfilePath
   try {
     seccompProfilePath = Path.resolve(__dirname, '../seccomp/clsi-profile.json')
     module.exports.clsi.docker.seccomp_profile = JSON.stringify(
@@ -165,5 +181,23 @@ if (process.env.DOCKER_RUNNER) {
 
   module.exports.path.synctexBaseDir = () => '/compile'
 
-  module.exports.path.sandboxedCompilesHostDir = process.env.COMPILES_HOST_DIR
+  module.exports.path.sandboxedCompilesHostDirCompiles =
+    process.env.SANDBOXED_COMPILES_HOST_DIR_COMPILES ||
+    process.env.SANDBOXED_COMPILES_HOST_DIR ||
+    process.env.COMPILES_HOST_DIR
+  if (!module.exports.path.sandboxedCompilesHostDirCompiles) {
+    throw new Error(
+      'SANDBOXED_COMPILES enabled, but SANDBOXED_COMPILES_HOST_DIR_COMPILES not set'
+    )
+  }
+
+  module.exports.path.sandboxedCompilesHostDirOutput =
+    process.env.SANDBOXED_COMPILES_HOST_DIR_OUTPUT ||
+    process.env.OUTPUT_HOST_DIR
+  if (!module.exports.path.sandboxedCompilesHostDirOutput) {
+    // TODO(das7pad): Enforce in a future major version of Server Pro.
+    // throw new Error(
+    //   'SANDBOXED_COMPILES enabled, but SANDBOXED_COMPILES_HOST_DIR_OUTPUT not set'
+    // )
+  }
 }

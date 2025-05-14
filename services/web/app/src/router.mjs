@@ -66,6 +66,7 @@ import _ from 'lodash'
 import { plainTextResponse } from './infrastructure/Response.js'
 import PublicAccessLevels from './Features/Authorization/PublicAccessLevels.js'
 import SocketDiagnostics from './Features/SocketDiagnostics/SocketDiagnostics.mjs'
+import ClsiCacheController from './Features/Compile/ClsiCacheController.js'
 const ClsiCookieManager = ClsiCookieManagerFactory(
   Settings.apis.clsi != null ? Settings.apis.clsi.backendGroupName : undefined
 )
@@ -483,6 +484,11 @@ async function initialize(webRouter, privateApiRouter, publicApiRouter) {
     AuthenticationController.requirePrivateApiAuth(),
     UserInfoController.getPersonalInfo
   )
+  webRouter.get(
+    '/user/features',
+    AuthenticationController.requireLogin(),
+    UserInfoController.getUserFeatures
+  )
 
   webRouter.get(
     '/user/reconfirm',
@@ -606,36 +612,21 @@ async function initialize(webRouter, privateApiRouter, publicApiRouter) {
     CompileController.stopCompile
   )
 
-  // LEGACY: Used by the web download buttons, adds filename header, TODO: remove at some future date
   webRouter.get(
-    '/project/:Project_id/output/output.pdf',
+    '/project/:Project_id/output/cached/output.overleaf.json',
     AuthorizationMiddleware.ensureUserCanReadProject,
-    CompileController.downloadPdf
+    ClsiCacheController.getLatestBuildFromCache
   )
 
-  // PDF Download button
   webRouter.get(
-    /^\/download\/project\/([^/]*)\/output\/output\.pdf$/,
-    function (req, res, next) {
-      const params = { Project_id: req.params[0] }
-      req.params = params
-      next()
-    },
+    '/download/project/:Project_id/build/:buildId/output/cached/:filename',
     AuthorizationMiddleware.ensureUserCanReadProject,
-    CompileController.downloadPdf
+    ClsiCacheController.downloadFromCache
   )
 
   // PDF Download button for specific build
   webRouter.get(
-    /^\/download\/project\/([^/]*)\/build\/([0-9a-f-]+)\/output\/output\.pdf$/,
-    function (req, res, next) {
-      const params = {
-        Project_id: req.params[0],
-        build_id: req.params[1],
-      }
-      req.params = params
-      next()
-    },
+    '/download/project/:Project_id/build/:build_id/output/output.pdf',
     AuthorizationMiddleware.ensureUserCanReadProject,
     CompileController.downloadPdf
   )
@@ -646,22 +637,7 @@ async function initialize(webRouter, privateApiRouter, publicApiRouter) {
     { params: ['Project_id'] }
   )
 
-  // Used by the pdf viewers
-  webRouter.get(
-    /^\/project\/([^/]*)\/output\/(.*)$/,
-    function (req, res, next) {
-      const params = {
-        Project_id: req.params[0],
-        file: req.params[1],
-      }
-      req.params = params
-      next()
-    },
-    rateLimiterMiddlewareOutputFiles,
-    AuthorizationMiddleware.ensureUserCanReadProject,
-    CompileController.getFileFromClsi
-  )
-  // direct url access to output files for a specific build (query string not required)
+  // direct url access to output files for a specific build
   webRouter.get(
     /^\/project\/([^/]*)\/build\/([0-9a-f-]+)\/output\/(.*)$/,
     function (req, res, next) {
@@ -678,24 +654,7 @@ async function initialize(webRouter, privateApiRouter, publicApiRouter) {
     CompileController.getFileFromClsi
   )
 
-  // direct url access to output files for user but no build, to retrieve files when build fails
-  webRouter.get(
-    /^\/project\/([^/]*)\/user\/([0-9a-f-]+)\/output\/(.*)$/,
-    function (req, res, next) {
-      const params = {
-        Project_id: req.params[0],
-        user_id: req.params[1],
-        file: req.params[2],
-      }
-      req.params = params
-      next()
-    },
-    rateLimiterMiddlewareOutputFiles,
-    AuthorizationMiddleware.ensureUserCanReadProject,
-    CompileController.getFileFromClsi
-  )
-
-  // direct url access to output files for a specific user and build (query string not required)
+  // direct url access to output files for a specific user and build
   webRouter.get(
     /^\/project\/([^/]*)\/user\/([0-9a-f]+)\/build\/([0-9a-f-]+)\/output\/(.*)$/,
     function (req, res, next) {
@@ -992,20 +951,6 @@ async function initialize(webRouter, privateApiRouter, publicApiRouter) {
   )
 
   privateApiRouter.get(
-    /^\/internal\/project\/([^/]*)\/output\/(.*)$/,
-    function (req, res, next) {
-      const params = {
-        Project_id: req.params[0],
-        file: req.params[1],
-      }
-      req.params = params
-      next()
-    },
-    AuthenticationController.requirePrivateApiAuth(),
-    CompileController.getFileFromClsi
-  )
-
-  privateApiRouter.get(
     '/project/:Project_id/doc/:doc_id',
     AuthenticationController.requirePrivateApiAuth(),
     DocumentController.getDocument
@@ -1247,7 +1192,9 @@ async function initialize(webRouter, privateApiRouter, publicApiRouter) {
       const sendRes = _.once(function (statusCode, message) {
         res.status(statusCode)
         plainTextResponse(res, message)
-        ClsiCookieManager.clearServerId(projectId, testUserId, () => {})
+        ClsiCookieManager.promises
+          .clearServerId(projectId, testUserId)
+          .catch(() => {})
       }) // force every compile to a new server
       // set a timeout
       let handler = setTimeout(function () {

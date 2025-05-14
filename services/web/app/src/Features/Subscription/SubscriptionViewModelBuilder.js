@@ -5,7 +5,7 @@ const PlansLocator = require('./PlansLocator')
 const {
   isStandaloneAiAddOnPlanCode,
   MEMBERS_LIMIT_ADD_ON_CODE,
-} = require('./RecurlyEntities')
+} = require('./PaymentProviderEntities')
 const SubscriptionFormatters = require('./SubscriptionFormatters')
 const SubscriptionLocator = require('./SubscriptionLocator')
 const SubscriptionUpdater = require('./SubscriptionUpdater')
@@ -17,19 +17,17 @@ const _ = require('lodash')
 const async = require('async')
 const SubscriptionHelper = require('./SubscriptionHelper')
 const { callbackify } = require('@overleaf/promise-utils')
-const {
-  InvalidError,
-  NotFoundError,
-  V1ConnectionError,
-} = require('../Errors/Errors')
+const { V1ConnectionError } = require('../Errors/Errors')
 const FeaturesHelper = require('./FeaturesHelper')
+const { formatCurrency } = require('../../util/currency')
+const Modules = require('../../infrastructure/Modules')
 
 /**
  * @import { Subscription } from "../../../../types/project/dashboard/subscription"
  */
 
 function buildHostedLink(type) {
-  return `/user/subscription/recurly/${type}`
+  return `/user/subscription/payment/${type}`
 }
 
 // Downgrade from Mongoose object, so we can add custom attributes to object
@@ -37,39 +35,6 @@ function serializeMongooseObject(object) {
   return object && typeof object.toObject === 'function'
     ? object.toObject()
     : object
-}
-
-async function getRedirectToHostedPage(userId, pageType) {
-  if (!['billing-details', 'account-management'].includes(pageType)) {
-    throw new InvalidError('unexpected page type')
-  }
-  const personalSubscription =
-    await SubscriptionLocator.promises.getUsersSubscription(userId)
-  const recurlySubscriptionId = personalSubscription?.recurlySubscription_id
-  if (!recurlySubscriptionId) {
-    throw new NotFoundError('not a recurly subscription')
-  }
-  const recurlySubscription = await RecurlyWrapper.promises.getSubscription(
-    recurlySubscriptionId,
-    { includeAccount: true }
-  )
-
-  const recurlySubdomain = Settings.apis.recurly.subdomain
-  const hostedLoginToken = recurlySubscription.account.hosted_login_token
-  if (!hostedLoginToken) {
-    throw new Error('recurly account does not have hosted login token')
-  }
-  let path = ''
-  if (pageType === 'billing-details') {
-    path = 'billing_info/edit?ht='
-  }
-  return [
-    'https://',
-    recurlySubdomain,
-    '.recurly.com/account/',
-    path,
-    hostedLoginToken,
-  ].join('')
 }
 
 async function buildUsersSubscriptionViewModel(user, locale = 'en') {
@@ -80,38 +45,16 @@ async function buildUsersSubscriptionViewModel(user, locale = 'en') {
     currentInstitutionsWithLicence,
     managedInstitutions,
     managedPublishers,
-    recurlySubscription,
-    recurlyCoupons,
+    fetchedPaymentRecord,
     plan,
   } = await async.auto({
     personalSubscription(cb) {
       SubscriptionLocator.getUsersSubscription(user, cb)
     },
-    recurlySubscription: [
+    fetchedPaymentRecord: [
       'personalSubscription',
       ({ personalSubscription }, cb) => {
-        if (
-          personalSubscription == null ||
-          personalSubscription.recurlySubscription_id == null ||
-          personalSubscription.recurlySubscription_id === ''
-        ) {
-          return cb(null, null)
-        }
-        RecurlyWrapper.getSubscription(
-          personalSubscription.recurlySubscription_id,
-          { includeAccount: true },
-          cb
-        )
-      },
-    ],
-    recurlyCoupons: [
-      'recurlySubscription',
-      ({ recurlySubscription }, cb) => {
-        if (!recurlySubscription) {
-          return cb(null, null)
-        }
-        const accountId = recurlySubscription.account.account_code
-        RecurlyWrapper.getAccountActiveCoupons(accountId, cb)
+        Modules.hooks.fire('getPaymentFromRecord', personalSubscription, cb)
       },
     ],
     plan: [
@@ -157,6 +100,8 @@ async function buildUsersSubscriptionViewModel(user, locale = 'en') {
       PublishersGetter.getManagedPublishers(user._id, cb)
     },
   })
+
+  const paymentRecord = fetchedPaymentRecord && fetchedPaymentRecord[0]
 
   if (memberGroupSubscriptions == null) {
     memberGroupSubscriptions = []
@@ -216,9 +161,6 @@ async function buildUsersSubscriptionViewModel(user, locale = 'en') {
   if (managedInstitutions == null) {
     managedInstitutions = []
   }
-  if (recurlyCoupons == null) {
-    recurlyCoupons = []
-  }
 
   personalSubscription = serializeMongooseObject(personalSubscription)
 
@@ -235,14 +177,6 @@ async function buildUsersSubscriptionViewModel(user, locale = 'en') {
     personalSubscription.plan = plan
   }
 
-  // Subscription DB object contains a recurly property, used to cache trial info
-  // on the project-list. However, this can cause the wrong template to render,
-  // if we do not have any subscription data from Recurly (recurlySubscription)
-  // TODO: Delete this workaround once recurly cache property name migration rolled out.
-  if (personalSubscription) {
-    delete personalSubscription.recurly
-  }
-
   function getPlanOnlyDisplayPrice(
     totalPlanPriceInCents,
     taxRate,
@@ -251,8 +185,8 @@ async function buildUsersSubscriptionViewModel(user, locale = 'en') {
     // The MEMBERS_LIMIT_ADD_ON_CODE is considered as part of the new plan model
     const allAddOnsPriceInCentsExceptAdditionalLicensePrice = addOns.reduce(
       (prev, curr) => {
-        return curr.add_on_code !== MEMBERS_LIMIT_ADD_ON_CODE
-          ? curr.quantity * curr.unit_amount_in_cents + prev
+        return curr.code !== MEMBERS_LIMIT_ADD_ON_CODE
+          ? curr.quantity * curr.unitPrice + prev
           : prev
       },
       0
@@ -261,24 +195,24 @@ async function buildUsersSubscriptionViewModel(user, locale = 'en') {
       allAddOnsPriceInCentsExceptAdditionalLicensePrice +
       allAddOnsPriceInCentsExceptAdditionalLicensePrice * taxRate
 
-    return SubscriptionFormatters.formatPriceLocalized(
+    return formatCurrency(
       totalPlanPriceInCents -
         allAddOnsTotalPriceInCentsExceptAdditionalLicensePrice,
-      recurlySubscription.currency,
+      paymentRecord.subscription.currency,
       locale
     )
   }
 
   function getAddOnDisplayPricesWithoutAdditionalLicense(taxRate, addOns = []) {
     return addOns.reduce((prev, curr) => {
-      if (curr.add_on_code !== MEMBERS_LIMIT_ADD_ON_CODE) {
-        const priceInCents = curr.quantity * curr.unit_amount_in_cents
+      if (curr.code !== MEMBERS_LIMIT_ADD_ON_CODE) {
+        const priceInCents = curr.quantity * curr.unitPrice
         const totalPriceInCents = priceInCents + priceInCents * taxRate
 
         if (totalPriceInCents > 0) {
-          prev[curr.add_on_code] = SubscriptionFormatters.formatPriceLocalized(
+          prev[curr.code] = formatCurrency(
             totalPriceInCents,
-            recurlySubscription.currency,
+            paymentRecord.subscription.currency,
             locale
           )
         }
@@ -288,124 +222,143 @@ async function buildUsersSubscriptionViewModel(user, locale = 'en') {
     }, {})
   }
 
-  if (personalSubscription && recurlySubscription) {
-    const tax = recurlySubscription.tax_in_cents || 0
+  if (personalSubscription && paymentRecord && paymentRecord.subscription) {
+    // don't return subscription payment information
+    delete personalSubscription.paymentProvider
+    delete personalSubscription.recurly
+
+    const tax = paymentRecord.subscription.taxAmount || 0
     // Some plans allow adding more seats than the base plan provides.
     // This is recorded as a subscription add on.
-    // Note: tax_in_cents already includes the tax for any addon.
+    // Note: taxAmount already includes the tax for any addon.
     let addOnPrice = 0
     let additionalLicenses = 0
-    const addOns = recurlySubscription.subscription_add_ons || []
-    const taxRate = recurlySubscription.tax_rate
-      ? parseFloat(recurlySubscription.tax_rate._)
-      : 0
+    const addOns = paymentRecord.subscription.addOns || []
+    const taxRate = paymentRecord.subscription.taxRate
     addOns.forEach(addOn => {
-      addOnPrice += addOn.quantity * addOn.unit_amount_in_cents
-      if (addOn.add_on_code === plan.membersLimitAddOn) {
+      addOnPrice += addOn.quantity * addOn.unitPrice
+      if (addOn.code === plan.membersLimitAddOn) {
         additionalLicenses += addOn.quantity
       }
     })
     const totalLicenses = (plan.membersLimit || 0) + additionalLicenses
-    personalSubscription.recurly = {
-      tax,
+    const isInTrial =
+      paymentRecord.subscription.trialPeriodEnd &&
+      paymentRecord.subscription.trialPeriodEnd.getTime() > Date.now()
+    personalSubscription.payment = {
       taxRate,
-      billingDetailsLink: buildHostedLink('billing-details'),
+      billingDetailsLink:
+        paymentRecord.subscription.service === 'recurly'
+          ? buildHostedLink('billing-details')
+          : null,
       accountManagementLink: buildHostedLink('account-management'),
       additionalLicenses,
       addOns,
       totalLicenses,
       nextPaymentDueAt: SubscriptionFormatters.formatDateTime(
-        recurlySubscription.current_period_ends_at
+        paymentRecord.subscription.periodEnd
       ),
       nextPaymentDueDate: SubscriptionFormatters.formatDate(
-        recurlySubscription.current_period_ends_at
+        paymentRecord.subscription.periodEnd
       ),
-      currency: recurlySubscription.currency,
-      state: recurlySubscription.state,
+      currency: paymentRecord.subscription.currency,
+      state: paymentRecord.subscription.state,
       trialEndsAtFormatted: SubscriptionFormatters.formatDateTime(
-        recurlySubscription.trial_ends_at
+        paymentRecord.subscription.trialPeriodEnd
       ),
-      trial_ends_at: recurlySubscription.trial_ends_at,
-      activeCoupons: recurlyCoupons,
-      account: recurlySubscription.account,
-      pausedAt: recurlySubscription.paused_at,
-      remainingPauseCycles: recurlySubscription.remaining_pause_cycles,
+      trialEndsAt: paymentRecord.subscription.trialPeriodEnd,
+      activeCoupons: paymentRecord.coupons,
+      accountEmail: paymentRecord.account.email,
+      hasPastDueInvoice: paymentRecord.account.hasPastDueInvoice,
+      pausedAt: paymentRecord.subscription.pausePeriodStart,
+      remainingPauseCycles: paymentRecord.subscription.remainingPauseCycles,
+      isEligibleForPause:
+        paymentRecord.subscription.service === 'recurly' &&
+        !personalSubscription.pendingPlan &&
+        !personalSubscription.groupPlan &&
+        !isInTrial &&
+        !paymentRecord.subscription.planCode.includes('ann') &&
+        !paymentRecord.subscription.addOns?.length > 0,
+      isEligibleForGroupPlan:
+        paymentRecord.subscription.service === 'recurly' && !isInTrial,
     }
-    if (recurlySubscription.pending_subscription) {
-      const pendingPlan = PlansLocator.findLocalPlanInSettings(
-        recurlySubscription.pending_subscription.plan.plan_code
-      )
+
+    const isMonthlyCollaboratorPlan =
+      personalSubscription.planCode.includes('collaborator') &&
+      !personalSubscription.planCode.includes('ann') &&
+      !personalSubscription.plan.groupPlan
+    personalSubscription.payment.isEligibleForDowngradeUpsell =
+      !personalSubscription.payment.pausedAt &&
+      !personalSubscription.payment.remainingPauseCycles &&
+      isMonthlyCollaboratorPlan &&
+      !isInTrial &&
+      paymentRecord.subscription.service === 'recurly'
+
+    if (paymentRecord.subscription.pendingChange) {
+      const pendingPlanCode =
+        paymentRecord.subscription.pendingChange.nextPlanCode
+      const pendingPlan = PlansLocator.findLocalPlanInSettings(pendingPlanCode)
       if (pendingPlan == null) {
-        throw new Error(
-          `No plan found for planCode '${personalSubscription.planCode}'`
-        )
+        throw new Error(`No plan found for planCode '${pendingPlanCode}'`)
       }
       let pendingAdditionalLicenses = 0
       let pendingAddOnTax = 0
       let pendingAddOnPrice = 0
-      if (recurlySubscription.pending_subscription.subscription_add_ons) {
-        const pendingRecurlyAddons =
-          recurlySubscription.pending_subscription.subscription_add_ons
-        pendingRecurlyAddons.forEach(addOn => {
-          pendingAddOnPrice += addOn.quantity * addOn.unit_amount_in_cents
-          if (addOn.add_on_code === pendingPlan.membersLimitAddOn) {
+      if (paymentRecord.subscription.pendingChange.nextAddOns) {
+        const pendingAddOns =
+          paymentRecord.subscription.pendingChange.nextAddOns
+        pendingAddOns.forEach(addOn => {
+          pendingAddOnPrice += addOn.quantity * addOn.unitPrice
+          if (addOn.code === pendingPlan.membersLimitAddOn) {
             pendingAdditionalLicenses += addOn.quantity
           }
         })
         // Need to calculate tax ourselves as we don't get tax amounts for pending subs
         pendingAddOnTax =
-          personalSubscription.recurly.taxRate * pendingAddOnPrice
-        pendingPlan.addOns = pendingRecurlyAddons
+          personalSubscription.payment.taxRate * pendingAddOnPrice
+        pendingPlan.addOns = pendingAddOns
       }
       const pendingSubscriptionTax =
-        personalSubscription.recurly.taxRate *
-        recurlySubscription.pending_subscription.unit_amount_in_cents
-      const totalPriceInCents =
-        recurlySubscription.pending_subscription.unit_amount_in_cents +
+        personalSubscription.payment.taxRate *
+        paymentRecord.subscription.pendingChange.nextPlanPrice
+      const totalPrice =
+        paymentRecord.subscription.pendingChange.nextPlanPrice +
         pendingAddOnPrice +
         pendingAddOnTax +
         pendingSubscriptionTax
-      personalSubscription.recurly.displayPrice =
-        SubscriptionFormatters.formatPriceLocalized(
-          totalPriceInCents,
-          recurlySubscription.currency,
-          locale
-        )
-      personalSubscription.recurly.currentPlanDisplayPrice =
-        SubscriptionFormatters.formatPriceLocalized(
-          recurlySubscription.unit_amount_in_cents + addOnPrice + tax,
-          recurlySubscription.currency,
-          locale
-        )
-      personalSubscription.recurly.planOnlyDisplayPrice =
+
+      personalSubscription.payment.displayPrice = formatCurrency(
+        totalPrice,
+        paymentRecord.subscription.currency,
+        locale
+      )
+      personalSubscription.payment.planOnlyDisplayPrice =
         getPlanOnlyDisplayPrice(
-          totalPriceInCents,
+          totalPrice,
           taxRate,
-          recurlySubscription.pending_subscription.subscription_add_ons
+          paymentRecord.subscription.pendingChange.nextAddOns
         )
-      personalSubscription.recurly.addOnDisplayPricesWithoutAdditionalLicense =
+      personalSubscription.payment.addOnDisplayPricesWithoutAdditionalLicense =
         getAddOnDisplayPricesWithoutAdditionalLicense(
           taxRate,
-          recurlySubscription.pending_subscription.subscription_add_ons
+          paymentRecord.subscription.pendingChange.nextAddOns
         )
       const pendingTotalLicenses =
         (pendingPlan.membersLimit || 0) + pendingAdditionalLicenses
-      personalSubscription.recurly.pendingAdditionalLicenses =
+      personalSubscription.payment.pendingAdditionalLicenses =
         pendingAdditionalLicenses
-      personalSubscription.recurly.pendingTotalLicenses = pendingTotalLicenses
+      personalSubscription.payment.pendingTotalLicenses = pendingTotalLicenses
       personalSubscription.pendingPlan = pendingPlan
     } else {
-      const totalPriceInCents =
-        recurlySubscription.unit_amount_in_cents + addOnPrice + tax
-      personalSubscription.recurly.displayPrice =
-        SubscriptionFormatters.formatPriceLocalized(
-          totalPriceInCents,
-          recurlySubscription.currency,
-          locale
-        )
-      personalSubscription.recurly.planOnlyDisplayPrice =
-        getPlanOnlyDisplayPrice(totalPriceInCents, taxRate, addOns)
-      personalSubscription.recurly.addOnDisplayPricesWithoutAdditionalLicense =
+      const totalPrice = paymentRecord.subscription.planPrice + addOnPrice + tax
+      personalSubscription.payment.displayPrice = formatCurrency(
+        totalPrice,
+        paymentRecord.subscription.currency,
+        locale
+      )
+      personalSubscription.payment.planOnlyDisplayPrice =
+        getPlanOnlyDisplayPrice(totalPrice, taxRate, addOns)
+      personalSubscription.payment.addOnDisplayPricesWithoutAdditionalLicense =
         getAddOnDisplayPricesWithoutAdditionalLicense(taxRate, addOns)
     }
   }
@@ -645,7 +598,6 @@ module.exports = {
   getBestSubscription: callbackify(getBestSubscription),
   promises: {
     buildUsersSubscriptionViewModel,
-    getRedirectToHostedPage,
     getBestSubscription,
   },
 }

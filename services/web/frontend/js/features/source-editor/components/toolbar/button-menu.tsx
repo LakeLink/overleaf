@@ -8,12 +8,14 @@ import { EditorView } from '@codemirror/view'
 import { emitToolbarEvent } from '../../extensions/toolbar/utils/analytics'
 import { useCodeMirrorViewContext } from '../codemirror-context'
 
-export const ToolbarButtonMenu: FC<{
-  id: string
-  label: string
-  icon: React.ReactNode
-  altCommand?: (view: EditorView) => void
-}> = memo(function ButtonMenu({ icon, id, label, altCommand, children }) {
+export const ToolbarButtonMenu: FC<
+  React.PropsWithChildren<{
+    id: string
+    label: string
+    icon: React.ReactNode
+    altCommand?: (view: EditorView) => void
+  }>
+> = memo(function ButtonMenu({ icon, id, label, altCommand, children }) {
   const target = useRef<any>(null)
   const { open, onToggle, ref } = useDropdown()
   const view = useCodeMirrorViewContext()
@@ -21,7 +23,7 @@ export const ToolbarButtonMenu: FC<{
   const button = (
     <button
       type="button"
-      className="ol-cm-toolbar-button btn"
+      className="ol-cm-toolbar-button"
       aria-label={label}
       onMouseDown={event => {
         event.preventDefault()

@@ -12,6 +12,22 @@
     border: 1px solid var(--border-divider);
     padding: var(--spacing-05);
     margin: var(--spacing-05) 0;
+
+    hr {
+      margin: var(--spacing-04) 0;
+    }
+
+    h4 {
+      margin-top: 0;
+    }
+
+    ul {
+      margin-bottom: 0;
+
+      li:not(:last-child) {
+        margin-bottom: var(--spacing-04);
+      }
+    }
   }
 
   .ide-redesign-switcher-modal-leave-text {

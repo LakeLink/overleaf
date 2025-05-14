@@ -25,6 +25,7 @@ const ClsiFormatChecker = require('./ClsiFormatChecker')
 const DocumentUpdaterHandler = require('../DocumentUpdater/DocumentUpdaterHandler')
 const Metrics = require('@overleaf/metrics')
 const Errors = require('../Errors/Errors')
+const ClsiCacheHandler = require('./ClsiCacheHandler')
 const { getBlobLocation } = require('../History/HistoryManager')
 
 const VALID_COMPILERS = ['pdflatex', 'latex', 'xelatex', 'lualatex']
@@ -148,6 +149,13 @@ async function deleteAuxFiles(projectId, userId, options, clsiserverid) {
       clsiserverid
     )
   } finally {
+    // always clear the clsi-cache
+    try {
+      await ClsiCacheHandler.clearCache(projectId, userId)
+    } catch (err) {
+      logger.warn({ err, projectId, userId }, 'purge clsi-cache failed')
+    }
+
     // always clear the project state from the docupdater, even if there
     // was a problem with the request to the clsi
     try {
@@ -199,6 +207,7 @@ async function _sendBuiltRequest(projectId, userId, req, options, callback) {
     stats: compile.stats,
     timings: compile.timings,
     outputUrlPrefix: compile.outputUrlPrefix,
+    clsiCacheShard: compile.clsiCacheShard,
   }
 }
 
@@ -766,15 +775,24 @@ function _finaliseRequest(projectId, options, project, docs, files) {
     compile: {
       options: {
         buildId: options.buildId,
+        editorId: options.editorId,
         compiler: project.compiler,
         timeout: options.timeout,
         imageName: project.imageName,
         draft: Boolean(options.draft),
         stopOnFirstError: Boolean(options.stopOnFirstError),
+        clsiCacheSharded: Boolean(options.clsiCacheSharded),
         check: options.check,
         syncType: options.syncType,
         syncState: options.syncState,
         compileGroup: options.compileGroup,
+        // Overleaf alpha/staff users get compileGroup=alpha (via getProjectCompileLimits in CompileManager), enroll them into the premium rollout of clsi-cache.
+        compileFromClsiCache:
+          ['alpha', 'priority'].includes(options.compileGroup) &&
+          options.compileFromClsiCache,
+        populateClsiCache:
+          ['alpha', 'priority'].includes(options.compileGroup) &&
+          options.populateClsiCache,
         enablePdfCaching:
           (Settings.enablePdfCaching && options.enablePdfCaching) || false,
         pdfCachingMinChunkSize: options.pdfCachingMinChunkSize,
@@ -837,6 +855,7 @@ module.exports = {
     'timings',
     'outputUrlPrefix',
     'buildId',
+    'clsiCacheShard',
   ]),
   sendExternalRequest: callbackifyMultiResult(sendExternalRequest, [
     'status',

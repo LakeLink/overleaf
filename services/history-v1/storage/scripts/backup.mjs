@@ -2,9 +2,14 @@
 
 import logger from '@overleaf/logger'
 import commandLineArgs from 'command-line-args'
-import { History } from 'overleaf-editor-core'
-import { getProjectChunks, loadLatestRaw } from '../lib/chunk_store/index.js'
+import { Chunk, History, Snapshot } from 'overleaf-editor-core'
+import {
+  getProjectChunks,
+  getLatestChunkMetadata,
+  create,
+} from '../lib/chunk_store/index.js'
 import { client } from '../lib/mongodb.js'
+import redis from '../lib/redis.js'
 import knex from '../lib/knex.js'
 import { historyStore } from '../lib/history_store.js'
 import pLimit from 'p-limit'
@@ -322,6 +327,11 @@ const optionDefinitions = [
     defaultValue: 3600,
   },
   {
+    name: 'fix',
+    type: Number,
+    description: 'Fix projects without chunks',
+  },
+  {
     name: 'init',
     alias: 'I',
     type: Boolean,
@@ -367,6 +377,7 @@ function handleOptions() {
     !options.list &&
     !options.pending &&
     !options.init &&
+    !(options.fix >= 0) &&
     !(options.compare && options['start-date'] && options['end-date'])
 
   if (projectIdRequired && !options.projectId) {
@@ -433,7 +444,7 @@ async function analyseBackupStatus(projectId) {
     await getBackupStatus(projectId)
   // TODO: when we have confidence that the latestChunkMetadata always matches
   // the values from the backupStatus we can skip loading it here
-  const latestChunkMetadata = await loadLatestRaw(historyId, {
+  const latestChunkMetadata = await getLatestChunkMetadata(historyId, {
     readOnly: Boolean(USE_SECONDARY),
   })
   if (
@@ -443,7 +454,7 @@ async function analyseBackupStatus(projectId) {
     // compare the current end version with the latest chunk metadata to check that
     // the updates to the project collection are reliable
     // expect some failures due to the time window between getBackupStatus and
-    // loadLatestRaw where the project is being actively edited.
+    // getLatestChunkMetadata where the project is being actively edited.
     logger.warn(
       {
         projectId,
@@ -679,6 +690,54 @@ function convertToISODate(dateStr) {
     throw new Error('Date must be in YYYY-MM-DD format')
   }
   return new Date(dateStr + 'T00:00:00.000Z').toISOString()
+}
+
+export async function fixProjectsWithoutChunks(options) {
+  const limit = options.fix || 1
+  const query = {
+    'overleaf.history.id': { $exists: true },
+    'overleaf.backup.lastBackedUpVersion': { $in: [null] },
+  }
+  const cursor = client
+    .db()
+    .collection('projects')
+    .find(query, {
+      projection: { _id: 1, 'overleaf.history.id': 1 },
+      readPreference: READ_PREFERENCE_SECONDARY,
+    })
+    .limit(limit)
+  for await (const project of cursor) {
+    const historyId = project.overleaf.history.id.toString()
+    const chunks = await getProjectChunks(historyId)
+    if (chunks.length > 0) {
+      continue
+    }
+    if (DRY_RUN) {
+      console.log(
+        'Would create new chunk for Project ID:',
+        project._id.toHexString(),
+        'History ID:',
+        historyId,
+        'Chunks:',
+        chunks
+      )
+    } else {
+      console.log(
+        'Creating new chunk for Project ID:',
+        project._id.toHexString(),
+        'History ID:',
+        historyId,
+        'Chunks:',
+        chunks
+      )
+      const snapshot = new Snapshot()
+      const history = new History(snapshot, [])
+      const chunk = new Chunk(history, 0)
+      await create(historyId, chunk)
+      const newChunks = await getProjectChunks(historyId)
+      console.log('New chunk:', newChunks)
+    }
+  }
 }
 
 export async function initializeProjects(options) {
@@ -983,11 +1042,12 @@ async function main() {
   const options = handleOptions()
   await ensureGlobalBlobsLoaded()
   const projectId = options.projectId
-
   if (options.status) {
     await displayBackupStatus(projectId)
   } else if (options.list) {
     await displayPendingBackups(options)
+  } else if (options.fix !== undefined) {
+    await fixProjectsWithoutChunks(options)
   } else if (options.pending) {
     await backupPendingProjects(options)
   } else if (options.init) {
@@ -1031,6 +1091,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         })
         .catch(err => {
           console.error('Error closing MongoDB connection:', err)
+        })
+      redis
+        .disconnect()
+        .then(() => {
+          console.log('Redis connection closed')
+        })
+        .catch(err => {
+          console.error('Error closing Redis connection:', err)
         })
     })
 }

@@ -117,11 +117,6 @@ async function settingsPage(req, res) {
     )
   }
 
-  // Get the users write-and-cite assignment to switch between translation strings
-  await SplitTestHandler.promises.getAssignment(req, res, 'write-and-cite')
-  // Get the users papers-integration assignment to show the linking widget
-  await SplitTestHandler.promises.getAssignment(req, res, 'papers-integration')
-
   res.render('user/settings', {
     title: 'account_settings',
     user: {
@@ -154,6 +149,7 @@ async function settingsPage(req, res) {
         enabled: Boolean(user.aiErrorAssistant?.enabled),
       },
     },
+    labsExperiments: user.labsExperiments ?? [],
     hasPassword: !!user.hashedPassword,
     shouldAllowEditingDetails,
     oauthProviders: UserPagesController._translateProviderDescriptions(
@@ -307,14 +303,6 @@ const UserPagesController = {
   },
 
   async compromisedPasswordPage(req, res) {
-    // Populates splitTestVariants with a value for the split test name and allows
-    // Pug to read it
-    await SplitTestHandler.promises.getAssignment(
-      req,
-      res,
-      'bs5-misc-pages-platform'
-    )
-
     res.render('user/compromised_password')
   },
 

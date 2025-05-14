@@ -14,7 +14,7 @@ const UserGetter = require('../User/UserGetter')
 const AnalyticsManager = require('../Analytics/AnalyticsManager')
 const Queues = require('../../infrastructure/Queues')
 const Modules = require('../../infrastructure/Modules')
-const { AI_ADD_ON_CODE } = require('./RecurlyEntities')
+const { AI_ADD_ON_CODE } = require('./PaymentProviderEntities')
 
 /**
  * Enqueue a job for refreshing features for the given user
@@ -197,6 +197,14 @@ async function doSyncFromV1(v1UserId) {
   return refreshFeatures(user._id, 'sync-v1')
 }
 
+async function hasFeaturesViaWritefull(userId) {
+  const user = await UserGetter.promises.getUser(userId, {
+    _id: 1,
+    writefull: 1,
+  })
+  return Boolean(user?.writefull?.isPremium)
+}
+
 module.exports = {
   featuresEpochIsCurrent,
   computeFeatures: callbackify(computeFeatures),
@@ -209,10 +217,12 @@ module.exports = {
     'featuresChanged',
   ]),
   scheduleRefreshFeatures: callbackify(scheduleRefreshFeatures),
+  hasFeaturesViaWritefull: callbackify(hasFeaturesViaWritefull),
   promises: {
     computeFeatures,
     refreshFeatures,
     scheduleRefreshFeatures,
     doSyncFromV1,
+    hasFeaturesViaWritefull,
   },
 }

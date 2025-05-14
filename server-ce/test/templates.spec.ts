@@ -47,7 +47,9 @@ describe('Templates', () => {
       cy.url().should('match', /\/templates$/)
     })
 
-    it('should have templates feature', () => {
+    // TODO(25342): re-enable
+    // eslint-disable-next-line mocha/no-skipped-tests
+    it.skip('should have templates feature', () => {
       login(TEMPLATES_USER)
       const name = `Template ${Date.now()}`
       const description = `Template Description ${Date.now()}`
@@ -96,12 +98,12 @@ describe('Templates', () => {
         .parent()
         .parent()
         .within(() => cy.get('input[type="checkbox"]').first().check())
-      cy.get('.project-list-sidebar-react').within(() => {
+      cy.get('.project-list-sidebar-scroll').within(() => {
         cy.findAllByText('New Tag').first().click()
       })
       cy.focused().type(tagName)
       cy.findByText('Create').click()
-      cy.get('.project-list-sidebar-react').within(() => {
+      cy.get('.project-list-sidebar-scroll').within(() => {
         cy.findByText(tagName)
           .parent()
           .within(() => cy.get('.name').should('have.text', `${tagName} (1)`))

@@ -4,6 +4,7 @@ import commandLineArgs from 'command-line-args'
 import logger from '@overleaf/logger'
 import {
   listPendingBackups,
+  listUninitializedBackups,
   getBackupStatus,
 } from '../lib/backup_store/index.js'
 
@@ -16,8 +17,8 @@ const redisOptions = config.get('redis.queue')
 const backupQueue = new Queue('backup', {
   redis: redisOptions,
   defaultJobOptions: {
-    removeOnComplete: true,
-    removeOnFail: true,
+    removeOnComplete: { age: 60 }, // keep completed jobs for 60 seconds
+    removeOnFail: { age: 7 * 24 * 3600, count: 1000 }, // keep failed jobs for 7 days, max 1000
   },
 })
 
@@ -200,6 +201,18 @@ async function addDateRangeJob(input) {
   )
 }
 
+// Helper to list pending and uninitialized backups
+// This function combines the two cursors into a single generator
+// to yield projects from both lists
+async function* pendingCursor(timeIntervalMs, limit) {
+  for await (const project of listPendingBackups(timeIntervalMs, limit)) {
+    yield project
+  }
+  for await (const project of listUninitializedBackups(timeIntervalMs, limit)) {
+    yield project
+  }
+}
+
 // Process pending projects with changes older than the specified seconds
 async function processPendingProjects(
   age,
@@ -218,26 +231,34 @@ async function processPendingProjects(
   let addedCount = 0
   let existingCount = 0
   // Pass the limit directly to MongoDB query for better performance
-  const pendingCursor = listPendingBackups(timeIntervalMs, limit)
   const changeTimes = []
-  for await (const project of pendingCursor) {
+  for await (const project of pendingCursor(timeIntervalMs, limit)) {
     const projectId = project._id.toHexString()
-    const pendingAt = project.overleaf?.backup?.pendingChangeAt
+    const pendingAt =
+      project.overleaf?.backup?.pendingChangeAt || project._id.getTimestamp()
     if (pendingAt) {
       changeTimes.push(pendingAt)
       const pendingAge = Math.floor((Date.now() - pendingAt.getTime()) / 1000)
       if (pendingAge > WARN_THRESHOLD) {
-        const backupStatus = await getBackupStatus(projectId)
-        logger.warn(
-          {
-            projectId,
-            pendingAt,
-            pendingAge,
-            backupStatus,
-            warnThreshold: WARN_THRESHOLD,
-          },
-          `pending change exceeds rpo warning threshold`
-        )
+        try {
+          const backupStatus = await getBackupStatus(projectId)
+          logger.warn(
+            {
+              projectId,
+              pendingAt,
+              pendingAge,
+              backupStatus,
+              warnThreshold: WARN_THRESHOLD,
+            },
+            `pending change exceeds rpo warning threshold`
+          )
+        } catch (err) {
+          logger.error(
+            { projectId, pendingAt, pendingAge },
+            'Error getting backup status'
+          )
+          throw err
+        }
       }
     }
     if (showOnly && verbose) {
@@ -277,10 +298,11 @@ async function processPendingProjects(
       )
     }
   }
-
-  const oldestChange = changeTimes.reduce((min, time) =>
-    time < min ? time : min
-  )
+  // Set oldestChange to undefined if there are no changes
+  const oldestChange =
+    changeTimes.length > 0
+      ? changeTimes.reduce((min, time) => (time < min ? time : min))
+      : undefined
 
   if (showOnly) {
     console.log(
@@ -290,7 +312,9 @@ async function processPendingProjects(
     console.log(`Found ${count} projects with pending changes:`)
     console.log(`  ${addedCount} jobs added to queue`)
     console.log(`  ${existingCount} jobs already existed in queue`)
-    console.log(`  Oldest pending change: ${formatPendingTime(oldestChange)}`)
+    if (oldestChange) {
+      console.log(`  Oldest pending change: ${formatPendingTime(oldestChange)}`)
+    }
   }
 }
 

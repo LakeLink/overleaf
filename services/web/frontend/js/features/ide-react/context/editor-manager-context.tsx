@@ -88,7 +88,9 @@ export const EditorManagerContext = createContext<EditorManager | undefined>(
   undefined
 )
 
-export const EditorManagerProvider: FC = ({ children }) => {
+export const EditorManagerProvider: FC<React.PropsWithChildren> = ({
+  children,
+}) => {
   const { t } = useTranslation()
   const { scopeStore } = useIdeContext()
   const { reportError, eventEmitter, projectId } = useIdeReactContext()
@@ -580,7 +582,7 @@ export const EditorManagerProvider: FC = ({ children }) => {
         editorContent =
           typeof editorContent === 'string'
             ? editorContent
-            : document.doc?._doc.snapshot
+            : document.getSnapshot()
 
         // Tear down the ShareJsDoc.
         if (document.doc) document.doc.clearInflightAndPendingOps()

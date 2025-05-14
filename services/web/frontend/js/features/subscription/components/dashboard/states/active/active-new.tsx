@@ -1,7 +1,7 @@
 import { useTranslation, Trans } from 'react-i18next'
 import { PriceExceptions } from '../../../shared/price-exceptions'
 import { useSubscriptionDashboardContext } from '../../../../context/subscription-dashboard-context'
-import { RecurlySubscription } from '../../../../../../../../types/subscription/dashboard/subscription'
+import { PaidSubscription } from '../../../../../../../../types/subscription/dashboard/subscription'
 import { CancelSubscriptionButton } from './cancel-subscription-button'
 import { CancelSubscription } from './cancel-plan/cancel-subscription'
 import { TrialEnding } from './trial-ending'
@@ -12,15 +12,13 @@ import { ChangeToGroupModal } from './change-plan/modals/change-to-group-modal'
 import { CancelAiAddOnModal } from '@/features/subscription/components/dashboard/states/active/change-plan/modals/cancel-ai-add-on-modal'
 import OLButton from '@/features/ui/components/ol/ol-button'
 import isInFreeTrial from '../../../../util/is-in-free-trial'
-import { bsVersion } from '@/features/utils/bootstrap-5'
 import AddOns from '@/features/subscription/components/dashboard/states/active/add-ons'
 import {
   AI_ADD_ON_CODE,
-  AI_STANDALONE_PLAN_CODE,
+  AI_ASSIST_STANDALONE_MONTHLY_PLAN_CODE,
   isStandaloneAiPlanCode,
 } from '@/features/subscription/data/add-on-codes'
 import getMeta from '@/utils/meta'
-import classnames from 'classnames'
 import SubscriptionRemainder from '@/features/subscription/components/dashboard/states/active/subscription-remainder'
 import { sendMB } from '../../../../../../infrastructure/event-tracking'
 import PauseSubscriptionModal from '@/features/subscription/components/dashboard/pause-modal'
@@ -35,7 +33,7 @@ import Notification from '@/shared/components/notification'
 export function ActiveSubscriptionNew({
   subscription,
 }: {
-  subscription: RecurlySubscription
+  subscription: PaidSubscription
 }) {
   const { t } = useTranslation()
   const {
@@ -74,19 +72,23 @@ export function ActiveSubscriptionNew({
 
   const handlePlanChange = () => setModalIdShown('change-plan')
   const handleCancelClick = (addOnCode: string) => {
-    if ([AI_STANDALONE_PLAN_CODE, AI_ADD_ON_CODE].includes(addOnCode)) {
+    if (
+      [AI_ASSIST_STANDALONE_MONTHLY_PLAN_CODE, AI_ADD_ON_CODE].includes(
+        addOnCode
+      )
+    ) {
       setModalIdShown('cancel-ai-add-on')
     }
   }
   const hasPendingPause = Boolean(
-    subscription.recurly.state === 'active' &&
-      subscription.recurly.remainingPauseCycles &&
-      subscription.recurly.remainingPauseCycles > 0
+    subscription.payment.state === 'active' &&
+      subscription.payment.remainingPauseCycles &&
+      subscription.payment.remainingPauseCycles > 0
   )
 
   const isLegacyPlan =
-    subscription.recurly.totalLicenses !==
-    subscription.recurly.additionalLicenses
+    subscription.payment.totalLicenses !==
+    subscription.payment.additionalLicenses
 
   return (
     <>
@@ -100,14 +102,12 @@ export function ActiveSubscriptionNew({
           />
         )}
       </div>
-      <h2 className={classnames('h3', bsVersion({ bs5: 'fw-bold' }))}>
-        {t('billing')}
-      </h2>
+      <h2 className="h3 fw-bold">{t('billing')}</h2>
       <p className="mb-1">
         {subscription.plan.annual ? (
           <Trans
             i18nKey="billed_annually_at"
-            values={{ price: subscription.recurly.displayPrice }}
+            values={{ price: subscription.payment.displayPrice }}
             shouldUnescape
             tOptions={{ interpolation: { escapeValue: true } }}
             components={[
@@ -120,7 +120,7 @@ export function ActiveSubscriptionNew({
         ) : (
           <Trans
             i18nKey="billed_monthly_at"
-            values={{ price: subscription.recurly.displayPrice }}
+            values={{ price: subscription.payment.displayPrice }}
             shouldUnescape
             tOptions={{ interpolation: { escapeValue: true } }}
             components={[
@@ -135,28 +135,40 @@ export function ActiveSubscriptionNew({
       <p className="mb-1">
         <Trans
           i18nKey="renews_on"
-          values={{ date: subscription.recurly.nextPaymentDueDate }}
+          values={{ date: subscription.payment.nextPaymentDueDate }}
           shouldUnescape
           tOptions={{ interpolation: { escapeValue: true } }}
           components={[<strong />]} // eslint-disable-line react/jsx-key
         />
       </p>
       <div>
-        <a
-          href={subscription.recurly.accountManagementLink}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="me-2"
-        >
-          {t('view_invoices')}
-        </a>
-        <a
-          href={subscription.recurly.billingDetailsLink}
-          target="_blank"
-          rel="noreferrer noopener"
-        >
-          {t('view_billing_details')}
-        </a>
+        {subscription.payment.billingDetailsLink ? (
+          <>
+            <a
+              href={subscription.payment.accountManagementLink}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="me-2"
+            >
+              {t('view_invoices')}
+            </a>
+            <a
+              href={subscription.payment.billingDetailsLink}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              {t('view_billing_details')}
+            </a>
+          </>
+        ) : (
+          <a
+            href={subscription.payment.accountManagementLink}
+            rel="noreferrer noopener"
+            className="me-2"
+          >
+            {t('view_payment_portal')}
+          </a>
+        )}
       </div>
       <div className="mt-3">
         <PriceExceptions subscription={subscription} />
@@ -169,31 +181,27 @@ export function ActiveSubscriptionNew({
         )}
       </div>
       <hr />
-      <h2 className={classnames('h3', bsVersion({ bs5: 'fw-bold' }))}>
-        {t('plan')}
-      </h2>
-      <h3 className={classnames('h5 mt-0 mb-1', bsVersion({ bs5: 'fw-bold' }))}>
-        {planName}
-      </h3>
+      <h2 className="h3 fw-bold">{t('plan')}</h2>
+      <h3 className="h5 mt-0 mb-1 fw-bold">{planName}</h3>
       {subscription.pendingPlan &&
         subscription.pendingPlan.name !== subscription.plan.name && (
           <p className="mb-1">{t('want_change_to_apply_before_plan_end')}</p>
         )}
-      {isInFreeTrial(subscription.recurly.trial_ends_at) &&
-        subscription.recurly.trialEndsAtFormatted && (
+      {isInFreeTrial(subscription.payment.trialEndsAt) &&
+        subscription.payment.trialEndsAtFormatted && (
           <TrialEnding
-            trialEndsAtFormatted={subscription.recurly.trialEndsAtFormatted}
+            trialEndsAtFormatted={subscription.payment.trialEndsAtFormatted}
             className="mb-1"
           />
         )}
-      {subscription.recurly.totalLicenses > 0 && (
+      {subscription.payment.totalLicenses > 0 && (
         <p className="mb-1">
-          {isLegacyPlan && subscription.recurly.additionalLicenses > 0 ? (
+          {isLegacyPlan && subscription.payment.additionalLicenses > 0 ? (
             <Trans
               i18nKey="plus_x_additional_licenses_for_a_total_of_y_licenses"
               values={{
-                count: subscription.recurly.totalLicenses,
-                additionalLicenses: subscription.recurly.additionalLicenses,
+                count: subscription.payment.totalLicenses,
+                additionalLicenses: subscription.payment.additionalLicenses,
               }}
               shouldUnescape
               tOptions={{ interpolation: { escapeValue: true } }}
@@ -202,7 +210,7 @@ export function ActiveSubscriptionNew({
           ) : (
             <Trans
               i18nKey="supports_up_to_x_licenses"
-              values={{ count: subscription.recurly.totalLicenses }}
+              values={{ count: subscription.payment.totalLicenses }}
               shouldUnescape
               tOptions={{ interpolation: { escapeValue: true } }}
               components={[<strong />]} // eslint-disable-line react/jsx-key
@@ -217,7 +225,7 @@ export function ActiveSubscriptionNew({
               i18nKey="your_subscription_will_pause_on"
               values={{
                 planName: subscription.plan.name,
-                pauseDate: subscription.recurly.nextPaymentDueAt,
+                pauseDate: subscription.payment.nextPaymentDueAt,
                 reactivationDate: getFormattedRenewalDate(),
               }}
               shouldUnescape
@@ -235,10 +243,10 @@ export function ActiveSubscriptionNew({
         <p className="mb-1">
           {subscription.plan.annual
             ? t('x_price_per_year', {
-                price: subscription.recurly.planOnlyDisplayPrice,
+                price: subscription.payment.planOnlyDisplayPrice,
               })
             : t('x_price_per_month', {
-                price: subscription.recurly.planOnlyDisplayPrice,
+                price: subscription.payment.planOnlyDisplayPrice,
               })}
         </p>
       )}
@@ -269,7 +277,7 @@ export function ActiveSubscriptionNew({
 }
 
 type PlanActionsProps = {
-  subscription: RecurlySubscription
+  subscription: PaidSubscription
   onStandalonePlan: boolean
   handlePlanChange: () => void
   hasPendingPause: boolean
@@ -309,12 +317,11 @@ function PlanActions({
         <FlexibleGroupLicensingActions subscription={subscription} />
       ) : (
         <>
-          {!hasPendingPause &&
-            subscription.recurly.account.has_past_due_invoice._ !== 'true' && (
-              <OLButton variant="secondary" onClick={handlePlanChange}>
-                {t('change_plan')}
-              </OLButton>
-            )}
+          {!hasPendingPause && !subscription.payment.hasPastDueInvoice && (
+            <OLButton variant="secondary" onClick={handlePlanChange}>
+              {t('change_plan')}
+            </OLButton>
+          )}
         </>
       )}
       {hasPendingPause && (
@@ -343,11 +350,11 @@ function PlanActions({
 function FlexibleGroupLicensingActions({
   subscription,
 }: {
-  subscription: RecurlySubscription
+  subscription: PaidSubscription
 }) {
   const { t } = useTranslation()
 
-  if (subscription.pendingPlan) {
+  if (subscription.pendingPlan || subscription.payment.hasPastDueInvoice) {
     return null
   }
 

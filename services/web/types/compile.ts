@@ -1,6 +1,7 @@
 export type CompileOutputFile = {
   path: string
   url: string
+  downloadURL?: string
   type: string
   build: string
   ranges?: {
@@ -22,6 +23,7 @@ export type CompileResponseData = {
   outputFiles: CompileOutputFile[]
   compileGroup?: string
   clsiServerId?: string
+  clsiCacheShard?: string
   pdfDownloadDomain?: string
   pdfCachingMinChunkSize: number
   validationProblems: any

@@ -1,16 +1,4 @@
 import { createContext, type FC, type ReactNode, useContext } from 'react'
-import { useSplitTestContext } from '@/shared/context/split-test-context'
-import getMeta from '@/utils/meta'
-
-export const hasDsNav = () => getMeta('ol-ExposedSettings').isOverleaf
-
-/**
- * This hook returns whether the user has the split-test assignment 'sidebar-navigation-ui-update'
- */
-export const useHideDsSurvey = () => {
-  const { splitTestVariants } = useSplitTestContext()
-  return splitTestVariants['sidebar-navigation-ui-update'] === 'active'
-}
 
 /**
  * This context wraps elements that should be styled according to the sidebar-navigation-ui-update redesign
@@ -18,9 +6,11 @@ export const useHideDsSurvey = () => {
  */
 const DsNavStyleContext = createContext<boolean | undefined>(undefined)
 
-export const DsNavStyleProvider: FC<{
-  children: ReactNode
-}> = ({ children }) => (
+export const DsNavStyleProvider: FC<
+  React.PropsWithChildren<{
+    children: ReactNode
+  }>
+> = ({ children }) => (
   <DsNavStyleContext.Provider value>{children}</DsNavStyleContext.Provider>
 )
 

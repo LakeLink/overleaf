@@ -196,6 +196,7 @@ const UserSchema = new Schema(
       enabled: { type: Boolean, default: null },
       autoCreatedAccount: { type: Boolean, default: false },
       isPremium: { type: Boolean, default: false },
+      premiumSource: { type: String, default: null },
     },
     aiErrorAssistant: {
       enabled: { type: Boolean, default: true },
@@ -203,6 +204,7 @@ const UserSchema = new Schema(
     alphaProgram: { type: Boolean, default: false }, // experimental features
     betaProgram: { type: Boolean, default: false },
     labsProgram: { type: Boolean, default: false },
+    labsExperiments: { type: Array, default: [] },
     overleaf: {
       id: { type: Number },
       accessToken: { type: String },

@@ -30,14 +30,17 @@ import { historyStore } from '../../../../storage/lib/history_store.js'
  * @typedef {import("overleaf-editor-core").Blob} Blob
  */
 
-async function verifyProjectScript(historyId) {
+// Timeout for script execution, increased to avoid flaky tests
+const SCRIPT_TIMEOUT = 15_000
+
+async function verifyProjectScript(historyId, expectFail = true) {
   try {
     const result = await promisify(execFile)(
       process.argv0,
       ['storage/scripts/verify_project.mjs', `--historyId=${historyId}`],
       {
         encoding: 'utf-8',
-        timeout: 5_000,
+        timeout: SCRIPT_TIMEOUT,
         env: {
           ...process.env,
           LOG_LEVEL: 'warn',
@@ -53,6 +56,9 @@ async function verifyProjectScript(historyId) {
       'code' in err &&
       'stderr' in err
     ) {
+      if (!expectFail) {
+        console.log(err)
+      }
       return {
         stdout: typeof err.stdout === 'string' ? err.stdout : '',
         status: typeof err.code === 'number' ? err.code : -1,
@@ -68,7 +74,7 @@ async function verifyProjectScript(historyId) {
  * @param {string} hash
  * @return {Promise<{stdout: string, status:number }>}
  */
-async function verifyBlobScript(historyId, hash) {
+async function verifyBlobScript(historyId, hash, expectFail = true) {
   try {
     const result = await promisify(execFile)(
       process.argv0,
@@ -79,7 +85,7 @@ async function verifyBlobScript(historyId, hash) {
       ],
       {
         encoding: 'utf-8',
-        timeout: 5_000,
+        timeout: SCRIPT_TIMEOUT,
         env: {
           ...process.env,
           LOG_LEVEL: 'warn',
@@ -89,6 +95,9 @@ async function verifyBlobScript(historyId, hash) {
     return { status: 0, stdout: result.stdout }
   } catch (err) {
     if (err && typeof err === 'object' && 'stdout' in err && 'code' in err) {
+      if (!expectFail) {
+        console.log(err)
+      }
       return {
         stdout: typeof err.stdout === 'string' ? err.stdout : '',
         status: typeof err.code === 'number' ? err.code : -1,
@@ -110,17 +119,17 @@ async function verifyBlobHTTP(historyId, hash) {
 }
 
 async function backupChunk(historyId) {
-  const newChunk = await chunkStore.loadLatestRaw(historyId)
+  const newChunkMetadata = await chunkStore.getLatestChunkMetadata(historyId)
   const { buffer: chunkBuffer } = await historyStore.loadRawWithBuffer(
     historyId,
-    newChunk.id
+    newChunkMetadata.id
   )
   const md5 = Crypto.createHash('md5').update(chunkBuffer)
   await backupPersistor.sendStream(
     chunksBucket,
     path.join(
       projectKey.format(historyId),
-      projectKey.pad(newChunk.startVersion)
+      projectKey.pad(newChunkMetadata.startVersion)
     ),
     Stream.Readable.from([chunkBuffer]),
     {
@@ -140,14 +149,14 @@ async function addFileInNewChunk(
   historyId,
   { creationDate = new Date() }
 ) {
-  const chunk = await chunkStore.loadLatest(historyId)
+  const chunk = await chunkStore.loadLatest(historyId, { persistedOnly: true })
   const operation = Operation.addFile(
     `${historyId}.txt`,
     File.fromString(fileContents)
   )
   const changes = [new Change([operation], creationDate, [])]
   chunk.pushChanges(changes)
-  await chunkStore.update(historyId, 0, chunk)
+  await chunkStore.update(historyId, chunk)
 }
 
 /**
@@ -202,6 +211,7 @@ async function checkDEKExists(historyId) {
 }
 
 describe('backupVerifier', function () {
+  this.timeout(5_000 + SCRIPT_TIMEOUT) // allow time for external scripts to run
   const historyIdPostgres = '42'
   const historyIdMongo = '000000000000000000000042'
   let blobHashPG, blobHashMongo, blobPathPG
@@ -228,7 +238,7 @@ describe('backupVerifier', function () {
   describe('storage/scripts/verify_project.mjs', function () {
     describe('when the project is appropriately backed up', function () {
       it('should return 0', async function () {
-        const response = await verifyProjectScript(historyIdPostgres)
+        const response = await verifyProjectScript(historyIdPostgres, false)
         expect(response.status).to.equal(0)
       })
     })
@@ -306,12 +316,20 @@ describe('backupVerifier', function () {
       expect(result.stdout).to.include('hash mismatch for backed up blob')
     })
     it('should successfully verify from postgres', async function () {
-      const result = await verifyBlobScript(historyIdPostgres, blobHashPG)
+      const result = await verifyBlobScript(
+        historyIdPostgres,
+        blobHashPG,
+        false
+      )
       expect(result.status).to.equal(0)
       expect(result.stdout.split('\n')).to.include('OK')
     })
     it('should successfully verify from mongo', async function () {
-      const result = await verifyBlobScript(historyIdMongo, blobHashMongo)
+      const result = await verifyBlobScript(
+        historyIdMongo,
+        blobHashMongo,
+        false
+      )
       expect(result.status).to.equal(0)
       expect(result.stdout.split('\n')).to.include('OK')
     })

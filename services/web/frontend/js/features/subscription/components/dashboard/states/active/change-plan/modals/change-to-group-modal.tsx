@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
-import { RecurlySubscription } from '../../../../../../../../../../types/subscription/dashboard/subscription'
+import { PaidSubscription } from '../../../../../../../../../../types/subscription/dashboard/subscription'
 import { PriceForDisplayData } from '../../../../../../../../../../types/subscription/plan'
 import { postJSON } from '../../../../../../../../infrastructure/fetch-json'
 import getMeta from '../../../../../../../../utils/meta'
@@ -22,9 +22,7 @@ import OLFormCheckbox from '@/features/ui/components/ol/ol-form-checkbox'
 import { useContactUsModal } from '@/shared/hooks/use-contact-us-modal'
 import { UserProvider } from '@/shared/context/user-context'
 import OLButton from '@/features/ui/components/ol/ol-button'
-import BootstrapVersionSwitcher from '@/features/ui/components/bootstrap-5/bootstrap-version-switcher'
 import OLNotification from '@/features/ui/components/ol/ol-notification'
-import { bsVersion } from '@/features/utils/bootstrap-5'
 
 const educationalPercentDiscount = 40
 
@@ -79,8 +77,6 @@ function GroupPrice({
             })}
       </span>
 
-      <BootstrapVersionSwitcher bs3={<br />} />
-
       <span className="circle-subtext">
         <span aria-hidden>
           {t('x_price_per_user', {
@@ -119,7 +115,7 @@ export function ChangeToGroupModal() {
     useContactUsModal({ autofillProjectUrl: false })
   const groupPlans = getMeta('ol-groupPlans')
   const showGroupDiscount = getMeta('ol-showGroupDiscount')
-  const personalSubscription = getMeta('ol-subscription') as RecurlySubscription
+  const personalSubscription = getMeta('ol-subscription') as PaidSubscription
   const [error, setError] = useState(false)
   const [inflight, setInflight] = useState(false)
   const location = useLocation()
@@ -221,10 +217,7 @@ export function ChangeToGroupModal() {
                   <fieldset className="form-group">
                     <legend className="legend-as-label">{t('plan')}</legend>
                     {groupPlans.plans.map(option => (
-                      <div
-                        className={bsVersion({ bs3: 'radio' })}
-                        key={option.code}
-                      >
+                      <div key={option.code}>
                         <OLFormCheckbox
                           type="radio"
                           name="plan-code"
@@ -333,11 +326,6 @@ export function ChangeToGroupModal() {
               onClick={upgrade}
               isLoading={inflight}
               loadingLabel={t('processing_uppercase') + '…'}
-              bs3Props={{
-                loading: inflight
-                  ? t('processing_uppercase') + '…'
-                  : t('upgrade_now'),
-              }}
             >
               {t('upgrade_now')}
             </OLButton>

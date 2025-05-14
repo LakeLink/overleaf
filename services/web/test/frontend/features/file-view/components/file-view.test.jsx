@@ -32,7 +32,8 @@ describe('<FileView/>', function () {
   }
 
   beforeEach(function () {
-    fetchMock.reset()
+    fetchMock.removeRoutes().clearHistory()
+    window.metaAttributesCache.set('ol-preventCompileOnLoad', true)
   })
 
   describe('for a text file', function () {

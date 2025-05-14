@@ -35,6 +35,7 @@ import { useEditorManagerContext } from '@/features/ide-react/context/editor-man
 import classNames from 'classnames'
 import useEventListener from '@/shared/hooks/use-event-listener'
 import getMeta from '@/utils/meta'
+import useReviewPanelLayout from '../hooks/use-review-panel-layout'
 
 const isReviewerRoleEnabled = getMeta('ol-isReviewerRoleEnabled')
 const TRACK_CHANGES_ON_WIDGET_HEIGHT = 25
@@ -48,8 +49,7 @@ const ReviewTooltipMenu: FC = () => {
   const isViewer = useViewerPermissions()
   const [show, setShow] = useState(true)
   const { setView } = useReviewPanelViewActionsContext()
-  const { setReviewPanelOpen } = useLayoutContext()
-
+  const { openReviewPanel } = useReviewPanelLayout()
   const tooltipState = state.field(reviewTooltipStateField, false)?.tooltip
   const previousTooltipState = usePreviousValue(tooltipState)
 
@@ -65,7 +65,7 @@ const ReviewTooltipMenu: FC = () => {
       return
     }
 
-    setReviewPanelOpen(true)
+    openReviewPanel()
     setView('cur_file')
 
     const effects = isCursorNearViewportEdge(view, main.anchor)
@@ -77,7 +77,7 @@ const ReviewTooltipMenu: FC = () => {
 
     view.dispatch({ effects })
     setShow(false)
-  }, [setReviewPanelOpen, setView, setShow, view])
+  }, [openReviewPanel, setView, setShow, view])
 
   useEventListener('add-new-review-comment', addComment)
 
@@ -244,6 +244,7 @@ const ReviewTooltipMenuContent: FC<{ onAddComment: () => void }> = ({
             <button
               className="review-tooltip-menu-button"
               onClick={acceptChangesHandler}
+              aria-label={t('accept_selected_changes')}
             >
               <MaterialIcon type="check" />
             </button>
@@ -256,6 +257,7 @@ const ReviewTooltipMenuContent: FC<{ onAddComment: () => void }> = ({
             <button
               className="review-tooltip-menu-button"
               onClick={rejectChangesHandler}
+              aria-label={t('reject_selected_changes')}
             >
               <MaterialIcon type="clear" />
             </button>

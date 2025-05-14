@@ -1,7 +1,7 @@
 import { expect } from 'chai'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import * as eventTracking from '@/infrastructure/event-tracking'
-import { RecurlySubscription } from '../../../../../../../../types/subscription/dashboard/subscription'
+import { PaidSubscription } from '../../../../../../../../types/subscription/dashboard/subscription'
 import {
   annualActiveSubscription,
   groupActiveSubscription,
@@ -11,7 +11,7 @@ import {
   trialCollaboratorSubscription,
   trialSubscription,
 } from '../../../../fixtures/subscriptions'
-import sinon, { type SinonStub } from 'sinon'
+import sinon from 'sinon'
 import { cleanUpContext } from '../../../../helpers/render-with-subscription-dash-context'
 import { renderActiveSubscription } from '../../../../helpers/render-active-subscription'
 import { cloneDeep } from 'lodash'
@@ -21,21 +21,11 @@ import {
   extendTrialUrl,
   subscriptionUpdateUrl,
 } from '@/features/subscription/data/subscription-url'
-import * as useLocationModule from '../../../../../../../../frontend/js/shared/hooks/use-location'
+import { location } from '@/shared/components/location'
 import { MetaTag } from '@/utils/meta'
-import * as bootstrapUtils from '@/features/utils/bootstrap-5'
 
 describe('<ActiveSubscription />', function () {
   let sendMBSpy: sinon.SinonSpy
-  let isBootstrap5Stub: SinonStub
-
-  before(function () {
-    isBootstrap5Stub = sinon.stub(bootstrapUtils, 'isBootstrap5').returns(true)
-  })
-
-  after(function () {
-    isBootstrap5Stub.restore()
-  })
 
   beforeEach(function () {
     sendMBSpy = sinon.spy(eventTracking, 'sendMB')
@@ -46,7 +36,7 @@ describe('<ActiveSubscription />', function () {
     sendMBSpy.restore()
   })
 
-  function expectedInActiveSubscription(subscription: RecurlySubscription) {
+  function expectedInActiveSubscription(subscription: PaidSubscription) {
     // sentence broken up by bolding
     screen.getByText('You are currently subscribed to the', { exact: false })
     screen.getByText(subscription.plan.name, { exact: false })
@@ -55,11 +45,11 @@ describe('<ActiveSubscription />', function () {
 
     // sentence broken up by bolding
     screen.getByText('The next payment of', { exact: false })
-    screen.getByText(subscription.recurly.displayPrice, {
+    screen.getByText(subscription.payment.displayPrice, {
       exact: false,
     })
     screen.getByText('will be collected on', { exact: false })
-    const dates = screen.getAllByText(subscription.recurly.nextPaymentDueAt, {
+    const dates = screen.getAllByText(subscription.payment.nextPaymentDueAt, {
       exact: false,
     })
     expect(dates.length).to.equal(2)
@@ -87,9 +77,13 @@ describe('<ActiveSubscription />', function () {
     screen.getByText('You are currently subscribed to the', { exact: false })
 
     await screen.findByRole('heading', { name: 'Change plan' })
-    expect(
-      screen.getAllByRole('button', { name: 'Change to this plan' }).length > 0
-    ).to.be.true
+    await waitFor(
+      () =>
+        expect(
+          screen.getAllByRole('button', { name: 'Change to this plan' })
+            .length > 0
+        ).to.be.true
+    )
   })
 
   it('notes when user is changing plan at end of current plan term', function () {
@@ -120,7 +114,7 @@ describe('<ActiveSubscription />', function () {
       JSON.parse(JSON.stringify(annualActiveSubscription))
     )
 
-    activePastDueSubscription.recurly.account.has_past_due_invoice._ = 'true'
+    activePastDueSubscription.payment.hasPastDueInvoice = true
 
     renderActiveSubscription(activePastDueSubscription)
 
@@ -136,14 +130,14 @@ describe('<ActiveSubscription />', function () {
     })
 
     screen.getByText(
-      groupActiveSubscriptionWithPendingLicenseChange.recurly
+      groupActiveSubscriptionWithPendingLicenseChange.payment
         .pendingAdditionalLicenses!
     )
 
     screen.getByText('additional license(s) for a total of', { exact: false })
 
     screen.getByText(
-      groupActiveSubscriptionWithPendingLicenseChange.recurly
+      groupActiveSubscriptionWithPendingLicenseChange.payment
         .pendingTotalLicenses!
     )
 
@@ -156,10 +150,10 @@ describe('<ActiveSubscription />', function () {
 
   it('shows the pending license change message when plan change is not pending', function () {
     const subscription = Object.assign({}, groupActiveSubscription)
-    subscription.recurly.additionalLicenses = 4
-    subscription.recurly.totalLicenses =
-      subscription.recurly.totalLicenses +
-      subscription.recurly.additionalLicenses
+    subscription.payment.additionalLicenses = 4
+    subscription.payment.totalLicenses =
+      subscription.payment.totalLicenses +
+      subscription.payment.additionalLicenses
 
     renderActiveSubscription(subscription)
 
@@ -167,11 +161,11 @@ describe('<ActiveSubscription />', function () {
       exact: false,
     })
 
-    screen.getByText(subscription.recurly.additionalLicenses)
+    screen.getByText(subscription.payment.additionalLicenses)
 
     screen.getByText('additional license(s) for a total of', { exact: false })
 
-    screen.getByText(subscription.recurly.totalLicenses)
+    screen.getByText(subscription.payment.totalLicenses)
   })
 
   it('shows when trial ends and first payment collected and when subscription would become inactive if cancelled', function () {
@@ -179,16 +173,18 @@ describe('<ActiveSubscription />', function () {
     screen.getByText('You’re on a free trial which ends on', { exact: false })
 
     const endDate = screen.getAllByText(
-      trialSubscription.recurly.trialEndsAtFormatted!
+      trialSubscription.payment.trialEndsAtFormatted!
     )
     expect(endDate.length).to.equal(3)
   })
 
   it('shows current discounts', function () {
     const subscriptionWithActiveCoupons = cloneDeep(annualActiveSubscription)
-    subscriptionWithActiveCoupons.recurly.activeCoupons = [
+    subscriptionWithActiveCoupons.payment.activeCoupons = [
       {
         name: 'fake coupon name',
+        code: 'fake-coupon',
+        description: '',
       },
     ]
     renderActiveSubscription(subscriptionWithActiveCoupons)
@@ -196,27 +192,19 @@ describe('<ActiveSubscription />', function () {
       /this does not include your current discounts, which will be applied automatically before your next payment/i
     )
     screen.getByText(
-      subscriptionWithActiveCoupons.recurly.activeCoupons[0].name
+      subscriptionWithActiveCoupons.payment.activeCoupons[0].name
     )
   })
 
   describe('cancel plan', function () {
-    const assignStub = sinon.stub()
-    const reloadStub = sinon.stub()
-
     beforeEach(function () {
-      this.locationStub = sinon.stub(useLocationModule, 'useLocation').returns({
-        assign: assignStub,
-        replace: sinon.stub(),
-        reload: reloadStub,
-        setHash: sinon.stub(),
-        toString: sinon.stub(),
-      })
+      this.locationWrapperSandbox = sinon.createSandbox()
+      this.locationWrapperStub = this.locationWrapperSandbox.stub(location)
     })
 
     afterEach(function () {
-      this.locationStub.restore()
-      fetchMock.reset()
+      this.locationWrapperSandbox.restore()
+      fetchMock.removeRoutes().clearHistory()
     })
 
     function showConfirmCancelUI() {
@@ -233,7 +221,7 @@ describe('<ActiveSubscription />', function () {
         { exact: false }
       )
       const dates = screen.getAllByText(
-        annualActiveSubscription.recurly.nextPaymentDueAt,
+        annualActiveSubscription.payment.nextPaymentDueAt,
         {
           exact: false,
         }
@@ -252,7 +240,7 @@ describe('<ActiveSubscription />', function () {
         { exact: false }
       )
       const dates = screen.getAllByText(
-        trialSubscription.recurly.trialEndsAtFormatted!
+        trialSubscription.payment.trialEndsAtFormatted!
       )
       expect(dates.length).to.equal(3)
       const button = screen.getByRole('button', {
@@ -285,6 +273,7 @@ describe('<ActiveSubscription />', function () {
         name: 'Cancel my subscription',
       })
       fireEvent.click(button)
+      const assignStub = this.locationWrapperStub.assign
       await waitFor(() => {
         expect(assignStub).to.have.been.called
       })
@@ -414,6 +403,7 @@ describe('<ActiveSubscription />', function () {
         })
         fireEvent.click(extendTrialButton)
         // page is reloaded on success
+        const reloadStub = this.locationWrapperStub.reload
         await waitFor(() => {
           expect(reloadStub).to.have.been.called
         })
@@ -480,10 +470,10 @@ describe('<ActiveSubscription />', function () {
         })
       })
 
-      it('does not show option to downgrade when not a collaborator plan', function () {
-        const trialPlan = cloneDeep(monthlyActiveCollaborator)
-        trialPlan.plan.planCode = 'anotherplan'
-        renderActiveSubscription(trialPlan)
+      it('does not show option to downgrade when plan is not eligible for downgrades', function () {
+        const ineligiblePlan = cloneDeep(monthlyActiveCollaborator)
+        ineligiblePlan.payment.isEligibleForDowngradeUpsell = false
+        renderActiveSubscription(ineligiblePlan)
         showConfirmCancelUI()
         expect(
           screen.queryByRole('button', {
@@ -507,7 +497,10 @@ describe('<ActiveSubscription />', function () {
         const endPointResponse = {
           status: 200,
         }
-        fetchMock.post(subscriptionUpdateUrl, endPointResponse)
+        fetchMock.post(
+          `${subscriptionUpdateUrl}?downgradeToPaidPersonal`,
+          endPointResponse
+        )
         renderActiveSubscription(monthlyActiveCollaborator)
         showConfirmCancelUI()
         const downgradeButton = await screen.findByRole('button', {
@@ -515,6 +508,7 @@ describe('<ActiveSubscription />', function () {
         })
         fireEvent.click(downgradeButton)
         // page is reloaded on success
+        const reloadStub = this.locationWrapperStub.reload
         await waitFor(() => {
           expect(reloadStub).to.have.been.called
         })

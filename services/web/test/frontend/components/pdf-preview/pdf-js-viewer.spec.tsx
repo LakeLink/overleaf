@@ -1,7 +1,7 @@
 import { EditorProviders } from '../../helpers/editor-providers'
 import PdfJsViewer from '../../../../frontend/js/features/pdf-preview/components/pdf-js-viewer'
 import { mockScope } from './scope'
-import { getContainerEl } from 'cypress/react'
+import { getContainerEl } from 'cypress/react18'
 import { unmountComponentAtNode } from 'react-dom'
 import { PdfPreviewProvider } from '../../../../frontend/js/features/pdf-preview/components/pdf-preview-provider'
 
@@ -23,7 +23,7 @@ describe('<PdfJSViewer/>', function () {
       <EditorProviders scope={scope}>
         <PdfPreviewProvider>
           <div className="pdf-viewer">
-            <PdfJsViewer url="/build/123/output.pdf" />
+            <PdfJsViewer url="/build/123/output.pdf?clsiserverid=foo" />
           </div>
         </PdfPreviewProvider>
       </EditorProviders>
@@ -68,7 +68,7 @@ describe('<PdfJSViewer/>', function () {
       <EditorProviders scope={scope}>
         <PdfPreviewProvider>
           <div className="pdf-viewer">
-            <PdfJsViewer url="/build/123/output.pdf" />
+            <PdfJsViewer url="/build/123/output.pdf?clsiserverid=foo" />
           </div>
         </PdfPreviewProvider>
       </EditorProviders>
@@ -88,7 +88,7 @@ describe('<PdfJSViewer/>', function () {
       <EditorProviders scope={scope}>
         <PdfPreviewProvider>
           <div className="pdf-viewer">
-            <PdfJsViewer url="/build/123/output.pdf" />
+            <PdfJsViewer url="/build/123/output.pdf?clsiserverid=foo" />
           </div>
         </PdfPreviewProvider>
       </EditorProviders>

@@ -18,9 +18,9 @@ function PersonalSubscriptionRecurlySyncEmail() {
     runAsync(postJSON('/user/subscription/account/email'))
   }
 
-  if (!personalSubscription || !('recurly' in personalSubscription)) return null
+  if (!personalSubscription || !('payment' in personalSubscription)) return null
 
-  const recurlyEmail = personalSubscription.recurly.account.email
+  const recurlyEmail = personalSubscription.payment.accountEmail
 
   if (!userEmail || recurlyEmail === userEmail) return null
 
@@ -51,9 +51,6 @@ function PersonalSubscriptionRecurlySyncEmail() {
                   disabled={isLoading}
                   isLoading={isLoading}
                   loadingLabel={t('updating')}
-                  bs3Props={{
-                    loading: isLoading ? t('updating') + '…' : t('update'),
-                  }}
                 >
                   {t('update')}
                 </OLButton>

@@ -13,6 +13,8 @@ const GLOBAL_BLOB_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 
 describe('ClsiManager', function () {
   beforeEach(function () {
+    tk.freeze(Date.now())
+
     this.user_id = 'user-id'
     this.project = {
       _id: 'project-id',
@@ -144,6 +146,9 @@ describe('ClsiManager', function () {
       enablePdfCaching: true,
       clsiCookie: { key: 'clsiserver' },
     }
+    this.ClsiCacheHandler = {
+      clearCache: sinon.stub().resolves(),
+    }
     this.Features = {
       hasFeature: sinon.stub().withArgs('project-history-blobs').returns(true),
     }
@@ -172,13 +177,13 @@ describe('ClsiManager', function () {
           this.DocumentUpdaterHandler,
         './ClsiCookieManager': () => this.ClsiCookieManager,
         './ClsiStateManager': this.ClsiStateManager,
+        './ClsiCacheHandler': this.ClsiCacheHandler,
         '@overleaf/fetch-utils': this.FetchUtils,
         './ClsiFormatChecker': this.ClsiFormatChecker,
         '@overleaf/metrics': this.Metrics,
         '../History/HistoryManager': this.HistoryManager,
       },
     })
-    tk.freeze(Date.now())
   })
 
   after(function () {
@@ -390,6 +395,8 @@ describe('ClsiManager', function () {
             incrementalCompilesEnabled: true,
             compileBackendClass: 'e2',
             compileGroup: 'priority',
+            compileFromClsiCache: true,
+            populateClsiCache: true,
             enablePdfCaching: true,
             pdfCachingMinChunkSize: 1337,
           }
@@ -448,6 +455,8 @@ describe('ClsiManager', function () {
                   syncType: 'incremental',
                   syncState: '01234567890abcdef',
                   compileGroup: 'priority',
+                  compileFromClsiCache: true,
+                  populateClsiCache: true,
                   enablePdfCaching: true,
                   pdfCachingMinChunkSize: 1337,
                   metricsMethod: 'priority',
@@ -943,6 +952,12 @@ describe('ClsiManager', function () {
           ),
           { method: 'DELETE' }
         )
+      })
+
+      it('should clear the output.tar.gz files in clsi-cache', function () {
+        this.ClsiCacheHandler.clearCache
+          .calledWith(this.project._id, this.user_id)
+          .should.equal(true)
       })
 
       it('should clear the project state from the docupdater', function () {

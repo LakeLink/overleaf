@@ -12,7 +12,8 @@ import {
   ADD_ON_NAME,
   isStandaloneAiPlanCode,
 } from '../../data/add-on-codes'
-import { RecurlySubscription } from '../../../../../../types/subscription/dashboard/subscription'
+import { PaidSubscription } from '../../../../../../types/subscription/dashboard/subscription'
+import { useBroadcastUser } from '@/shared/hooks/user-channel/use-broadcast-user'
 
 function SuccessfulSubscription() {
   const { t } = useTranslation()
@@ -20,8 +21,9 @@ function SuccessfulSubscription() {
     useSubscriptionDashboardContext()
   const postCheckoutRedirect = getMeta('ol-postCheckoutRedirect')
   const { appName, adminEmail } = getMeta('ol-ExposedSettings')
+  useBroadcastUser()
 
-  if (!subscription || !('recurly' in subscription)) return null
+  if (!subscription || !('payment' in subscription)) return null
 
   const onAiStandalonePlan = isStandaloneAiPlanCode(subscription.planCode)
 
@@ -37,15 +39,15 @@ function SuccessfulSubscription() {
               type="success"
               content={
                 <>
-                  {subscription.recurly.trial_ends_at && (
+                  {subscription.payment.trialEndsAt && (
                     <>
                       <p>
                         <Trans
                           i18nKey="next_payment_of_x_collectected_on_y"
                           values={{
-                            paymentAmmount: subscription.recurly.displayPrice,
+                            paymentAmmount: subscription.payment.displayPrice,
                             collectionDate:
-                              subscription.recurly.nextPaymentDueAt,
+                              subscription.payment.nextPaymentDueAt,
                           }}
                           shouldUnescape
                           tOptions={{ interpolation: { escapeValue: true } }}
@@ -126,7 +128,7 @@ function ThankYouSection({
   subscription,
   onAiStandalonePlan,
 }: {
-  subscription: RecurlySubscription
+  subscription: PaidSubscription
   onAiStandalonePlan: boolean
 }) {
   const { t } = useTranslation()

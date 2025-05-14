@@ -62,10 +62,10 @@ function PdfJsViewer({ url, pdfFile }: PdfJsViewerProps) {
 
   // create the viewer when the container is mounted
   const handleContainer = useCallback(
-    parent => {
+    (parent: HTMLDivElement | null) => {
       if (parent) {
         try {
-          setPdfJsWrapper(new PDFJSWrapper(parent.firstChild))
+          setPdfJsWrapper(new PDFJSWrapper(parent.firstChild as HTMLDivElement))
         } catch (error: any) {
           setLoadingError(true)
           captureException(error)
@@ -144,6 +144,10 @@ function PdfJsViewer({ url, pdfFile }: PdfJsViewerProps) {
       setRawScale(scale.scale)
     }
 
+    const handlePageChanging = (event: { pageNumber: number }) => {
+      setPage(event.pageNumber)
+    }
+
     // `pagesinit` fires when the data for rendering the first page is ready.
     pdfJsWrapper.eventBus.on('pagesinit', handlePagesinit)
     // `pagerendered` fires when a page was actually rendered.
@@ -151,12 +155,15 @@ function PdfJsViewer({ url, pdfFile }: PdfJsViewerProps) {
     // Once a page has been rendered we can set the initial current page number.
     pdfJsWrapper.eventBus.on('pagerendered', handleRenderedInitialPageNumber)
     pdfJsWrapper.eventBus.on('scalechanging', handleScaleChanged)
+    // `pagechanging` fires when the page number changes.
+    pdfJsWrapper.eventBus.on('pagechanging', handlePageChanging)
 
     return () => {
       pdfJsWrapper.eventBus.off('pagesinit', handlePagesinit)
       pdfJsWrapper.eventBus.off('pagerendered', handleRendered)
       pdfJsWrapper.eventBus.off('pagerendered', handleRenderedInitialPageNumber)
       pdfJsWrapper.eventBus.off('scalechanging', handleScaleChanged)
+      pdfJsWrapper.eventBus.off('pagechanging', handlePageChanging)
     }
   }, [pdfJsWrapper, firstRenderDone, startFetch])
 
@@ -168,10 +175,10 @@ function PdfJsViewer({ url, pdfFile }: PdfJsViewerProps) {
       setStartFetch(performance.now())
 
       const abortController = new AbortController()
-      const handleFetchError = (err: Error) => {
+      const handleFetchError = (err: any) => {
         if (abortController.signal.aborted) return
         // The error is already logged at the call-site with additional context.
-        if (err instanceof PDFJS.MissingPDFException) {
+        if (err instanceof PDFJS.ResponseException && err.missing) {
           setError('rendering-error-expected')
         } else {
           setError('rendering-error')
@@ -385,7 +392,7 @@ function PdfJsViewer({ url, pdfFile }: PdfJsViewerProps) {
 
   // set the scale in response to zoom option changes
   const setZoom = useCallback(
-    zoom => {
+    (zoom: any) => {
       switch (zoom) {
         case 'zoom-in':
           if (pdfJsWrapper) {
@@ -430,7 +437,7 @@ function PdfJsViewer({ url, pdfFile }: PdfJsViewerProps) {
   }, [pdfJsWrapper])
 
   const handleKeyDown = useCallback(
-    event => {
+    (event: React.KeyboardEvent) => {
       if (!initialised || !pdfJsWrapper) {
         return
       }

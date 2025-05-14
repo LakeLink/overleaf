@@ -91,7 +91,7 @@ async function getLatestHistoryRaw(req, res, next) {
   const readOnly = req.swagger.params.readOnly.value
   try {
     const { startVersion, endVersion, endTimestamp } =
-      await chunkStore.loadLatestRaw(projectId, { readOnly })
+      await chunkStore.getLatestChunkMetadata(projectId, { readOnly })
     res.json({
       startVersion,
       endVersion,
@@ -136,6 +136,45 @@ async function getHistoryBefore(req, res, next) {
       throw err
     }
   }
+}
+
+/**
+ * Get all changes since the beginning of history or since a given version
+ */
+async function getChanges(req, res, next) {
+  const projectId = req.swagger.params.project_id.value
+  const since = req.swagger.params.since.value ?? 0
+
+  if (since < 0) {
+    // Negative values would cause an infinite loop
+    return res.status(400).json({
+      error: `Version out of bounds: ${since}`,
+    })
+  }
+
+  const changes = []
+  let chunk = await chunkStore.loadLatest(projectId)
+
+  if (since > chunk.getEndVersion()) {
+    return res.status(400).json({
+      error: `Version out of bounds: ${since}`,
+    })
+  }
+
+  // Fetch all chunks that come after the chunk that contains the start version
+  while (chunk.getStartVersion() > since) {
+    const changesInChunk = chunk.getChanges()
+    changes.unshift(...changesInChunk)
+    chunk = await chunkStore.loadAtVersion(projectId, chunk.getStartVersion())
+  }
+
+  // Extract the relevant changes from the chunk that contains the start version
+  const changesInChunk = chunk
+    .getChanges()
+    .slice(since - chunk.getStartVersion())
+  changes.unshift(...changesInChunk)
+
+  res.json(changes.map(change => change.toRaw()))
 }
 
 async function getZip(req, res, next) {
@@ -337,6 +376,7 @@ module.exports = {
   getLatestHistoryRaw: expressify(getLatestHistoryRaw),
   getHistory: expressify(getHistory),
   getHistoryBefore: expressify(getHistoryBefore),
+  getChanges: expressify(getChanges),
   getZip: expressify(getZip),
   createZip: expressify(createZip),
   deleteProject: expressify(deleteProject),

@@ -15,7 +15,6 @@ const metrics = require('@overleaf/metrics')
 const { User } = require('../../models/User')
 const SubscriptionLocator = require('../Subscription/SubscriptionLocator')
 const LimitationsManager = require('../Subscription/LimitationsManager')
-const FeaturesHelper = require('../Subscription/FeaturesHelper')
 const Settings = require('@overleaf/settings')
 const AuthorizationManager = require('../Authorization/AuthorizationManager')
 const InactiveProjectManager = require('../InactiveData/InactiveProjectManager')
@@ -49,7 +48,7 @@ const Modules = require('../../infrastructure/Modules')
 const UserGetter = require('../User/UserGetter')
 const {
   isStandaloneAiAddOnPlanCode,
-} = require('../Subscription/RecurlyEntities')
+} = require('../Subscription/PaymentProviderEntities')
 const SubscriptionController = require('../Subscription/SubscriptionController.js')
 const { formatCurrency } = require('../../util/currency')
 
@@ -338,6 +337,7 @@ const _ProjectController = {
       'external-socket-heartbeat',
       'full-project-search',
       'null-test-share-modal',
+      'populate-clsi-cache',
       'pdf-caching-cached-url-lookup',
       'pdf-caching-mode',
       'pdf-caching-prefetch-large',
@@ -347,15 +347,13 @@ const _ProjectController = {
       !anonymous && 'ro-mirror-on-client',
       'track-pdf-download',
       !anonymous && 'writefull-oauth-promotion',
-      'write-and-cite',
-      'write-and-cite-ars',
-      'default-visual-for-beginners',
       'hotjar',
       'reviewer-role',
-      'papers-integration',
       'editor-redesign',
       'paywall-change-compile-timeout',
       'overleaf-assist-bundle',
+      'word-count-client',
+      'editor-popup-ux-survey',
     ].filter(Boolean)
 
     const getUserValues = async userId =>
@@ -364,7 +362,7 @@ const _ProjectController = {
           user: (async () => {
             const user = await User.findById(
               userId,
-              'email first_name last_name referal_id signUpDate featureSwitches features featuresEpoch refProviders alphaProgram betaProgram isAdmin ace labsProgram completedTutorials writefull aiErrorAssistant'
+              'email first_name last_name referal_id signUpDate featureSwitches features featuresEpoch refProviders alphaProgram betaProgram isAdmin ace labsProgram labsExperiments completedTutorials writefull aiErrorAssistant'
             ).exec()
             // Handle case of deleted user
             if (!user) {
@@ -404,13 +402,6 @@ const _ProjectController = {
               userId,
               projectId
             ),
-          usedLatex: OnboardingDataCollectionManager.getOnboardingDataValue(
-            userId,
-            'usedLatex'
-          ).catch(err => {
-            logger.error({ err, userId })
-            return null
-          }),
           odcRole: OnboardingDataCollectionManager.getOnboardingDataValue(
             userId,
             'role'
@@ -470,7 +461,6 @@ const _ProjectController = {
         subscription,
         isTokenMember,
         isInvitedMember,
-        usedLatex,
         odcRole,
       } = userValues
 
@@ -567,10 +557,11 @@ const _ProjectController = {
         .catch(err =>
           logger.error({ err }, 'failed to update split test info in session')
         )
+
+      const ownerFeatures = await UserGetter.promises.getUserFeatures(
+        project.owner_ref
+      )
       if (userId) {
-        const ownerFeatures = await UserGetter.promises.getUserFeatures(
-          project.owner_ref
-        )
         const planLimit = ownerFeatures?.collaborators || 0
         const namedEditors = project.collaberator_refs?.length || 0
         const pendingEditors = project.pendingEditor_refs?.length || 0
@@ -761,16 +752,7 @@ const _ProjectController = {
 
       let fullFeatureSet = user?.features
       if (!anonymous) {
-        // generate users feature set including features added, or overriden via modules
-        const moduleFeatures =
-          (await Modules.promises.hooks.fire(
-            'getModuleProvidedFeatures',
-            userId
-          )) || []
-        fullFeatureSet = FeaturesHelper.computeFeatureSet([
-          user.features,
-          ...moduleFeatures,
-        ])
+        fullFeatureSet = await UserGetter.promises.getUserFeatures(userId)
       }
 
       const isPaywallChangeCompileTimeoutEnabled =
@@ -796,8 +778,10 @@ const _ProjectController = {
 
       let planCode = subscription?.planCode
       if (!planCode && !userInNonIndividualSub) {
-        planCode = 'free'
+        planCode = 'personal'
       }
+
+      const planDetails = Settings.plans.find(p => p.planCode === planCode)
 
       res.render(template, {
         title: project.name,
@@ -805,6 +789,8 @@ const _ProjectController = {
         bodyClasses: ['editor'],
         project_id: project._id,
         projectName: project.name,
+        projectOwnerHasPremiumOnPageLoad:
+          ownerFeatures?.compileGroup === 'priority',
         user: {
           id: userId,
           email: user.email,
@@ -829,6 +815,8 @@ const _ProjectController = {
           inactiveTutorials: TutorialHandler.getInactiveTutorials(user),
           isAdmin: hasAdminAccess(user),
           planCode,
+          planName: planDetails?.name,
+          isAnnualPlan: planCode && planDetails?.annual,
           isMemberOfGroupSubscription: userIsMemberOfGroupSubscription,
           hasInstitutionLicence: userHasInstitutionLicence,
         },
@@ -847,6 +835,7 @@ const _ProjectController = {
           referencesSearchMode: user.ace.referencesSearchMode,
           enableNewEditor: user.ace.enableNewEditor ?? true,
         },
+        labsExperiments: user.labsExperiments ?? [],
         privilegeLevel,
         anonymous,
         isTokenMember,
@@ -887,12 +876,6 @@ const _ProjectController = {
         fixedSizeDocument: true,
         hasTrackChangesFeature: Features.hasFeature('track-changes'),
         projectTags,
-        usedLatex:
-          // only use the usedLatex value if the split test is enabled
-          splitTestAssignments['default-visual-for-beginners']?.variant ===
-          'enabled'
-            ? usedLatex
-            : null,
         odcRole:
           // only use the ODC role value if the split test is enabled
           splitTestAssignments['paywall-change-compile-timeout']?.variant ===
@@ -943,7 +926,7 @@ const _ProjectController = {
     return plansData
   },
 
-  async _getAddonPrices(req, res, addonPlans = ['assistBundle']) {
+  async _getAddonPrices(req, res, addonPlans = ['assistant']) {
     const plansData = {}
 
     const locale = req.i18n.language
@@ -956,9 +939,17 @@ const _ProjectController = {
       const annualPrice = Settings.localizedAddOnsPricing[currency][plan].annual
       const monthlyPrice =
         Settings.localizedAddOnsPricing[currency][plan].monthly
+      const annualDividedByTwelve =
+        Settings.localizedAddOnsPricing[currency][plan].annualDividedByTwelve
 
       plansData[plan] = {
         annual: formatCurrency(annualPrice, currency, locale, true),
+        annualDividedByTwelve: formatCurrency(
+          annualDividedByTwelve,
+          currency,
+          locale,
+          true
+        ),
         monthly: formatCurrency(monthlyPrice, currency, locale, true),
       }
     })

@@ -57,6 +57,23 @@ const SubscriptionSchema = new Schema(
         type: Date,
       },
     },
+    paymentProvider: {
+      service: {
+        type: String,
+      },
+      subscriptionId: {
+        type: String,
+      },
+      state: {
+        type: String,
+      },
+      trialStartedAt: {
+        type: Date,
+      },
+      trialEndsAt: {
+        type: Date,
+      },
+    },
     collectionMethod: {
       type: String,
       enum: ['automatic', 'manual'],

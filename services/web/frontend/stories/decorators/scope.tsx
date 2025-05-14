@@ -89,6 +89,7 @@ const initialize = () => {
       sharejs_doc: {
         doc_id: 'test-doc',
         getSnapshot: () => 'some doc content',
+        hasBufferedOps: () => false,
       },
       open_doc_name: 'testfile.tex',
     },
@@ -158,7 +159,7 @@ export const ScopeDecorator = (
   )
 }
 
-const ConnectionProvider: FC = ({ children }) => {
+const ConnectionProvider: FC<React.PropsWithChildren> = ({ children }) => {
   const [value] = useState(() => {
     const connectionState: ConnectionState = {
       readyState: WebSocket.OPEN,
@@ -200,7 +201,7 @@ const ConnectionProvider: FC = ({ children }) => {
   )
 }
 
-const IdeReactProvider: FC = ({ children }) => {
+const IdeReactProvider: FC<React.PropsWithChildren> = ({ children }) => {
   const projectId = 'project-123'
   const [startedFreeTrial, setStartedFreeTrial] = useState(false)
 

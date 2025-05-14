@@ -20,20 +20,11 @@ import { saveProjectSettings } from '@/features/editor-left-menu/utils/api'
 import { PermissionsLevel } from '@/features/ide-react/types/permissions'
 import { useModalsContext } from '@/features/ide-react/context/modals-context'
 import { WritefullAPI } from './types/writefull-instance'
+import { Cobranding } from '../../../../types/cobranding'
 
 export const EditorContext = createContext<
   | {
-      cobranding?: {
-        logoImgUrl: string
-        brandVariationName: string
-        brandVariationId: number
-        brandId: number
-        brandVariationHomeUrl: string
-        publishGuideHtml?: string
-        partner?: string
-        brandedMenu?: boolean
-        submitBtnHtml?: string
-      }
+      cobranding?: Cobranding
       hasPremiumCompile?: boolean
       renameProject: (newName: string) => void
       setPermissionsLevel: (permissionsLevel: PermissionsLevel) => void
@@ -61,7 +52,7 @@ export const EditorContext = createContext<
   | undefined
 >(undefined)
 
-export const EditorProvider: FC = ({ children }) => {
+export const EditorProvider: FC<React.PropsWithChildren> = ({ children }) => {
   const { socket } = useIdeContext()
   const { id: userId, featureUsage } = useUserContext()
   const { role } = useDetachContext()
@@ -125,7 +116,7 @@ export const EditorProvider: FC = ({ children }) => {
   )
 
   const deactivateTutorial = useCallback(
-    tutorialKey => {
+    (tutorialKey: string) => {
       setInactiveTutorials([...inactiveTutorials, tutorialKey])
     },
     [inactiveTutorials]

@@ -22,11 +22,11 @@ describe('<EmailsSection />', function () {
     Object.assign(getMeta('ol-ExposedSettings'), {
       hasAffiliationsFeature: true,
     })
-    fetchMock.reset()
+    fetchMock.removeRoutes().clearHistory()
   })
 
   afterEach(function () {
-    fetchMock.reset()
+    fetchMock.removeRoutes().clearHistory()
   })
 
   it('renders translated heading', function () {
@@ -40,6 +40,7 @@ describe('<EmailsSection />', function () {
 
     screen.getByText(/add additional email addresses/i)
     screen.getByText(/to change your primary email/i)
+    screen.getByLabelText('Learn more about managing your Overleaf emails.')
   })
 
   it('renders a loading message when loading', async function () {

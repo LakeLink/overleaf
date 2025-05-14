@@ -22,13 +22,15 @@ const Modules = require('../../infrastructure/Modules')
 const async = require('async')
 const HttpErrorHandler = require('../Errors/HttpErrorHandler')
 const RecurlyClient = require('./RecurlyClient')
-const { AI_ADD_ON_CODE } = require('./RecurlyEntities')
+const { AI_ADD_ON_CODE } = require('./PaymentProviderEntities')
 const PlansLocator = require('./PlansLocator')
+const PaymentProviderEntities = require('./PaymentProviderEntities')
+const { User } = require('../../models/User')
 
 /**
  * @import { SubscriptionChangeDescription } from '../../../../types/subscription/subscription-change-preview'
  * @import { SubscriptionChangePreview } from '../../../../types/subscription/subscription-change-preview'
- * @import { RecurlySubscriptionChange } from './RecurlyEntities'
+ * @import { PaymentProviderSubscriptionChange } from './PaymentProviderEntities'
  * @import { PaymentMethod } from './types'
  */
 
@@ -45,7 +47,6 @@ function formatGroupPlansDataForDash() {
 
 async function userSubscriptionPage(req, res) {
   const user = SessionManager.getSessionUser(req.session)
-
   await SplitTestHandler.promises.getAssignment(req, res, 'pause-subscription')
 
   const groupPricingDiscount = await SplitTestHandler.promises.getAssignment(
@@ -154,6 +155,9 @@ async function userSubscriptionPage(req, res) {
     )
   }
 
+  const hasAiAssistViaWritefull =
+    await FeaturesUpdater.promises.hasFeaturesViaWritefull(user._id)
+
   const data = {
     title: 'your_subscription',
     plans: plansData?.plans,
@@ -176,13 +180,16 @@ async function userSubscriptionPage(req, res) {
     groupSettingsEnabledFor,
     isManagedAccount: !!req.managedBy,
     userRestrictions: Array.from(req.userRestrictions || []),
+    hasAiAssistViaWritefull,
   }
   res.render('subscriptions/dashboard-react', data)
 }
 
 async function successfulSubscription(req, res) {
   const user = SessionManager.getSessionUser(req.session)
-
+  if (!user) {
+    throw new Error('User is not logged in')
+  }
   const { personalSubscription } =
     await SubscriptionViewModelBuilder.promises.buildUsersSubscriptionViewModel(
       user,
@@ -194,11 +201,23 @@ async function successfulSubscription(req, res) {
   if (!personalSubscription) {
     res.redirect('/user/subscription/plans')
   } else {
+    const userInDb = await User.findById(user._id, {
+      _id: 1,
+      features: 1,
+    })
+
+    if (!userInDb) {
+      throw new Error('User not found')
+    }
+
     res.render('subscriptions/successful-subscription-react', {
       title: 'thank_you',
       personalSubscription,
       postCheckoutRedirect,
-      user,
+      user: {
+        _id: user._id,
+        features: userInDb.features,
+      },
     })
   }
 }
@@ -310,6 +329,7 @@ function cancelV1Subscription(req, res, next) {
 async function previewAddonPurchase(req, res) {
   const userId = SessionManager.getLoggedInUserId(req.session)
   const addOnCode = req.params.addOnCode
+  const purchaseReferrer = req.query.purchaseReferrer
 
   if (addOnCode !== AI_ADD_ON_CODE) {
     return HttpErrorHandler.notFound(req, res, `Unknown add-on: ${addOnCode}`)
@@ -321,13 +341,21 @@ async function previewAddonPurchase(req, res) {
   try {
     subscriptionChange =
       await SubscriptionHandler.promises.previewAddonPurchase(userId, addOnCode)
+
+    const hasAiAssistViaWritefull =
+      await FeaturesUpdater.promises.hasFeaturesViaWritefull(userId)
+    const isAiUpgrade =
+      PaymentProviderEntities.subscriptionChangeIsAiAssistUpgrade(
+        subscriptionChange
+      )
+    if (hasAiAssistViaWritefull && isAiUpgrade) {
+      return res.redirect(
+        '/user/subscription?redirect-reason=writefull-entitled'
+      )
+    }
   } catch (err) {
     if (err instanceof DuplicateAddOnError) {
-      return HttpErrorHandler.badRequest(
-        req,
-        res,
-        `Subscription already has add-on "${addOnCode}"`
-      )
+      return res.redirect('/user/subscription?redirect-reason=double-buy')
     }
     throw err
   }
@@ -351,7 +379,10 @@ async function previewAddonPurchase(req, res) {
     paymentMethod
   )
 
-  res.render('subscriptions/preview-change', { changePreview })
+  res.render('subscriptions/preview-change', {
+    changePreview,
+    purchaseReferrer,
+  })
 }
 
 async function purchaseAddon(req, res, next) {
@@ -371,7 +402,6 @@ async function purchaseAddon(req, res, next) {
       addOnCode,
       quantity
     )
-    return res.sendStatus(200)
   } catch (err) {
     if (err instanceof DuplicateAddOnError) {
       HttpErrorHandler.badRequest(
@@ -390,6 +420,14 @@ async function purchaseAddon(req, res, next) {
       return next(err)
     }
   }
+
+  try {
+    await FeaturesUpdater.promises.refreshFeatures(user._id, 'add-on-purchase')
+  } catch (err) {
+    logger.error({ err }, 'Failed to refresh features after add-on purchase')
+  }
+
+  return res.sendStatus(200)
 }
 
 async function removeAddon(req, res, next) {
@@ -599,18 +637,6 @@ async function refreshUserFeatures(req, res) {
   res.sendStatus(200)
 }
 
-async function redirectToHostedPage(req, res) {
-  const userId = SessionManager.getLoggedInUserId(req.session)
-  const { pageType } = req.params
-  const url =
-    await SubscriptionViewModelBuilder.promises.getRedirectToHostedPage(
-      userId,
-      pageType
-    )
-  logger.warn({ userId, pageType }, 'redirecting to recurly hosted page')
-  res.redirect(url)
-}
-
 async function getRecommendedCurrency(req, res) {
   const userId = SessionManager.getLoggedInUserId(req.session)
   let ip = req.ip
@@ -718,8 +744,8 @@ function getPlanNameForDisplay(planName, planCode) {
  * Build a subscription change preview for display purposes
  *
  * @param {SubscriptionChangeDescription} subscriptionChangeDescription A description of the change for the frontend
- * @param {RecurlySubscriptionChange} subscriptionChange The subscription change object coming from Recurly
- * @param {PaymentMethod} paymentMethod The payment method associated to the user
+ * @param {PaymentProviderSubscriptionChange} subscriptionChange The subscription change object coming from Recurly
+ * @param {PaymentMethod} [paymentMethod] The payment method associated to the user
  * @return {SubscriptionChangePreview}
  */
 function makeChangePreview(
@@ -735,7 +761,8 @@ function makeChangePreview(
     change: subscriptionChangeDescription,
     currency: subscription.currency,
     immediateCharge: { ...subscriptionChange.immediateCharge },
-    paymentMethod: paymentMethod.toString(),
+    paymentMethod: paymentMethod?.toString(),
+    netTerms: subscription.netTerms,
     nextPlan: {
       annual: nextPlan.annual ?? false,
     },
@@ -781,7 +808,6 @@ module.exports = {
   extendTrial: expressify(extendTrial),
   recurlyNotificationParser,
   refreshUserFeatures: expressify(refreshUserFeatures),
-  redirectToHostedPage: expressify(redirectToHostedPage),
   previewAddonPurchase: expressify(previewAddonPurchase),
   purchaseAddon,
   removeAddon,

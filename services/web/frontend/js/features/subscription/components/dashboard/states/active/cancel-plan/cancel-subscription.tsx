@@ -8,7 +8,6 @@ import {
   cancelSubscriptionUrl,
   redirectAfterCancelSubscriptionUrl,
 } from '../../../../../data/subscription-url'
-import showDowngradeOption from '../../../../../util/show-downgrade-option'
 import GenericErrorAlert from '../../../generic-error-alert'
 import DowngradePlanButton from './downgrade-plan-button'
 import ExtendTrialButton from './extend-trial-button'
@@ -155,15 +154,10 @@ export function CancelSubscription() {
     isSuccessSecondaryAction ||
     isSuccessCancel
 
-  if (!personalSubscription || !('recurly' in personalSubscription)) return null
+  if (!personalSubscription || !('payment' in personalSubscription)) return null
 
-  const showDowngrade = showDowngradeOption(
-    personalSubscription.plan.planCode,
-    personalSubscription.plan.groupPlan,
-    personalSubscription.recurly.trial_ends_at,
-    personalSubscription.recurly.pausedAt,
-    personalSubscription.recurly.remainingPauseCycles
-  )
+  const showDowngrade =
+    personalSubscription.payment.isEligibleForDowngradeUpsell
   const planToDowngradeTo = plans.find(
     plan => plan.planCode === planCodeToDowngradeTo
   )

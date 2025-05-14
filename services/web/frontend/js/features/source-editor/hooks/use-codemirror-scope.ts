@@ -33,7 +33,7 @@ import { setSpellCheckLanguage } from '../extensions/spelling'
 import { setKeybindings } from '../extensions/keybindings'
 import { Highlight } from '../../../../../types/highlight'
 import { EditorView } from '@codemirror/view'
-import { useErrorHandler } from 'react-error-boundary'
+import { useErrorBoundary } from 'react-error-boundary'
 import { setVisual } from '../extensions/visual/visual'
 import { useFileTreePathContext } from '@/features/file-tree/contexts/file-tree-path'
 import { useUserSettingsContext } from '@/shared/context/user-settings-context'
@@ -51,9 +51,12 @@ import { updateRanges } from '@/features/source-editor/extensions/ranges'
 import { useThreadsContext } from '@/features/review-panel-new/context/threads-context'
 import { useHunspell } from '@/features/source-editor/hooks/use-hunspell'
 import { Permissions } from '@/features/ide-react/types/permissions'
-import { useEditorManagerContext } from '@/features/ide-react/context/editor-manager-context'
+import {
+  GotoOffsetOptions,
+  useEditorManagerContext,
+} from '@/features/ide-react/context/editor-manager-context'
+import { GotoLineOptions } from '@/features/ide-react/types/goto-line-options'
 import { useOnlineUsersContext } from '@/features/ide-react/context/online-users-context'
-import { setBreadcrumbsEnabled } from '../extensions/breadcrumbs-panel'
 
 function useCodeMirrorScope(view: EditorView) {
   const { fileTreeData } = useFileTreeData()
@@ -266,7 +269,7 @@ function useCodeMirrorScope(view: EditorView) {
     visual: showVisual,
   })
 
-  const handleError = useErrorHandler()
+  const { showBoundary } = useErrorBoundary()
 
   const handleException = useCallback((exception: any) => {
     captureException(exception, {
@@ -305,7 +308,7 @@ function useCodeMirrorScope(view: EditorView) {
           spelling: spellingRef.current,
           visual: visualRef.current,
           projectFeatures: projectFeaturesRef.current,
-          handleError,
+          showBoundary,
           handleException,
         }),
       })
@@ -336,7 +339,7 @@ function useCodeMirrorScope(view: EditorView) {
     }
     // IMPORTANT: This effect must not depend on anything variable apart from currentDocument,
     // as the editor state is recreated when the effect runs.
-  }, [view, currentDocument, handleError, handleException])
+  }, [view, currentDocument, showBoundary, handleException])
 
   useEffect(() => {
     if (openDocName) {
@@ -436,20 +439,13 @@ function useCodeMirrorScope(view: EditorView) {
     settingsRef.current.referencesSearchMode = referencesSearchMode
   }, [referencesSearchMode])
 
-  useEffect(() => {
-    settingsRef.current.enableNewEditor = enableNewEditor
-    window.setTimeout(() => {
-      view.dispatch(setBreadcrumbsEnabled(enableNewEditor))
-    })
-  }, [view, enableNewEditor])
-
   const emitSyncToPdf = useScopeEventEmitter('cursor:editor:syncToPdf')
 
   // select and scroll to position on editor:gotoLine event (from synctex)
   useScopeEventListener(
     'editor:gotoLine',
     useCallback(
-      (_event, options) => {
+      (_event: any, options: GotoLineOptions) => {
         setCursorLineAndScroll(
           view,
           options.gotoLine,
@@ -468,7 +464,7 @@ function useCodeMirrorScope(view: EditorView) {
   useScopeEventListener(
     'editor:gotoOffset',
     useCallback(
-      (_event, options) => {
+      (_event: any, options: GotoOffsetOptions) => {
         setCursorPositionAndScroll(view, options.gotoOffset)
       },
       [view]

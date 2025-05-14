@@ -45,7 +45,6 @@ export type User = {
   alphaProgram?: boolean
   betaProgram?: boolean
   labsProgram?: boolean
-  isLatexBeginner?: boolean
   signUpDate?: string // date string
   features?: Features
   refProviders?: RefProviders
@@ -53,12 +52,15 @@ export type User = {
     enabled: boolean
     autoCreatedAccount: boolean
     firstAutoLoad: boolean
+    premiumSource: string
   }
   aiErrorAssistant?: {
     enabled: boolean
   }
   featureUsage?: FeatureUsage
   planCode?: string
+  planName?: string
+  isAnnualPlan?: boolean
   isMemberOfGroupSubscription?: boolean
   hasInstitutionLicence?: boolean
 }

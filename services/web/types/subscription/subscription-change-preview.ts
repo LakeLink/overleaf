@@ -1,7 +1,8 @@
 export type SubscriptionChangePreview = {
   change: SubscriptionChangeDescription
   currency: string
-  paymentMethod: string
+  paymentMethod: string | undefined
+  netTerms: number
   nextPlan: {
     annual: boolean
   }

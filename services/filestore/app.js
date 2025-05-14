@@ -50,64 +50,68 @@ app.use((req, res, next) => {
 
 Metrics.injectMetricsRoute(app)
 
-app.head(
-  '/project/:project_id/file/:file_id',
-  keyBuilder.userFileKeyMiddleware,
-  fileController.getFileHead
-)
-app.get(
-  '/project/:project_id/file/:file_id',
-  keyBuilder.userFileKeyMiddleware,
-  fileController.getFile
-)
-app.post(
-  '/project/:project_id/file/:file_id',
-  keyBuilder.userFileKeyMiddleware,
-  fileController.insertFile
-)
-app.put(
-  '/project/:project_id/file/:file_id',
-  keyBuilder.userFileKeyMiddleware,
-  bodyParser.json(),
-  fileController.copyFile
-)
-app.delete(
-  '/project/:project_id/file/:file_id',
-  keyBuilder.userFileKeyMiddleware,
-  fileController.deleteFile
-)
-app.delete(
-  '/project/:project_id',
-  keyBuilder.userProjectKeyMiddleware,
-  fileController.deleteProject
-)
+if (settings.filestore.stores.user_files) {
+  app.head(
+    '/project/:project_id/file/:file_id',
+    keyBuilder.userFileKeyMiddleware,
+    fileController.getFileHead
+  )
+  app.get(
+    '/project/:project_id/file/:file_id',
+    keyBuilder.userFileKeyMiddleware,
+    fileController.getFile
+  )
+  app.post(
+    '/project/:project_id/file/:file_id',
+    keyBuilder.userFileKeyMiddleware,
+    fileController.insertFile
+  )
+  app.put(
+    '/project/:project_id/file/:file_id',
+    keyBuilder.userFileKeyMiddleware,
+    bodyParser.json(),
+    fileController.copyFile
+  )
+  app.delete(
+    '/project/:project_id/file/:file_id',
+    keyBuilder.userFileKeyMiddleware,
+    fileController.deleteFile
+  )
+  app.delete(
+    '/project/:project_id',
+    keyBuilder.userProjectKeyMiddleware,
+    fileController.deleteProject
+  )
 
-app.get(
-  '/project/:project_id/size',
-  keyBuilder.userProjectKeyMiddleware,
-  fileController.directorySize
-)
+  app.get(
+    '/project/:project_id/size',
+    keyBuilder.userProjectKeyMiddleware,
+    fileController.directorySize
+  )
+}
 
-app.head(
-  '/template/:template_id/v/:version/:format',
-  keyBuilder.templateFileKeyMiddleware,
-  fileController.getFileHead
-)
-app.get(
-  '/template/:template_id/v/:version/:format',
-  keyBuilder.templateFileKeyMiddleware,
-  fileController.getFile
-)
-app.get(
-  '/template/:template_id/v/:version/:format/:sub_type',
-  keyBuilder.templateFileKeyMiddleware,
-  fileController.getFile
-)
-app.post(
-  '/template/:template_id/v/:version/:format',
-  keyBuilder.templateFileKeyMiddleware,
-  fileController.insertFile
-)
+if (settings.filestore.stores.template_files) {
+  app.head(
+    '/template/:template_id/v/:version/:format',
+    keyBuilder.templateFileKeyMiddleware,
+    fileController.getFileHead
+  )
+  app.get(
+    '/template/:template_id/v/:version/:format',
+    keyBuilder.templateFileKeyMiddleware,
+    fileController.getFile
+  )
+  app.get(
+    '/template/:template_id/v/:version/:format/:sub_type',
+    keyBuilder.templateFileKeyMiddleware,
+    fileController.getFile
+  )
+  app.post(
+    '/template/:template_id/v/:version/:format',
+    keyBuilder.templateFileKeyMiddleware,
+    fileController.insertFile
+  )
+}
 
 app.get(
   '/bucket/:bucket/key/*',

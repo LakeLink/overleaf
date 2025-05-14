@@ -9,12 +9,11 @@ import {
   trialSubscription,
 } from '../../fixtures/subscriptions'
 import { renderActiveSubscription } from '../../helpers/render-active-subscription'
-import * as useLocationModule from '../../../../../../frontend/js/shared/hooks/use-location'
+import { location } from '@/shared/components/location'
 import { MetaTag } from '@/utils/meta'
 
 const pauseSubscriptionSplitTestMeta: MetaTag[] = [
   { name: 'ol-splitTestVariants', value: { 'pause-subscription': 'enabled' } },
-  { name: 'ol-bootstrapVersion', value: 5 },
 ]
 
 function renderSubscriptionWithPauseSupport(
@@ -46,22 +45,17 @@ function clickSubmitButton() {
 
 describe('<PauseSubscriptionModal />', function () {
   beforeEach(function () {
-    reloadStub = sinon.stub()
-    this.locationStub = sinon.stub(useLocationModule, 'useLocation').returns({
-      assign: sinon.stub(),
-      replace: sinon.stub(),
-      reload: reloadStub,
-      setHash: sinon.stub(),
-      toString: sinon
-        .stub()
-        .returns('https://www.dev-overleaf.com/user/subscription'),
-    })
+    this.locationWrapperSandbox = sinon.createSandbox()
+    this.locationWrapperStub = this.locationWrapperSandbox.stub(location)
+    this.locationWrapperStub.toString.returns(
+      'https://www.dev-overleaf.com/user/subscription'
+    )
     this.replaceStateStub = sinon.stub(window.history, 'replaceState')
   })
 
   afterEach(function () {
-    fetchMock.reset()
-    this.locationStub.restore()
+    fetchMock.removeRoutes().clearHistory()
+    this.locationWrapperSandbox.restore()
     this.replaceStateStub.restore()
   })
 
@@ -90,7 +84,6 @@ describe('<PauseSubscriptionModal />', function () {
     clickCancelButton()
     await screen.findByText('Pause instead, to pick up where you left off')
   })
-  let reloadStub: sinon.SinonStub
 
   it('renders options for pause duration', async function () {
     renderSubscriptionWithPauseSupport()
@@ -136,6 +129,7 @@ describe('<PauseSubscriptionModal />', function () {
     renderSubscriptionWithPauseSupport()
     clickCancelButton()
     clickSubmitButton()
+    const reloadStub = this.locationWrapperStub.reload
     await waitFor(() => {
       expect(reloadStub).to.have.been.called
     })

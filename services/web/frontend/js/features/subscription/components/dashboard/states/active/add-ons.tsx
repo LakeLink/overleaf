@@ -1,19 +1,21 @@
 import { useTranslation } from 'react-i18next'
+import getMeta from '@/utils/meta'
 import { Dropdown, DropdownMenu, DropdownToggle } from 'react-bootstrap-5'
 import OLDropdownMenuItem from '@/features/ui/components/ol/ol-dropdown-menu-item'
 import MaterialIcon from '@/shared/components/material-icon'
 import {
   ADD_ON_NAME,
   AI_ADD_ON_CODE,
-  AI_STANDALONE_ANNUAL_PLAN_CODE,
-  AI_STANDALONE_PLAN_CODE,
+  AI_ASSIST_STANDALONE_ANNUAL_PLAN_CODE,
+  AI_ASSIST_STANDALONE_MONTHLY_PLAN_CODE,
 } from '@/features/subscription/data/add-on-codes'
 import sparkle from '@/shared/svgs/sparkle.svg'
-import { RecurlySubscription } from '../../../../../../../../types/subscription/dashboard/subscription'
+import { PaidSubscription } from '../../../../../../../../types/subscription/dashboard/subscription'
 import { LICENSE_ADD_ON } from '@/features/group-management/components/upgrade-subscription/upgrade-subscription-plan-details'
+import WritefullManagedBundleAddOn from './change-plan/modals/writefull-bundle-management-modal'
 
 type AddOnsProps = {
-  subscription: RecurlySubscription
+  subscription: PaidSubscription
   onStandalonePlan: boolean
   handleCancelClick: (code: string) => void
 }
@@ -30,8 +32,8 @@ type AddOnProps = {
 function resolveAddOnName(addOnCode: string) {
   switch (addOnCode) {
     case AI_ADD_ON_CODE:
-    case AI_STANDALONE_ANNUAL_PLAN_CODE:
-    case AI_STANDALONE_PLAN_CODE:
+    case AI_ASSIST_STANDALONE_ANNUAL_PLAN_CODE:
+    case AI_ASSIST_STANDALONE_MONTHLY_PLAN_CODE:
       return ADD_ON_NAME
   }
 }
@@ -104,35 +106,42 @@ function AddOns({
   handleCancelClick,
 }: AddOnsProps) {
   const { t } = useTranslation()
+  const hasAiAssistViaWritefull = getMeta('ol-hasAiAssistViaWritefull')
   const addOnsDisplayPrices = onStandalonePlan
     ? {
-        [AI_STANDALONE_PLAN_CODE]: subscription.recurly.displayPrice,
+        [AI_ASSIST_STANDALONE_MONTHLY_PLAN_CODE]:
+          subscription.payment.displayPrice,
       }
-    : subscription.recurly.addOnDisplayPricesWithoutAdditionalLicense
+    : subscription.payment.addOnDisplayPricesWithoutAdditionalLicense
   const addOnsToDisplay = onStandalonePlan
-    ? [{ addOnCode: AI_STANDALONE_PLAN_CODE }]
+    ? [{ addOnCode: AI_ASSIST_STANDALONE_MONTHLY_PLAN_CODE }]
     : subscription.addOns?.filter(addOn => addOn.addOnCode !== LICENSE_ADD_ON)
 
+  const hasAddons =
+    (addOnsToDisplay && addOnsToDisplay.length > 0) || hasAiAssistViaWritefull
   return (
     <>
       <h2 className="h3 fw-bold">{t('add_ons')}</h2>
-      {addOnsToDisplay && addOnsToDisplay.length > 0 ? (
-        addOnsToDisplay.map(addOn => (
-          <AddOn
-            addOnCode={addOn.addOnCode}
-            key={addOn.addOnCode}
-            isAnnual={Boolean(subscription.plan.annual)}
-            handleCancelClick={handleCancelClick}
-            pendingCancellation={
-              subscription.pendingPlan !== undefined &&
-              (subscription.pendingPlan.addOns ?? []).every(
-                pendingAddOn => pendingAddOn.addOnCode !== addOn.addOnCode
-              )
-            }
-            displayPrice={addOnsDisplayPrices[addOn.addOnCode]}
-            nextBillingDate={subscription.recurly.nextPaymentDueDate}
-          />
-        ))
+      {hasAddons ? (
+        <>
+          {addOnsToDisplay?.map(addOn => (
+            <AddOn
+              addOnCode={addOn.addOnCode}
+              key={addOn.addOnCode}
+              isAnnual={Boolean(subscription.plan.annual)}
+              handleCancelClick={handleCancelClick}
+              pendingCancellation={
+                subscription.pendingPlan !== undefined &&
+                (subscription.pendingPlan.addOns ?? []).every(
+                  pendingAddOn => pendingAddOn.code !== addOn.addOnCode
+                )
+              }
+              displayPrice={addOnsDisplayPrices[addOn.addOnCode]}
+              nextBillingDate={subscription.payment.nextPaymentDueDate}
+            />
+          ))}
+          {hasAiAssistViaWritefull && <WritefullManagedBundleAddOn />}
+        </>
       ) : (
         <p>{t('you_dont_have_any_add_ons_on_your_account')}</p>
       )}

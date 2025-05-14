@@ -16,6 +16,7 @@ import {
 } from 'react-bootstrap-5'
 import FormText from '@/features/ui/components/bootstrap-5/form/form-text'
 import Button from '@/features/ui/components/bootstrap-5/button'
+import PoNumber from '@/features/group-management/components/add-seats/po-number'
 import CostSummary from '@/features/group-management/components/add-seats/cost-summary'
 import RequestStatus from '@/features/group-management/components/request-status'
 import useAsync from '@/shared/hooks/use-async'
@@ -29,8 +30,10 @@ import {
 } from '../../../../../../types/subscription/subscription-change-preview'
 import { MergeAndOverride, Nullable } from '../../../../../../types/utils'
 import { sendMB } from '../../../../infrastructure/event-tracking'
+import { useFeatureFlag } from '@/shared/context/split-test-context'
 
 export const MAX_NUMBER_OF_USERS = 20
+export const MAX_NUMBER_OF_PO_NUMBER_CHARACTERS = 50
 
 type CostSummaryData = MergeAndOverride<
   SubscriptionChangePreview,
@@ -43,8 +46,13 @@ function AddSeats() {
   const subscriptionId = getMeta('ol-subscriptionId')
   const totalLicenses = Number(getMeta('ol-totalLicenses'))
   const isProfessional = getMeta('ol-isProfessional')
+  const isCollectionMethodManual = getMeta('ol-isCollectionMethodManual')
   const [addSeatsInputError, setAddSeatsInputError] = useState<string>()
+  const [poNumberInputError, setPoNumberInputError] = useState<string>()
   const [shouldContactSales, setShouldContactSales] = useState(false)
+  const isFlexibleGroupLicensingForManuallyBilledSubscriptions = useFeatureFlag(
+    'flexible-group-licensing-for-manually-billed-subscriptions'
+  )
   const controller = useAbortController()
   const { signal: addSeatsSignal } = useAbortController()
   const { signal: contactSalesSignal } = useAbortController()
@@ -119,6 +127,38 @@ function AddSeats() {
     }
   }
 
+  const poNumberValidationSchema = useMemo(() => {
+    return yup
+      .string()
+      .matches(
+        /^[\p{L}\p{N}]*$/u,
+        t('po_number_can_include_digits_and_letters_only')
+      )
+      .max(
+        MAX_NUMBER_OF_PO_NUMBER_CHARACTERS,
+        t('po_number_must_not_exceed_x_characters', {
+          count: MAX_NUMBER_OF_PO_NUMBER_CHARACTERS,
+        })
+      )
+  }, [t])
+
+  const validatePoNumber = async (value: string | undefined) => {
+    try {
+      await poNumberValidationSchema.validate(value)
+      setPoNumberInputError(undefined)
+
+      return true
+    } catch (error) {
+      if (error instanceof yup.ValidationError) {
+        setPoNumberInputError(error.errors[0])
+      } else {
+        debugConsole.error(error)
+      }
+
+      return false
+    }
+  }
+
   const handleSeatsChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value === '' ? undefined : e.target.value
     const isValidSeatsNumber = await validateSeats(value)
@@ -151,8 +191,14 @@ function AddSeats() {
       formData.get('seats') === ''
         ? undefined
         : (formData.get('seats') as string)
+    const poNumber = !formData.get('po_number')
+      ? undefined
+      : (formData.get('po_number') as string)
 
-    if (!(await validateSeats(rawSeats))) {
+    if (
+      !(await validateSeats(rawSeats)) ||
+      !(await validatePoNumber(poNumber))
+    ) {
       return
     }
 
@@ -166,6 +212,7 @@ function AddSeats() {
           signal: contactSalesSignal,
           body: {
             adding: rawSeats,
+            poNumber,
           },
         }
       )
@@ -176,7 +223,10 @@ function AddSeats() {
       })
       const post = postJSON('/user/subscription/group/add-users/create', {
         signal: addSeatsSignal,
-        body: { adding: Number(rawSeats) },
+        body: {
+          adding: Number(rawSeats),
+          poNumber,
+        },
       })
       runAsyncAddSeats(post)
         .then(() => {
@@ -323,6 +373,13 @@ function AddSeats() {
                       <FormText type="error">{addSeatsInputError}</FormText>
                     )}
                   </FormGroup>
+                  {isFlexibleGroupLicensingForManuallyBilledSubscriptions &&
+                    isCollectionMethodManual && (
+                      <PoNumber
+                        error={poNumberInputError}
+                        validate={validatePoNumber}
+                      />
+                    )}
                 </div>
                 <CostSummarySection
                   isLoadingCostSummary={isLoadingCostSummary}

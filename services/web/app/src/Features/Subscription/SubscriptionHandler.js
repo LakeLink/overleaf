@@ -12,9 +12,10 @@ const EmailHandler = require('../Email/EmailHandler')
 const { callbackify } = require('@overleaf/promise-utils')
 const UserUpdater = require('../User/UserUpdater')
 const { NotFoundError } = require('../Errors/Errors')
+const Modules = require('../../infrastructure/Modules')
 
 /**
- * @import { RecurlySubscription, RecurlySubscriptionChange } from './RecurlyEntities'
+ * @import { PaymentProviderSubscription, PaymentProviderSubscriptionChange } from './PaymentProviderEntities'
  */
 
 async function validateNoSubscriptionInRecurly(userId) {
@@ -69,7 +70,7 @@ async function createSubscription(user, subscriptionDetails, recurlyTokenIds) {
  *
  * @param {string} userId
  * @param {string} planCode
- * @return {Promise<RecurlySubscriptionChange>}
+ * @return {Promise<PaymentProviderSubscriptionChange>}
  */
 async function previewSubscriptionChange(userId, planCode) {
   const subscription = await getSubscriptionForUser(userId)
@@ -82,9 +83,8 @@ async function previewSubscriptionChange(userId, planCode) {
 /**
  * @param user
  * @param planCode
- * @param couponCode
  */
-async function updateSubscription(user, planCode, couponCode) {
+async function updateSubscription(user, planCode) {
   let hasSubscription = false
   let subscription
 
@@ -101,30 +101,18 @@ async function updateSubscription(user, planCode, couponCode) {
   if (
     !hasSubscription ||
     subscription == null ||
-    subscription.recurlySubscription_id == null
+    (subscription.recurlySubscription_id == null &&
+      subscription.paymentProvider?.subscriptionId == null)
   ) {
     return
   }
-  const recurlySubscriptionId = subscription.recurlySubscription_id
 
-  if (couponCode) {
-    const usersSubscription = await RecurlyWrapper.promises.getSubscription(
-      recurlySubscriptionId,
-      { includeAccount: true }
-    )
-
-    await RecurlyWrapper.promises.redeemCoupon(
-      usersSubscription.account.account_code,
-      couponCode
-    )
-  }
-
-  const recurlySubscription = await RecurlyClient.promises.getSubscription(
-    recurlySubscriptionId
+  await Modules.promises.hooks.fire(
+    'updatePaidSubscription',
+    subscription,
+    planCode,
+    user._id
   )
-  const changeRequest = recurlySubscription.getRequestForPlanChange(planCode)
-  await RecurlyClient.promises.applySubscriptionChangeRequest(changeRequest)
-  await syncSubscription({ uuid: recurlySubscriptionId }, user._id)
 }
 
 /**
@@ -135,8 +123,9 @@ async function cancelPendingSubscriptionChange(user) {
     await LimitationsManager.promises.userHasSubscription(user)
 
   if (hasSubscription && subscription != null) {
-    await RecurlyClient.promises.removeSubscriptionChangeByUuid(
-      subscription.recurlySubscription_id
+    await Modules.promises.hooks.fire(
+      'cancelPendingPaidSubscriptionChange',
+      subscription
     )
   }
 }
@@ -149,10 +138,7 @@ async function cancelSubscription(user) {
     const { hasSubscription, subscription } =
       await LimitationsManager.promises.userHasSubscription(user)
     if (hasSubscription && subscription != null) {
-      await RecurlyClient.promises.cancelSubscriptionByUuid(
-        subscription.recurlySubscription_id
-      )
-      await _updateSubscriptionFromRecurly(subscription)
+      await Modules.promises.hooks.fire('cancelPaidSubscription', subscription)
       const emailOpts = {
         to: user.email,
         first_name: user.first_name,
@@ -180,10 +166,10 @@ async function reactivateSubscription(user) {
     const { hasSubscription, subscription } =
       await LimitationsManager.promises.userHasSubscription(user)
     if (hasSubscription && subscription != null) {
-      await RecurlyClient.promises.reactivateSubscriptionByUuid(
-        subscription.recurlySubscription_id
+      await Modules.promises.hooks.fire(
+        'reactivatePaidSubscription',
+        subscription
       )
-      await _updateSubscriptionFromRecurly(subscription)
       EmailHandler.sendEmail(
         'reactivatedSubscription',
         { to: user.email },
@@ -267,23 +253,12 @@ async function extendTrial(subscription, daysToExend) {
   )
 }
 
-async function _updateSubscriptionFromRecurly(subscription) {
-  const recurlySubscription = await RecurlyWrapper.promises.getSubscription(
-    subscription.recurlySubscription_id,
-    {}
-  )
-  await SubscriptionUpdater.promises.updateSubscriptionFromRecurly(
-    recurlySubscription,
-    subscription
-  )
-}
-
 /**
  * Preview the effect of purchasing an add-on
  *
  * @param {string} userId
  * @param {string} addOnCode
- * @return {Promise<RecurlySubscriptionChange>}
+ * @return {Promise<PaymentProviderSubscriptionChange>}
  */
 async function previewAddonPurchase(userId, addOnCode) {
   const subscription = await getSubscriptionForUser(userId)
@@ -353,7 +328,7 @@ async function removeAddon(userId, addOnCode) {
  * Throws a NotFoundError if the subscription can't be found
  *
  * @param {string} userId
- * @return {Promise<RecurlySubscription>}
+ * @return {Promise<PaymentProviderSubscription>}
  */
 async function getSubscriptionForUser(userId) {
   const subscription =

@@ -43,7 +43,9 @@ describe('<FigureModal />', function () {
     const scope = mockScope(content)
     scope.editor.showVisual = true
 
-    const FileTreePathProvider: FC = ({ children }) => (
+    const FileTreePathProvider: FC<React.PropsWithChildren> = ({
+      children,
+    }) => (
       <FileTreePathContext.Provider
         value={{
           dirname: cy.stub(),
@@ -126,7 +128,7 @@ describe('<FigureModal />', function () {
     })
 
     it('Lists files from project', function () {
-      cy.findByRole('textbox', { name: 'Image file' }).click()
+      cy.findByRole('combobox', { name: 'Image file' }).click()
       cy.findByRole('listbox')
         .children()
         .should('have.length', 2)
@@ -137,7 +139,7 @@ describe('<FigureModal />', function () {
 
     it('Enables insert button when choosing file', function () {
       cy.findByRole('button', { name: 'Insert figure' }).should('be.disabled')
-      cy.findByRole('textbox', { name: 'Image file' }).click()
+      cy.findByRole('combobox', { name: 'Image file' }).click()
       cy.findByRole('listbox').within(() => {
         cy.findByText('frog.jpg').click()
       })
@@ -145,7 +147,7 @@ describe('<FigureModal />', function () {
     })
 
     it('Inserts file when pressing insert button', function () {
-      cy.findByRole('textbox', { name: 'Image file' }).click()
+      cy.findByRole('combobox', { name: 'Image file' }).click()
       cy.findByRole('listbox').within(() => {
         cy.findByText('frog.jpg').click()
       })
@@ -166,8 +168,8 @@ describe('<FigureModal />', function () {
       cy.findByRole('menu').within(() => {
         cy.findByRole('button', { name: 'From another project' }).click()
       })
-      cy.findByRole('textbox', { name: 'Project' }).as('project-dropdown')
-      cy.findByRole('textbox', { name: 'Image file' }).as('file-dropdown')
+      cy.findByRole('combobox', { name: 'Project' }).as('project-dropdown')
+      cy.findByRole('combobox', { name: 'Image file' }).as('file-dropdown')
     })
 
     it('List projects and files in projects', function () {
@@ -203,6 +205,19 @@ describe('<FigureModal />', function () {
       cy.findByRole('button', { name: 'Insert figure' }).should('be.enabled')
     })
 
+    it('Closes project dropdown on pressing Esc key but leaves modal open', function () {
+      cy.findByRole('button', { name: 'Insert figure' }).should('be.disabled')
+      cy.get('@project-dropdown').click()
+      cy.findByRole('listbox').should('exist')
+      cy.get('@project-dropdown').type('{esc}', { force: true })
+      cy.findByRole('listbox').should('not.exist')
+      cy.findByRole('dialog').should('exist')
+
+      // Check that a subsequent press of the Esc key closes the modal
+      cy.get('@project-dropdown').type('{esc}', { force: true })
+      cy.findByRole('dialog').should('not.exist')
+    })
+
     it('Creates linked file when pressing insert', function () {
       cy.get('@project-dropdown').click()
       cy.findByRole('listbox').within(() => {
@@ -235,7 +250,7 @@ describe('<FigureModal />', function () {
         cy.findByRole('option', { name: 'My first project' }).click()
       })
       cy.findByRole('button', { name: 'select from output files' }).click()
-      cy.findByRole('textbox', { name: 'Output file' }).click()
+      cy.findByRole('combobox', { name: 'Output file' }).click()
       cy.findByRole('listbox').within(() => {
         cy.findByRole('option', { name: 'output.pdf' }).click()
       })
@@ -298,7 +313,7 @@ describe('<FigureModal />', function () {
       cy.findByRole('menu').within(() => {
         cy.findByText('From another project').click()
       })
-      cy.findByRole('textbox', { name: 'Project' }).click()
+      cy.findByRole('combobox', { name: 'Project' }).click()
       cy.findByRole('listbox').within(() => {
         cy.findByRole('option', { name: 'My first project' }).click()
       })
@@ -322,7 +337,7 @@ describe('<FigureModal />', function () {
       })
       expectNoOutputSwitch()
       it('should show output file selector', function () {
-        cy.findByRole('textbox', { name: 'Output file' }).click()
+        cy.findByRole('combobox', { name: 'Output file' }).click()
         cy.findByRole('listbox').within(() => {
           cy.findByRole('option', { name: 'output.pdf' }).click()
         })
@@ -341,7 +356,7 @@ describe('<FigureModal />', function () {
       expectNoOutputSwitch()
 
       it('should show source file selector', function () {
-        cy.findByRole('textbox', { name: 'Image file' }).click()
+        cy.findByRole('combobox', { name: 'Image file' }).click()
         cy.findByRole('listbox').within(() => {
           cy.findByRole('option', { name: 'frog.jpg' }).click()
         })
@@ -532,7 +547,7 @@ describe('<FigureModal />', function () {
       cy.findByText('Done').click()
       cy.get('.cm-content').should(
         'have.text',
-        '\\begin{figure}\\centering\\end{figure}'
+        '\\begin{figure}\\centering\\includegraphics[width=0.75\\linewidth]{frog.jpg}\\end{figure}'
       )
     })
 
@@ -554,7 +569,7 @@ describe('<FigureModal />', function () {
       cy.findByText('Done').click()
       cy.get('.cm-content').should(
         'have.text',
-        '\\begin{figure}\\centering🏷fig:my-label\\end{figure}'
+        '\\begin{figure}\\centering\\includegraphics[width=0.75\\linewidth]{frog.jpg}🏷fig:my-label\\end{figure}'
       )
     })
 

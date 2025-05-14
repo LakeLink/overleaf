@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useCallback, useEffect, useRef } from 'react'
 import ReactDOM from 'react-dom'
 import {
   Dropdown,
@@ -13,30 +13,34 @@ function FileTreeContextMenu() {
   const { fileTreeReadOnly } = useFileTreeData()
   const { contextMenuCoords, setContextMenuCoords } = useFileTreeMainContext()
   const toggleButtonRef = useRef<HTMLButtonElement | null>(null)
+  const keyboardInputRef = useRef(false)
 
   useEffect(() => {
     if (contextMenuCoords) {
       toggleButtonRef.current = document.querySelector(
         '.entity-menu-toggle'
       ) as HTMLButtonElement | null
-      focusContextMenu()
     }
   }, [contextMenuCoords])
 
-  if (!contextMenuCoords || fileTreeReadOnly) return null
+  useEffect(() => {
+    if (contextMenuCoords && keyboardInputRef.current) {
+      const firstDropdownMenuItem = document.querySelector(
+        '#dropdown-file-tree-context-menu .dropdown-item:not([disabled])'
+      ) as HTMLButtonElement | null
 
-  // A11y - Move the focus to the context menu when it opens
-  function focusContextMenu() {
-    const BS3contextMenu = document.querySelector(
-      '[aria-labelledby="dropdown-file-tree-context-menu"]'
-    ) as HTMLElement | null
-    BS3contextMenu?.focus()
-  }
+      if (firstDropdownMenuItem) {
+        firstDropdownMenuItem.focus()
+      }
+    }
+  }, [contextMenuCoords])
 
   function close() {
+    if (!contextMenuCoords) return
     setContextMenuCoords(null)
+
     if (toggleButtonRef.current) {
-      // A11y - Move the focus back to the toggle button when the context menu closes by pressing the Esc key
+      // A11y - Focus moves back to the trigger button when the context menu is dismissed
       toggleButtonRef.current.focus()
     }
   }
@@ -45,13 +49,32 @@ function FileTreeContextMenu() {
     if (!wantOpen) close()
   }
 
-  // A11y - Close the context menu when the user presses the Tab key
-  // Focus should move to the next element in the filetree
-  function handleKeyDown(event: React.KeyboardEvent<Element>) {
-    if (event.key === 'Tab') {
+  function handleClose(event: React.KeyboardEvent<Element>) {
+    if (event.key === 'Tab' || event.key === 'Escape') {
+      event.preventDefault()
       close()
     }
   }
+
+  const handleKeyDown = useCallback(() => {
+    keyboardInputRef.current = true
+  }, [])
+
+  const handleMouseDown = useCallback(() => {
+    keyboardInputRef.current = false
+  }, [])
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeyDown)
+    document.addEventListener('mousedown', handleMouseDown)
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('mousedown', handleMouseDown)
+    }
+  }, [handleKeyDown, handleMouseDown])
+
+  if (!contextMenuCoords || fileTreeReadOnly) return null
 
   return ReactDOM.createPortal(
     <div style={contextMenuCoords} className="context-menu">
@@ -63,8 +86,7 @@ function FileTreeContextMenu() {
             ? 'up'
             : 'down'
         }
-        focusFirstItemOnShow // A11y - Focus the first item in the context menu when it opens since the menu is rendered at the root level
-        onKeyDown={handleKeyDown}
+        onKeyDown={handleClose}
         onToggle={handleToggle}
       >
         <DropdownMenu
@@ -78,15 +100,5 @@ function FileTreeContextMenu() {
     document.body
   )
 }
-
-// fake component required as Dropdowns require a Toggle, even tho we don't want
-// one for the context menu
-const FakeDropDownToggle = React.forwardRef<undefined, { bsRole: string }>(
-  ({ bsRole }, ref) => {
-    return null
-  }
-)
-
-FakeDropDownToggle.displayName = 'FakeDropDownToggle'
 
 export default FileTreeContextMenu

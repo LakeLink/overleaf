@@ -18,6 +18,7 @@ export type ProjectContextValue = {
   rootDocId?: string
   mainBibliographyDocId?: string
   compiler: string
+  imageName: string
   members: ProjectContextMember[]
   invites: ProjectContextMember[]
   features: {
@@ -49,6 +50,7 @@ export type ProjectContextValue = {
   }[]
   trackChangesState: boolean | Record<UserId | '__guests__', boolean>
   projectSnapshot: ProjectSnapshot
+  joinedOnce: boolean
 }
 
 export type ProjectContextUpdateValue = Partial<ProjectContextValue>

@@ -23,9 +23,11 @@ export function createToolbarPanel() {
 }
 
 const toolbarTheme = EditorView.theme({
-  '.ol-cm-toolbar': {
+  '.ol-cm-toolbar-wrapper': {
     backgroundColor: 'var(--editor-toolbar-bg)',
     color: 'var(--toolbar-btn-color)',
+  },
+  '.ol-cm-toolbar': {
     flex: 1,
     display: 'flex',
     overflowX: 'hidden',
@@ -56,6 +58,26 @@ const toolbarTheme = EditorView.theme({
         borderBottomColor: 'var(--editor-toolbar-bg)',
       },
     },
+  },
+  '.ol-cm-toolbar-header': {
+    color: 'var(--toolbar-btn-color)',
+  },
+  '.ol-cm-toolbar-dropdown-divider': {
+    borderBottom: '1px solid',
+    borderColor: 'var(--toolbar-dropdown-divider-color)',
+  },
+  // here render both the icons, and hide one depending on if its dark or light mode with &.overall-theme-dark
+  '.ol-cm-toolbar-ai-sparkle-gradient': {
+    display: 'block',
+  },
+  '.ol-cm-toolbar-ai-sparkle-white': {
+    display: 'none',
+  },
+  '&.overall-theme-dark .ol-cm-toolbar-ai-sparkle-gradient': {
+    display: 'none',
+  },
+  '&.overall-theme-dark .ol-cm-toolbar-ai-sparkle-white': {
+    display: 'block',
   },
   '.ol-cm-toolbar-button-menu-popover': {
     backgroundColor: 'initial',

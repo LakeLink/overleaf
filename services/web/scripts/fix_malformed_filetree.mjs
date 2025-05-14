@@ -8,13 +8,16 @@
  */
 import mongodb from 'mongodb-legacy'
 import { db } from '../app/src/infrastructure/mongodb.js'
-import ProjectLocator from '../app/src/Features/Project/ProjectLocator.js'
+import ProjectLocator, {
+  findDeep,
+} from '../app/src/Features/Project/ProjectLocator.js'
 import minimist from 'minimist'
 import readline from 'node:readline'
 import fs from 'node:fs'
 import logger from '@overleaf/logger'
 
 const { ObjectId } = mongodb
+const lastUpdated = new Date()
 
 const argv = minimist(process.argv.slice(2), {
   string: ['logs'],
@@ -72,7 +75,7 @@ async function processBadPath(projectId, mongoPath, _id) {
   if (isRootFolder(mongoPath)) {
     modifiedCount = await fixRootFolder(projectId)
   } else if (isArrayElement(mongoPath)) {
-    modifiedCount = await removeNulls(projectId, parentPath(mongoPath))
+    modifiedCount = await removeNulls(projectId, _id)
   } else if (isArray(mongoPath)) {
     modifiedCount = await fixArray(projectId, mongoPath)
   } else if (isFolderId(mongoPath)) {
@@ -83,7 +86,7 @@ async function processBadPath(projectId, mongoPath, _id) {
       parentPath(parentPath(mongoPath))
     )
   } else if (isName(mongoPath)) {
-    modifiedCount = await fixName(projectId, mongoPath)
+    modifiedCount = await fixName(projectId, _id)
   } else if (isHash(mongoPath)) {
     console.error(`Missing file hash: ${projectId}/${_id} (${mongoPath})`)
     console.error('SaaS: likely needs filestore restore')
@@ -155,6 +158,8 @@ async function fixRootFolder(projectId) {
             fileRefs: [],
           },
         ],
+        lastUpdated,
+        lastUpdatedBy: null, // unset lastUpdatedBy
       },
     }
   )
@@ -164,10 +169,30 @@ async function fixRootFolder(projectId) {
 /**
  * Remove all nulls from the given docs/files/folders array
  */
-async function removeNulls(projectId, path) {
+async function removeNulls(projectId, _id) {
+  if (!_id) {
+    throw new Error('missing _id')
+  }
+  const project = await db.projects.findOne(
+    { _id: new ObjectId(projectId) },
+    { projection: { rootFolder: 1 } }
+  )
+  const foundResult = findDeep(project, obj => obj?._id?.toString() === _id)
+  if (!foundResult) return
+  const { path } = foundResult
   const result = await db.projects.updateOne(
-    { _id: new ObjectId(projectId), [path]: { $type: 'array' } },
-    { $pull: { [path]: null } }
+    { _id: new ObjectId(projectId) },
+    {
+      $pull: {
+        [`${path}.folders`]: null,
+        [`${path}.docs`]: null,
+        [`${path}.fileRefs`]: null,
+      },
+      $set: {
+        lastUpdated,
+        lastUpdatedBy: null, // unset lastUpdatedBy
+      },
+    }
   )
   return result.modifiedCount
 }
@@ -178,7 +203,7 @@ async function removeNulls(projectId, path) {
 async function fixArray(projectId, path) {
   const result = await db.projects.updateOne(
     { _id: new ObjectId(projectId), [path]: { $not: { $type: 'array' } } },
-    { $set: { [path]: [] } }
+    { $set: { [path]: [], lastUpdated, lastUpdatedBy: null } }
   )
   return result.modifiedCount
 }
@@ -189,7 +214,13 @@ async function fixArray(projectId, path) {
 async function fixFolderId(projectId, path) {
   const result = await db.projects.updateOne(
     { _id: new ObjectId(projectId), [path]: { $exists: false } },
-    { $set: { [path]: new ObjectId() } }
+    {
+      $set: {
+        [path]: new ObjectId(),
+        lastUpdated,
+        lastUpdatedBy: null, // unset lastUpdatedBy
+      },
+    }
   )
   return result.modifiedCount
 }
@@ -200,7 +231,13 @@ async function fixFolderId(projectId, path) {
 async function removeElementsWithoutIds(projectId, path) {
   const result = await db.projects.updateOne(
     { _id: new ObjectId(projectId), [path]: { $type: 'array' } },
-    { $pull: { [path]: { _id: null } } }
+    {
+      $pull: { [path]: { _id: null } },
+      $set: {
+        lastUpdated,
+        lastUpdatedBy: null, // unset lastUpdatedBy
+      },
+    }
   )
   return result.modifiedCount
 }
@@ -208,19 +245,32 @@ async function removeElementsWithoutIds(projectId, path) {
 /**
  * Give a name to a file/doc/folder that doesn't have one
  */
-async function fixName(projectId, path) {
+async function fixName(projectId, _id) {
+  if (!_id) {
+    throw new Error('missing _id')
+  }
   const project = await db.projects.findOne(
     { _id: new ObjectId(projectId) },
     { projection: { rootFolder: 1 } }
   )
-  const arrayPath = parentPath(parentPath(path))
-  const array = ProjectLocator.findElementByMongoPath(project, arrayPath)
-  const existingNames = new Set(array.map(x => x.name))
+  const foundResult = findDeep(project, obj => obj?._id?.toString() === _id)
+  if (!foundResult) return
+  const { path } = foundResult
+  const array = ProjectLocator.findElementByMongoPath(project, parentPath(path))
   const name =
-    path === 'rootFolder.0.name' ? 'rootFolder' : findUniqueName(existingNames)
+    path === 'rootFolder.0'
+      ? 'rootFolder'
+      : findUniqueName(new Set(array.map(x => x?.name)))
+  const pathToName = `${path}.name`
   const result = await db.projects.updateOne(
-    { _id: new ObjectId(projectId), [path]: { $in: [null, ''] } },
-    { $set: { [path]: name } }
+    { _id: new ObjectId(projectId), [pathToName]: { $in: [null, ''] } },
+    {
+      $set: {
+        [pathToName]: name,
+        lastUpdated,
+        lastUpdatedBy: null, // unset lastUpdatedBy
+      },
+    }
   )
   return result.modifiedCount
 }

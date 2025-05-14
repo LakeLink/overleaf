@@ -1,6 +1,8 @@
 import AddSeats, {
   MAX_NUMBER_OF_USERS,
+  MAX_NUMBER_OF_PO_NUMBER_CHARACTERS,
 } from '@/features/group-management/components/add-seats/add-seats'
+import { SplitTestProvider } from '@/shared/context/split-test-context'
 
 describe('<AddSeats />', function () {
   beforeEach(function () {
@@ -11,9 +13,17 @@ describe('<AddSeats />', function () {
       win.metaAttributesCache.set('ol-subscriptionId', '123')
       win.metaAttributesCache.set('ol-totalLicenses', this.totalLicenses)
       win.metaAttributesCache.set('ol-isProfessional', false)
+      win.metaAttributesCache.set('ol-isCollectionMethodManual', true)
+      win.metaAttributesCache.set('ol-splitTestVariants', {
+        'flexible-group-licensing-for-manually-billed-subscriptions': 'enabled',
+      })
     })
 
-    cy.mount(<AddSeats />)
+    cy.mount(
+      <SplitTestProvider>
+        <AddSeats />
+      </SplitTestProvider>
+    )
 
     cy.findByRole('button', { name: /buy licenses/i })
     cy.findByTestId('add-more-users-group-form')
@@ -68,6 +78,52 @@ describe('<AddSeats />', function () {
     )
   })
 
+  describe('PO number', function () {
+    it('should not render the PO checkbox and PO input if collection method is not manual', function () {
+      cy.window().then(win => {
+        win.metaAttributesCache.set('ol-isCollectionMethodManual', false)
+      })
+      cy.mount(
+        <SplitTestProvider>
+          <AddSeats />
+        </SplitTestProvider>
+      )
+
+      cy.findByLabelText(/i want to add a po number/i).should('not.exist')
+      cy.findByLabelText(/^po number$/i).should('not.exist')
+    })
+
+    it('should check the PO checkbox in order to activate the PO input field', function () {
+      cy.findByLabelText(/^po number$/i).should('not.exist')
+      cy.findByLabelText(/i want to add a po number/i).check()
+      cy.findByLabelText(/^po number$/i)
+    })
+
+    describe('validation', function () {
+      beforeEach(function () {
+        cy.findByLabelText(/i want to add a po number/i).check()
+      })
+
+      it('should show max characters error', function () {
+        const totalCharacters = 'a'.repeat(
+          MAX_NUMBER_OF_PO_NUMBER_CHARACTERS + 1
+        )
+        cy.findByLabelText(/^po number$/i).type(totalCharacters)
+        cy.findByText(
+          new RegExp(
+            `po number must not exceed ${MAX_NUMBER_OF_PO_NUMBER_CHARACTERS} characters`,
+            'i'
+          )
+        )
+      })
+
+      it('should show letters and numbers only error', function () {
+        cy.findByLabelText(/^po number$/i).type('🚧')
+        cy.findByText(/po number can include digits and letters only/i)
+      })
+    })
+  })
+
   describe('"Upgrade my plan" link', function () {
     it('shows the link', function () {
       cy.findByRole('link', { name: /upgrade my plan/i }).should(
@@ -82,7 +138,11 @@ describe('<AddSeats />', function () {
         win.metaAttributesCache.set('ol-isProfessional', true)
       })
 
-      cy.mount(<AddSeats />)
+      cy.mount(
+        <SplitTestProvider>
+          <AddSeats />
+        </SplitTestProvider>
+      )
 
       cy.findByRole('link', { name: /upgrade my plan/i }).should('not.exist')
     })
@@ -216,6 +276,7 @@ describe('<AddSeats />', function () {
             },
           },
           currency: 'USD',
+          netTerms: 30,
           immediateCharge: {
             subtotal: 100,
             tax: 20,
@@ -241,13 +302,16 @@ describe('<AddSeats />', function () {
         cy.findByRole('button', { name: /send request/i }).should('not.exist')
       })
 
-      it('renders the preview data', function () {
+      function makeRequest(body: object, inputValue: string) {
         cy.intercept('POST', '/user/subscription/group/add-users/preview', {
           statusCode: 200,
-          body: this.body,
+          body,
         }).as('addUsersRequest')
-        cy.get('@input').type(this.adding.toString())
+        cy.get('@input').type(inputValue)
+      }
 
+      it('renders common preview data content', function () {
+        makeRequest(this.body, this.adding.toString())
         cy.findByTestId('cost-summary').within(() => {
           cy.contains(
             new RegExp(
@@ -279,7 +343,6 @@ describe('<AddSeats />', function () {
           cy.findByTestId('discount').should('not.exist')
 
           cy.findByTestId('total').within(() => {
-            cy.findByText(/total due today/i)
             cy.findByTestId('price').should(
               'have.text',
               `$${this.body.immediateCharge.total}.00`
@@ -287,12 +350,46 @@ describe('<AddSeats />', function () {
           })
 
           cy.findByText(
-            /we’ll charge you now for the cost of your additional licenses based on the remaining months of your current subscription/i
-          )
-          cy.findByText(
             /after that, we’ll bill you \$1,000\.00 \(\$895\.00 \+ \$105\.00 tax\) annually on December 1, unless you cancel/i
           )
         })
+      })
+
+      it('renders the preview data with manually billed subscription', function () {
+        makeRequest(this.body, this.adding.toString())
+        cy.findByTestId('cost-summary').within(() => {
+          cy.findByTestId('total').within(() => {
+            cy.findByText(
+              new RegExp(`total due in ${this.body.netTerms} days`, 'i')
+            )
+          })
+        })
+        cy.findByText(
+          new RegExp(
+            `we’ll invoice you now for the additional licences based on the remaining months of your current subscription, and payment will be due in ${this.body.netTerms} days`,
+            'i'
+          )
+        )
+      })
+
+      it('renders the preview data with automatically billed subscription', function () {
+        cy.window().then(win => {
+          win.metaAttributesCache.set('ol-isCollectionMethodManual', false)
+        })
+        cy.mount(
+          <SplitTestProvider>
+            <AddSeats />
+          </SplitTestProvider>
+        )
+        makeRequest(this.body, this.adding.toString())
+        cy.findByTestId('cost-summary').within(() => {
+          cy.findByTestId('total').within(() => {
+            cy.findByText(/total due today/i)
+          })
+        })
+        cy.findByText(
+          /we’ll charge you now for the cost of your additional licenses based on the remaining months of your current subscription/i
+        )
       })
 
       it('renders the preview data with discount', function () {
@@ -325,16 +422,23 @@ describe('<AddSeats />', function () {
         })
 
         function makeRequest(statusCode: number, adding: string) {
+          const PO_NUMBER = 'PO123456789'
           cy.intercept('POST', '/user/subscription/group/add-users/create', {
             statusCode,
           }).as('addUsersRequest')
           cy.get('@input').type(adding)
+          cy.findByLabelText(/i want to add a po number/i).check()
+          cy.findByLabelText(/^po number$/i).type(PO_NUMBER)
           cy.get('@addUsersBtn').click()
+
+          const body = {
+            adding: Number(adding),
+            poNumber: PO_NUMBER,
+          }
           cy.get('@addUsersRequest')
             .its('request.body')
-            .should('deep.equal', {
-              adding: Number(adding),
-            })
+            .should('deep.equal', body)
+            .and('have.keys', Object.keys(body))
           cy.findByTestId('add-more-users-group-form').should('not.exist')
         }
 

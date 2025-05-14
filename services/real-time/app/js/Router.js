@@ -113,6 +113,10 @@ module.exports = Router = {
       bodyParser.json({ limit: '5mb' }),
       HttpApiController.sendMessage
     )
+    app.get(
+      '/project/:projectId/count-connected-clients',
+      HttpApiController.countConnectedClients
+    )
 
     app.post('/drain', HttpApiController.startDrain)
     app.post(
@@ -579,7 +583,6 @@ module.exports = Router = {
             if (err) {
               Router._handleError(callback, err, client, 'applyOtUpdate', {
                 doc_id: docId,
-                update,
               })
             } else {
               callback()

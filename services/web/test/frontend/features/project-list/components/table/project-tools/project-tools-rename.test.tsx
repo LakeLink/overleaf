@@ -1,11 +1,9 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { expect } from 'chai'
 import moment from 'moment/moment'
 import fetchMock from 'fetch-mock'
 import { Project } from '../../../../../../../types/project/dashboard/api'
 import { ProjectListRootInner } from '@/features/project-list/components/project-list-root'
-import * as bootstrapUtils from '@/features/utils/bootstrap-5'
-import sinon, { type SinonStub } from 'sinon'
 
 const users = {
   picard: {
@@ -48,15 +46,6 @@ const projects: Project[] = [
 ]
 
 describe('<ProjectTools />', function () {
-  let isBootstrap5Stub: SinonStub
-
-  before(function () {
-    isBootstrap5Stub = sinon.stub(bootstrapUtils, 'isBootstrap5').returns(true)
-  })
-
-  after(function () {
-    isBootstrap5Stub.restore()
-  })
   beforeEach(function () {
     window.metaAttributesCache.set('ol-user', {})
     window.metaAttributesCache.set('ol-prefetchedProjectsBlob', {
@@ -76,27 +65,33 @@ describe('<ProjectTools />', function () {
 
   afterEach(function () {
     window.metaAttributesCache.clear()
-    fetchMock.reset()
+    fetchMock.removeRoutes().clearHistory()
   })
 
-  it('does not show the Rename option for a project owned by a different user', function () {
+  it('does not show the Rename option for a project owned by a different user', async function () {
     render(<ProjectListRootInner />)
     screen.getByLabelText('Select Starfleet Report (readAndWrite)').click()
     screen.getByRole('button', { name: 'More' }).click()
-    expect(
-      within(
-        screen.getByTestId('project-tools-more-dropdown-menu')
-      ).queryByRole('menuitem', { name: 'Rename' })
-    ).to.be.null
+    await waitFor(
+      () =>
+        expect(
+          within(
+            screen.getByTestId('project-tools-more-dropdown-menu')
+          ).queryByRole('menuitem', { name: 'Rename' })
+        ).to.be.null
+    )
   })
 
-  it('displays the Rename option for a project owned by the current user', function () {
+  it('displays the Rename option for a project owned by the current user', async function () {
     render(<ProjectListRootInner />)
     screen.getByLabelText('Select Starfleet Report (owner)').click()
     screen.getByRole('button', { name: 'More' }).click()
-    within(screen.getByTestId('project-tools-more-dropdown-menu'))
-      .getByRole('menuitem', { name: 'Rename' })
-      .click()
-    within(screen.getByRole('dialog')).getByText('Rename Project')
+    const menu = await screen.findByTestId('project-tools-more-dropdown-menu')
+    const menuItem = within(menu).getByRole('menuitem', {
+      name: 'Rename',
+    })
+    menuItem.click()
+    const dialog = await screen.findByRole('dialog')
+    within(dialog).getByText('Rename Project')
   })
 })

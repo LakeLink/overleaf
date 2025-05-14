@@ -38,6 +38,9 @@ const settings = {
         connectedUser({ project_id, client_id }) {
           return `connected_user:{${project_id}}:${client_id}`
         },
+        projectNotEmptySince({ projectId }) {
+          return `projectNotEmptySince:{${projectId}}`
+        },
       },
       maxRetriesPerRequest: parseInt(
         process.env.REAL_TIME_REDIS_MAX_RETRIES_PER_REQUEST ||
@@ -170,6 +173,7 @@ const settings = {
   behindProxy: process.env.BEHIND_PROXY === 'true',
   trustedProxyIps: process.env.TRUSTED_PROXY_IPS,
   keepAliveTimeoutMs: parseInt(process.env.KEEPALIVE_TIMEOUT_MS ?? '5000', 10),
+  allowedCorsOrigins: process.env.REAL_TIME_ALLOWED_CORS_ORIGINS,
 }
 
 // console.log settings.redis

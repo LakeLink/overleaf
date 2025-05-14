@@ -1,6 +1,6 @@
 import { expect } from 'chai'
 import { cloneDeep } from 'lodash'
-import { renderHook } from '@testing-library/react-hooks'
+import { renderHook, waitFor } from '@testing-library/react'
 import {
   EmailContextType,
   UserEmailsProvider,
@@ -26,7 +26,7 @@ const renderUserEmailsContext = () =>
 
 describe('UserEmailContext', function () {
   beforeEach(function () {
-    fetchMock.reset()
+    fetchMock.removeRoutes().clearHistory()
   })
 
   describe('context bootstrap', function () {
@@ -49,14 +49,16 @@ describe('UserEmailContext', function () {
     it('should load all user emails and update the initialisation state to "success"', async function () {
       fetchMock.get(/\/user\/emails/, fakeUsersData)
       const { result } = renderUserEmailsContext()
-      await fetchMock.flush(true)
-      expect(fetchMock.calls()).to.have.lengthOf(1)
-      expect(result.current.state.data.byId).to.deep.equal({
-        'bar@overleaf.com': { ...untrustedUserData, ...confirmedUserData },
-        'baz@overleaf.com': unconfirmedUserData,
-        'foo@overleaf.com': professionalUserData,
-        'qux@overleaf.com': unconfirmedCommonsUserData,
-      })
+      await fetchMock.callHistory.flush(true)
+      expect(fetchMock.callHistory.calls()).to.have.lengthOf(1)
+      await waitFor(() =>
+        expect(result.current.state.data.byId).to.deep.equal({
+          'bar@overleaf.com': { ...untrustedUserData, ...confirmedUserData },
+          'baz@overleaf.com': unconfirmedUserData,
+          'foo@overleaf.com': professionalUserData,
+          'qux@overleaf.com': unconfirmedCommonsUserData,
+        })
+      )
       expect(result.current.state.data.linkedInstitutionIds).to.have.lengthOf(0)
 
       expect(result.current.isInitializing).to.equal(false)
@@ -66,9 +68,9 @@ describe('UserEmailContext', function () {
     it('when loading user email fails, it should update the initialisation state to "failed"', async function () {
       fetchMock.get(/\/user\/emails/, 500)
       const { result } = renderUserEmailsContext()
-      await fetchMock.flush()
+      await fetchMock.callHistory.flush()
 
-      expect(result.current.isInitializing).to.equal(false)
+      await waitFor(() => expect(result.current.isInitializing).to.equal(false))
       expect(result.current.isInitializingError).to.equal(true)
     })
 
@@ -78,12 +80,16 @@ describe('UserEmailContext', function () {
         expect(result.current.state.isLoading).to.equal(true)
       })
 
-      it('should be updated with `setLoading`', function () {
+      it('should be updated with `setLoading`', async function () {
         const { result } = renderUserEmailsContext()
         result.current.setLoading(true)
-        expect(result.current.state.isLoading).to.equal(true)
+        await waitFor(() =>
+          expect(result.current.state.isLoading).to.equal(true)
+        )
         result.current.setLoading(false)
-        expect(result.current.state.isLoading).to.equal(false)
+        await waitFor(() =>
+          expect(result.current.state.isLoading).to.equal(false)
+        )
       })
     })
   })
@@ -94,23 +100,27 @@ describe('UserEmailContext', function () {
       fetchMock.get(/\/user\/emails/, fakeUsersData)
       const value = renderUserEmailsContext()
       result = value.result
-      await fetchMock.flush(true)
+      await fetchMock.callHistory.flush(true)
     })
 
     describe('getEmails()', function () {
       beforeEach(async function () {
-        fetchMock.reset()
+        fetchMock.removeRoutes().clearHistory()
       })
 
-      it('should set `isLoading === true`', function () {
-        fetchMock.get(/\/user\/emails/, [
-          {
-            email: 'new@email.com',
-            default: true,
-          },
-        ])
+      it('should set `isLoading === true`', async function () {
+        fetchMock.get(
+          /\/user\/emails/,
+          [
+            {
+              email: 'new@email.com',
+              default: true,
+            },
+          ],
+          { delay: 100 }
+        )
         result.current.getEmails()
-        expect(result.current.state.isLoading).to.be.true
+        await waitFor(() => expect(result.current.state.isLoading).to.be.true)
       })
 
       it('requests a new set of emails', async function () {
@@ -120,10 +130,12 @@ describe('UserEmailContext', function () {
         }
         fetchMock.get(/\/user\/emails/, [emailData])
         result.current.getEmails()
-        await fetchMock.flush(true)
-        expect(result.current.state.data.byId).to.deep.equal({
-          'new@email.com': emailData,
-        })
+        await fetchMock.callHistory.flush(true)
+        await waitFor(() =>
+          expect(result.current.state.data.byId).to.deep.equal({
+            'new@email.com': emailData,
+          })
+        )
       })
 
       it('should populate `linkedInstitutionIds`', async function () {
@@ -133,43 +145,56 @@ describe('UserEmailContext', function () {
           { ...professionalUserData, samlProviderId: 'saml_provider_2' },
         ])
         const { result } = renderUserEmailsContext()
-        await fetchMock.flush(true)
-        expect(result.current.state.data.linkedInstitutionIds).to.deep.equal([
-          'saml_provider_1',
-          'saml_provider_2',
-        ])
+        await fetchMock.callHistory.flush(true)
+        await waitFor(() =>
+          expect(result.current.state.data.linkedInstitutionIds).to.deep.equal([
+            'saml_provider_1',
+            'saml_provider_2',
+          ])
+        )
       })
     })
 
     describe('makePrimary()', function () {
-      it('sets an email as `default`', function () {
+      it('sets an email as `default`', async function () {
         expect(result.current.state.data.byId['bar@overleaf.com'].default).to.be
           .false
         result.current.makePrimary('bar@overleaf.com')
-        expect(result.current.state.data.byId['bar@overleaf.com'].default).to.be
-          .true
+        await waitFor(
+          () =>
+            expect(result.current.state.data.byId['bar@overleaf.com'].default)
+              .to.be.true
+        )
       })
 
-      it('sets `default=false` for the current primary email ', function () {
+      it('sets `default=false` for the current primary email ', async function () {
         expect(result.current.state.data.byId['foo@overleaf.com'].default).to.be
           .true
         result.current.makePrimary('bar@overleaf.com')
-        expect(result.current.state.data.byId['foo@overleaf.com'].default).to.be
-          .false
+        await waitFor(
+          () =>
+            expect(result.current.state.data.byId['foo@overleaf.com'].default)
+              .to.be.false
+        )
       })
 
-      it('produces no effect when passing a non-existing email', function () {
+      it('produces no effect when passing a non-existing email', async function () {
         const emails = cloneDeep(result.current.state.data.byId)
         result.current.makePrimary('non-existing@email.com')
-        expect(result.current.state.data.byId).to.deep.equal(emails)
+        await waitFor(() =>
+          expect(result.current.state.data.byId).to.deep.equal(emails)
+        )
       })
     })
 
     describe('deleteEmail()', function () {
-      it('removes data from the deleted email', function () {
+      it('removes data from the deleted email', async function () {
         result.current.deleteEmail('bar@overleaf.com')
-        expect(result.current.state.data.byId['bar@overleaf.com']).to.be
-          .undefined
+        await waitFor(
+          () =>
+            expect(result.current.state.data.byId['bar@overleaf.com']).to.be
+              .undefined
+        )
       })
 
       it('produces no effect when passing a non-existing email', function () {
@@ -180,14 +205,20 @@ describe('UserEmailContext', function () {
     })
 
     describe('setEmailAffiliationBeingEdited()', function () {
-      it('sets an email as currently being edited', function () {
+      it('sets an email as currently being edited', async function () {
         result.current.setEmailAffiliationBeingEdited('bar@overleaf.com')
-        expect(result.current.state.data.emailAffiliationBeingEdited).to.equal(
-          'bar@overleaf.com'
+        await waitFor(() =>
+          expect(
+            result.current.state.data.emailAffiliationBeingEdited
+          ).to.equal('bar@overleaf.com')
         )
 
         result.current.setEmailAffiliationBeingEdited(null)
-        expect(result.current.state.data.emailAffiliationBeingEdited).to.be.null
+        await waitFor(
+          () =>
+            expect(result.current.state.data.emailAffiliationBeingEdited).to.be
+              .null
+        )
       })
 
       it('produces no effect when passing a non-existing email', function () {
@@ -198,15 +229,17 @@ describe('UserEmailContext', function () {
     })
 
     describe('updateAffiliation()', function () {
-      it('updates affiliation data for an email', function () {
+      it('updates affiliation data for an email', async function () {
         result.current.updateAffiliation(
           'foo@overleaf.com',
           'new role',
           'new department'
         )
-        expect(
-          result.current.state.data.byId['foo@overleaf.com'].affiliation!.role
-        ).to.equal('new role')
+        await waitFor(() =>
+          expect(
+            result.current.state.data.byId['foo@overleaf.com'].affiliation!.role
+          ).to.equal('new role')
+        )
         expect(
           result.current.state.data.byId['foo@overleaf.com'].affiliation!
             .department
@@ -257,11 +290,11 @@ describe('UserEmailContext', function () {
         const affiliatedEmail2 = cloneDeep(professionalUserData)
         affiliatedEmail2.emailHasInstitutionLicence = true
 
-        fetchMock.reset()
+        fetchMock.removeRoutes().clearHistory()
         fetchMock.get(/\/user\/emails/, [affiliatedEmail1, affiliatedEmail2])
 
         result.current.getEmails()
-        await fetchMock.flush(true)
+        await fetchMock.callHistory.flush(true)
 
         // `resetLeaversSurveyExpiration` always happens after deletion
         result.current.deleteEmail(affiliatedEmail1.email)
@@ -281,11 +314,11 @@ describe('UserEmailContext', function () {
         const affiliatedEmail2 = cloneDeep(professionalUserData)
         affiliatedEmail2.emailHasInstitutionLicence = true
 
-        fetchMock.reset()
+        fetchMock.removeRoutes().clearHistory()
         fetchMock.get(/\/user\/emails/, [affiliatedEmail1, affiliatedEmail2])
 
         result.current.getEmails()
-        await fetchMock.flush(true)
+        await fetchMock.callHistory.flush(true)
 
         // `resetLeaversSurveyExpiration` always happens after deletion
         result.current.deleteEmail(affiliatedEmail1.email)
@@ -303,19 +336,21 @@ describe('UserEmailContext', function () {
         affiliatedEmail1.email = 'institution-test@example.com'
         affiliatedEmail1.affiliation.pastReconfirmDate = true
 
-        fetchMock.reset()
+        fetchMock.removeRoutes().clearHistory()
         fetchMock.get(/\/user\/emails/, [confirmedUserData, affiliatedEmail1])
 
         result.current.getEmails()
-        await fetchMock.flush(true)
+        await fetchMock.callHistory.flush(true)
 
         // `resetLeaversSurveyExpiration` always happens after deletion
         result.current.deleteEmail(affiliatedEmail1.email)
         result.current.resetLeaversSurveyExpiration(affiliatedEmail1)
 
-        expect(
-          localStorage.getItem('showInstitutionalLeaversSurveyUntil')
-        ).to.be.greaterThan(Date.now())
+        await waitFor(() =>
+          expect(
+            localStorage.getItem('showInstitutionalLeaversSurveyUntil')
+          ).to.be.greaterThan(Date.now())
+        )
       })
 
       it("when the leaver has no institution license, it shouldn't reset the survey expiration date", async function () {
@@ -323,11 +358,11 @@ describe('UserEmailContext', function () {
         emailWithInstitutionLicense.email = 'institution-licensed@example.com'
         emailWithInstitutionLicense.emailHasInstitutionLicence = false
 
-        fetchMock.reset()
+        fetchMock.removeRoutes().clearHistory()
         fetchMock.get(/\/user\/emails/, [emailWithInstitutionLicense])
 
         result.current.getEmails()
-        await fetchMock.flush(true)
+        await fetchMock.callHistory.flush(true)
 
         // `resetLeaversSurveyExpiration` always happens after deletion
         result.current.deleteEmail(emailWithInstitutionLicense.email)
@@ -342,11 +377,11 @@ describe('UserEmailContext', function () {
         emailWithInstitutionLicense.email = 'institution-licensed@example.com'
         emailWithInstitutionLicense.affiliation.pastReconfirmDate = false
 
-        fetchMock.reset()
+        fetchMock.removeRoutes().clearHistory()
         fetchMock.get(/\/user\/emails/, [emailWithInstitutionLicense])
 
         result.current.getEmails()
-        await fetchMock.flush(true)
+        await fetchMock.callHistory.flush(true)
 
         // `resetLeaversSurveyExpiration` always happens after deletion
         result.current.deleteEmail(emailWithInstitutionLicense.email)

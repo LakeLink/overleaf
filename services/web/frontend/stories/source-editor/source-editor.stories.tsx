@@ -6,7 +6,7 @@ import { FC } from 'react'
 import { FileTreePathContext } from '@/features/file-tree/contexts/file-tree-path'
 import RangesTracker from '@overleaf/ranges-tracker'
 
-const FileTreePathProvider: FC = ({ children }) => (
+const FileTreePathProvider: FC<React.PropsWithChildren> = ({ children }) => (
   <FileTreePathContext.Provider
     value={{
       dirname: () => null,
@@ -211,6 +211,7 @@ const mockDoc = (content: string, changes: Array<Record<string, any>> = []) => {
       return null
     },
     ranges: new RangesTracker(changes, []),
+    hasBufferedOps: () => false,
   }
 }
 

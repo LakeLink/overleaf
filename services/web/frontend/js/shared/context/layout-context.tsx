@@ -21,6 +21,7 @@ import useEventListener from '@/shared/hooks/use-event-listener'
 import { isSplitTestEnabled } from '@/utils/splitTestUtils'
 import { isMac } from '@/shared/utils/os'
 import { sendSearchEvent } from '@/features/event-tracking/search-events'
+import { useRailContext } from '@/features/ide-redesign/contexts/rail-context'
 
 export type IdeLayout = 'sideBySide' | 'flat'
 export type IdeView = 'editor' | 'file' | 'pdf' | 'history'
@@ -70,11 +71,13 @@ function setLayoutInLocalStorage(pdfLayout: IdeLayout) {
   )
 }
 
-export const LayoutProvider: FC = ({ children }) => {
+export const LayoutProvider: FC<React.PropsWithChildren> = ({ children }) => {
   // what to show in the "flat" view (editor or pdf)
   const [view, _setView] = useScopeValue<IdeView | null>('ui.view')
   const [openFile] = useScopeValue<BinaryFile | null>('openFile')
   const historyToggleEmitter = useScopeEventEmitter('history:toggle', true)
+  const { isOpen: railIsOpen, setIsOpen: setRailIsOpen } = useRailContext()
+  const [prevRailIsOpen, setPrevRailIsOpen] = useState(railIsOpen)
 
   const setView = useCallback(
     (value: IdeView | null) => {
@@ -82,6 +85,15 @@ export const LayoutProvider: FC = ({ children }) => {
         // ensure that the "history:toggle" event is broadcast when switching in or out of history view
         if (value === 'history' || oldValue === 'history') {
           historyToggleEmitter()
+        }
+
+        if (value === 'history') {
+          setPrevRailIsOpen(railIsOpen)
+          setRailIsOpen(true)
+        }
+
+        if (oldValue === 'history') {
+          setRailIsOpen(prevRailIsOpen)
         }
 
         if (value === 'editor' && openFile) {
@@ -95,7 +107,15 @@ export const LayoutProvider: FC = ({ children }) => {
         return value
       })
     },
-    [_setView, openFile, historyToggleEmitter]
+    [
+      _setView,
+      setRailIsOpen,
+      openFile,
+      historyToggleEmitter,
+      prevRailIsOpen,
+      setPrevRailIsOpen,
+      railIsOpen,
+    ]
   )
 
   // whether the chat pane is open
@@ -119,8 +139,8 @@ export const LayoutProvider: FC = ({ children }) => {
   useEventListener(
     'ui.toggle-left-menu',
     useCallback(
-      event => {
-        setLeftMenuShown((event as CustomEvent<boolean>).detail)
+      (event: CustomEvent<boolean>) => {
+        setLeftMenuShown(event.detail)
       },
       [setLeftMenuShown]
     )

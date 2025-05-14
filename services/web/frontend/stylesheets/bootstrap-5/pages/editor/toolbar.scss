@@ -22,6 +22,7 @@
   --editor-header-logo-background: url(../../../../../public/img/ol-brand/overleaf-o-white.svg)
     center / contain no-repeat;
   --editor-toolbar-bg: var(--neutral-80);
+  --toolbar-dropdown-divider-color: var(--border-dark-divider);
 }
 
 .ide-redesign-main {
@@ -32,8 +33,23 @@
   --editor-toolbar-bg: var(--bg-dark-primary);
   --toolbar-filetree-bg-color: var(--neutral-80);
 
-  .cm-panels-top {
-    border-bottom: none;
+  .ol-cm-toolbar-portal {
+    display: flex;
+    align-items: center;
+    background-color: var(--editor-toolbar-bg);
+
+    .review-panel-header {
+      align-self: flex-start;
+    }
+  }
+
+  .ol-cm-toolbar-wrapper {
+    flex: 1;
+    width: 100%;
+  }
+
+  .ol-cm-toolbar-wrapper-indented {
+    width: calc(100% - var(--review-panel-width));
   }
 }
 
@@ -56,6 +72,7 @@
   --editor-header-logo-background: url(../../../../../public/img/ol-brand/overleaf-o.svg)
     center / contain no-repeat;
   --editor-toolbar-bg: var(--white);
+  --toolbar-dropdown-divider-color: var(--border-divider);
 
   .ide-redesign-main {
     --toolbar-alt-bg-color: var(--bg-light-secondary);
@@ -64,10 +81,6 @@
     --toolbar-btn-hover-color: var(--white);
     --editor-toolbar-bg: var(--white);
     --toolbar-filetree-bg-color: var(--white);
-
-    .ol-cm-toolbar-portal {
-      border-bottom: 1px solid #ddd;
-    }
   }
 }
 
@@ -248,6 +261,23 @@
 
   .toolbar-item {
     display: flex;
+    justify-content: center;
+  }
+
+  .toolbar-cio-tooltip {
+    position: absolute;
+    top: var(--toolbar-height);
+    width: 391px;
+  }
+
+  #toolbar-cio-history {
+    @include media-breakpoint-down(lg) {
+      right: 10px;
+
+      /* The iframe a message renders in isn't aware of the page width, so we
+         make it 1px narrower to enable max-width media queries */
+      width: 390px;
+    }
   }
 }
 
@@ -503,15 +533,10 @@
   border-right: 1px solid var(--formatting-btn-border);
 }
 
-.toolbar-experiment-button.btn.btn-info {
-  @include ol-button-variant(
-    var(--content-positive),
-    var(--bg-accent-03),
-    var(--green-40),
-    var(--bg-accent-03),
-    var(--green-40),
-    false
-  );
+// Override a secondary button to ensure that the border is visible because
+// overriding a borderless button will not add a border.
+.toolbar-experiment-button.btn-secondary {
+  @include labs-button;
 
   max-height: 39px;
   font-size: var(--font-size-01);

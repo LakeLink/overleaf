@@ -56,12 +56,14 @@ const institutionDomainData = [
 ] as const
 
 function resetFetchMock() {
-  fetchMock.reset()
+  fetchMock.removeRoutes().clearHistory()
   fetchMock.get('express:/institutions/domains', [])
 }
 
 async function confirmCodeForEmail(email: string) {
-  screen.getByText(`Enter the 6-digit confirmation code sent to ${email}.`)
+  await screen.findByText(
+    `Enter the 6-digit confirmation code sent to ${email}.`
+  )
   const inputCode = screen.getByLabelText(/6-digit confirmation code/i)
   fireEvent.change(inputCode, { target: { value: '123456' } })
   const submitCodeBtn = screen.getByRole<HTMLButtonElement>('button', {
@@ -80,7 +82,7 @@ describe('<EmailsSection />', function () {
       hasSamlFeature: true,
       samlInitPath: 'saml/init',
     })
-    fetchMock.reset()
+    fetchMock.removeRoutes().clearHistory()
   })
 
   afterEach(function () {
@@ -97,14 +99,14 @@ describe('<EmailsSection />', function () {
   it('renders input', async function () {
     fetchMock.get('/user/emails?ensureAffiliation=true', [])
     render(<EmailsSection />)
-    await fetchMock.flush(true)
+    await fetchMock.callHistory.flush(true)
 
     const button = await screen.findByRole<HTMLButtonElement>('button', {
       name: /add another email/i,
     })
     fireEvent.click(button)
 
-    await screen.findByLabelText(/email/i)
+    await screen.findByLabelText(/email/i, { selector: 'input' })
   })
 
   it('renders "Start adding your address" until a valid email is typed', async function () {
@@ -112,14 +114,14 @@ describe('<EmailsSection />', function () {
     fetchMock.get(`/institutions/domains?hostname=email.com&limit=1`, 200)
     fetchMock.get(`/institutions/domains?hostname=email&limit=1`, 200)
     render(<EmailsSection />)
-    await fetchMock.flush(true)
+    await fetchMock.callHistory.flush(true)
 
     const button = await screen.findByRole<HTMLButtonElement>('button', {
       name: /add another email/i,
     })
     fireEvent.click(button)
 
-    const input = screen.getByLabelText(/email/i)
+    const input = screen.getByLabelText(/email/i, { selector: 'input' })
 
     // initially the text is displayed and the "add email" button disabled
     screen.getByText('Start by adding your email address.')
@@ -190,7 +192,7 @@ describe('<EmailsSection />', function () {
       { name: /add another email/i }
     )
 
-    await fetchMock.flush(true)
+    await fetchMock.callHistory.flush(true)
     resetFetchMock()
     fetchMock
       .get('/user/emails?ensureAffiliation=true', [userEmailData])
@@ -198,7 +200,7 @@ describe('<EmailsSection />', function () {
       .post('/user/emails/confirm-secondary', 200)
 
     fireEvent.click(addAnotherEmailBtn)
-    const input = screen.getByLabelText(/email/i)
+    const input = screen.getByLabelText(/email/i, { selector: 'input' })
 
     fireEvent.change(input, {
       target: { value: userEmailData.email },
@@ -233,14 +235,14 @@ describe('<EmailsSection />', function () {
       { name: /add another email/i }
     )
 
-    await fetchMock.flush(true)
+    await fetchMock.callHistory.flush(true)
     resetFetchMock()
     fetchMock
       .get('/user/emails?ensureAffiliation=true', [])
       .post('/user/emails/secondary', 400)
 
     fireEvent.click(addAnotherEmailBtn)
-    const input = screen.getByLabelText(/email/i)
+    const input = screen.getByLabelText(/email/i, { selector: 'input' })
 
     fireEvent.change(input, {
       target: { value: userEmailData.email },
@@ -271,13 +273,13 @@ describe('<EmailsSection />', function () {
       name: /add another email/i,
     })
 
-    await fetchMock.flush(true)
-    fetchMock.reset()
+    await fetchMock.callHistory.flush(true)
+    fetchMock.removeRoutes().clearHistory()
     fetchMock.get('express:/institutions/domains', institutionDomainData)
 
     await userEvent.click(button)
 
-    const input = screen.getByLabelText(/email/i)
+    const input = screen.getByLabelText(/email/i, { selector: 'input' })
     fireEvent.change(input, {
       target: { value: 'user@autocomplete.edu' },
     })
@@ -295,16 +297,19 @@ describe('<EmailsSection />', function () {
       name: /add another email/i,
     })
 
-    await fetchMock.flush(true)
+    await fetchMock.callHistory.flush(true)
     resetFetchMock()
 
     await userEvent.click(button)
 
-    await userEvent.type(screen.getByLabelText(/email/i), userEmailData.email)
+    await userEvent.type(
+      screen.getByLabelText(/email/i, { selector: 'input' }),
+      userEmailData.email
+    )
 
     await userEvent.click(screen.getByRole('button', { name: /let us know/i }))
 
-    const universityInput = screen.getByRole<HTMLInputElement>('textbox', {
+    const universityInput = screen.getByRole<HTMLInputElement>('combobox', {
       name: /university/i,
     })
 
@@ -321,7 +326,7 @@ describe('<EmailsSection />', function () {
 
     // Select the country from dropdown
     await userEvent.type(
-      screen.getByRole('textbox', {
+      screen.getByRole('combobox', {
         name: /country/i,
       }),
       country
@@ -330,7 +335,7 @@ describe('<EmailsSection />', function () {
 
     expect(universityInput.disabled).to.be.false
 
-    await fetchMock.flush(true)
+    await fetchMock.callHistory.flush(true)
     resetFetchMock()
 
     // Select the university from dropdown
@@ -339,9 +344,11 @@ describe('<EmailsSection />', function () {
       await screen.findByText(userEmailData.affiliation.institution.name)
     )
 
-    const roleInput = screen.getByRole('textbox', { name: /role/i })
+    const roleInput = screen.getByRole('combobox', { name: /role/i })
     await userEvent.type(roleInput, userEmailData.affiliation.role!)
-    const departmentInput = screen.getByRole('textbox', { name: /department/i })
+    const departmentInput = screen.getByRole('combobox', {
+      name: /department/i,
+    })
     await userEvent.click(departmentInput)
     await userEvent.click(screen.getByText(customDepartment))
 
@@ -364,9 +371,11 @@ describe('<EmailsSection />', function () {
       })
     )
 
-    const [[, request]] = fetchMock.calls(/\/user\/emails/)
+    const request = fetchMock.callHistory.calls(/\/user\/emails/).at(0)
 
-    expect(JSON.parse(request?.body?.toString() || '{}')).to.deep.include({
+    expect(
+      JSON.parse(request?.options.body?.toString() || '{}')
+    ).to.deep.include({
       email: userEmailData.email,
       university: {
         id: userEmailData.affiliation?.institution.id,
@@ -393,7 +402,7 @@ describe('<EmailsSection />', function () {
       name: /add another email/i,
     })
 
-    await fetchMock.flush(true)
+    await fetchMock.callHistory.flush(true)
     resetFetchMock()
 
     fetchMock.get('/institutions/list?country_code=de', [
@@ -409,11 +418,14 @@ describe('<EmailsSection />', function () {
 
     // open "add new email" section and click "let us know" to open the Country/University form
     await userEvent.click(button)
-    await userEvent.type(screen.getByLabelText(/email/i), userEmailData.email)
+    await userEvent.type(
+      screen.getByLabelText(/email/i, { selector: 'input' }),
+      userEmailData.email
+    )
     await userEvent.click(screen.getByRole('button', { name: /let us know/i }))
 
     // select a country
-    const countryInput = screen.getByRole<HTMLInputElement>('textbox', {
+    const countryInput = screen.getByRole<HTMLInputElement>('combobox', {
       name: /country/i,
     })
     await userEvent.click(countryInput)
@@ -421,7 +433,7 @@ describe('<EmailsSection />', function () {
     await userEvent.click(await screen.findByText('Germany'))
 
     // match several universities on initial typing
-    const universityInput = screen.getByRole<HTMLInputElement>('textbox', {
+    const universityInput = screen.getByRole<HTMLInputElement>('combobox', {
       name: /university/i,
     })
     await userEvent.click(universityInput)
@@ -446,16 +458,19 @@ describe('<EmailsSection />', function () {
       name: /add another email/i,
     })
 
-    await fetchMock.flush(true)
+    await fetchMock.callHistory.flush(true)
     resetFetchMock()
 
     await userEvent.click(button)
 
-    await userEvent.type(screen.getByLabelText(/email/i), userEmailData.email)
+    await userEvent.type(
+      screen.getByLabelText(/email/i, { selector: 'input' }),
+      userEmailData.email
+    )
 
     await userEvent.click(screen.getByRole('button', { name: /let us know/i }))
 
-    const universityInput = screen.getByRole<HTMLInputElement>('textbox', {
+    const universityInput = screen.getByRole<HTMLInputElement>('combobox', {
       name: /university/i,
     })
 
@@ -472,7 +487,7 @@ describe('<EmailsSection />', function () {
 
     // Select the country from dropdown
     await userEvent.type(
-      screen.getByRole('textbox', {
+      screen.getByRole('combobox', {
         name: /country/i,
       }),
       country
@@ -481,15 +496,17 @@ describe('<EmailsSection />', function () {
 
     expect(universityInput.disabled).to.be.false
 
-    await fetchMock.flush(true)
+    await fetchMock.callHistory.flush(true)
     resetFetchMock()
 
     // Enter the university manually
     await userEvent.type(universityInput, newUniversity)
 
-    const roleInput = screen.getByRole('textbox', { name: /role/i })
+    const roleInput = screen.getByRole('combobox', { name: /role/i })
     await userEvent.type(roleInput, userEmailData.affiliation.role!)
-    const departmentInput = screen.getByRole('textbox', { name: /department/i })
+    const departmentInput = screen.getByRole('combobox', {
+      name: /department/i,
+    })
     await userEvent.type(departmentInput, userEmailData.affiliation.department!)
 
     const userEmailDataCopy = {
@@ -516,9 +533,11 @@ describe('<EmailsSection />', function () {
 
     await confirmCodeForEmail(userEmailData.email)
 
-    const [[, request]] = fetchMock.calls(/\/user\/emails/)
+    const request = fetchMock.callHistory.calls(/\/user\/emails/).at(0)
 
-    expect(JSON.parse(request?.body?.toString() || '{}')).to.deep.include({
+    expect(
+      JSON.parse(request?.options.body?.toString() || '{}')
+    ).to.deep.include({
       email: userEmailData.email,
       university: {
         name: newUniversity,
@@ -554,8 +573,8 @@ describe('<EmailsSection />', function () {
       name: /add another email/i,
     })
 
-    await fetchMock.flush(true)
-    fetchMock.reset()
+    await fetchMock.callHistory.flush(true)
+    fetchMock.removeRoutes().clearHistory()
     fetchMock.get(
       `/institutions/domains?hostname=${hostnameFirstChar}&limit=1`,
       institutionDomainDataCopy
@@ -564,46 +583,46 @@ describe('<EmailsSection />', function () {
     await userEvent.click(button)
 
     await userEvent.type(
-      screen.getByLabelText(/email/i),
+      screen.getByLabelText(/email/i, { selector: 'input' }),
       `user@${hostnameFirstChar}`
     )
 
     await userEvent.keyboard('{Tab}')
-    await fetchMock.flush(true)
-    fetchMock.reset()
+    await fetchMock.callHistory.flush(true)
+    fetchMock.removeRoutes().clearHistory()
 
     expect(
-      screen.queryByRole('textbox', {
+      screen.queryByRole('combobox', {
         name: /country/i,
       })
     ).to.be.null
     expect(
-      screen.queryByRole('textbox', {
+      screen.queryByRole('combobox', {
         name: /university/i,
       })
     ).to.be.null
-    screen.getByRole('textbox', {
+    screen.getByRole('combobox', {
       name: /role/i,
     })
-    screen.getByRole('textbox', {
+    screen.getByRole('combobox', {
       name: /department/i,
     })
 
     await userEvent.click(screen.getByRole('button', { name: /change/i }))
 
-    screen.getByRole('textbox', {
+    screen.getByRole('combobox', {
       name: /country/i,
     })
-    screen.getByRole('textbox', {
+    screen.getByRole('combobox', {
       name: /university/i,
     })
     expect(
-      screen.queryByRole('textbox', {
+      screen.queryByRole('combobox', {
         name: /role/i,
       })
     ).to.be.null
     expect(
-      screen.queryByRole('textbox', {
+      screen.queryByRole('combobox', {
         name: /department/i,
       })
     ).to.be.null
@@ -627,8 +646,8 @@ describe('<EmailsSection />', function () {
       name: /add another email/i,
     })
 
-    await fetchMock.flush(true)
-    fetchMock.reset()
+    await fetchMock.callHistory.flush(true)
+    fetchMock.removeRoutes().clearHistory()
     fetchMock.get(
       `/institutions/domains?hostname=${hostnameFirstChar}&limit=1`,
       institutionDomainDataCopy
@@ -637,13 +656,13 @@ describe('<EmailsSection />', function () {
     await userEvent.click(button)
 
     await userEvent.type(
-      screen.getByLabelText(/email/i),
+      screen.getByLabelText(/email/i, { selector: 'input' }),
       `user@${hostnameFirstChar}`
     )
 
     await userEvent.keyboard('{Tab}')
-    await fetchMock.flush(true)
-    fetchMock.reset()
+    await fetchMock.callHistory.flush(true)
+    fetchMock.removeRoutes().clearHistory()
 
     screen.getByText(institutionDomainDataCopy[0].university.name)
 
@@ -664,11 +683,11 @@ describe('<EmailsSection />', function () {
       .post('/user/emails/confirm-secondary', 200)
 
     await userEvent.type(
-      screen.getByRole('textbox', { name: /role/i }),
+      screen.getByRole('combobox', { name: /role/i }),
       userEmailData.affiliation.role!
     )
     await userEvent.type(
-      screen.getByRole('textbox', { name: /department/i }),
+      screen.getByRole('combobox', { name: /department/i }),
       userEmailData.affiliation.department!
     )
     await userEvent.click(
@@ -679,8 +698,8 @@ describe('<EmailsSection />', function () {
 
     await confirmCodeForEmail('user@autocomplete.edu')
 
-    await fetchMock.flush(true)
-    fetchMock.reset()
+    await fetchMock.callHistory.flush(true)
+    fetchMock.removeRoutes().clearHistory()
 
     screen.getByText(userEmailDataCopy.affiliation.institution.name, {
       exact: false,

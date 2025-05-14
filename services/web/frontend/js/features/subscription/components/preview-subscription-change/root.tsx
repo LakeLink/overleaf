@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import moment from 'moment'
 import { useTranslation, Trans } from 'react-i18next'
 import {
@@ -25,19 +25,45 @@ function PreviewSubscriptionChange() {
   const preview = getMeta(
     'ol-subscriptionChangePreview'
   ) as SubscriptionChangePreview
+  const purchaseReferrer = getMeta('ol-purchaseReferrer')
   const { t } = useTranslation()
   const payNowTask = useAsync()
   const location = useLocation()
 
+  useEffect(() => {
+    if (preview.change.type === 'add-on-purchase') {
+      eventTracking.sendMB('preview-subscription-change-view', {
+        plan: preview.change.addOn.code,
+        upgradeType: 'add-on',
+        referrer: purchaseReferrer,
+      })
+    }
+  }, [preview.change, purchaseReferrer])
+
   const handlePayNowClick = useCallback(() => {
+    if (preview.change.type === 'add-on-purchase') {
+      eventTracking.sendMB('subscription-change-form-submit', {
+        plan: preview.change.addOn.code,
+        upgradeType: 'add-on',
+        referrer: purchaseReferrer,
+      })
+    }
+
     eventTracking.sendMB('assistant-add-on-purchase')
     payNowTask
       .runAsync(payNow(preview))
       .then(() => {
+        if (preview.change.type === 'add-on-purchase') {
+          eventTracking.sendMB('subscription-change-form-success', {
+            plan: preview.change.addOn.code,
+            upgradeType: 'add-on',
+            referrer: purchaseReferrer,
+          })
+        }
         location.replace('/user/subscription/thank-you')
       })
       .catch(debugConsole.error)
-  }, [location, payNowTask, preview])
+  }, [purchaseReferrer, location, payNowTask, preview])
 
   const aiAddOnChange =
     preview.change.type === 'add-on-purchase' &&
@@ -82,7 +108,7 @@ function PreviewSubscriptionChange() {
             {aiAddOnChange && (
               <div>
                 <Trans
-                  i18nKey="add_error_assist_to_your_projects"
+                  i18nKey="add_ai_assist_to_your_plan"
                   components={{
                     sparkle: (
                       <img

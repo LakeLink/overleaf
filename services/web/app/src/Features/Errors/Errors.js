@@ -41,6 +41,8 @@ class ServiceNotConfiguredError extends BackwardCompatibleError {}
 
 class TooManyRequestsError extends BackwardCompatibleError {}
 
+class ResourceGoneError extends BackwardCompatibleError {}
+
 class DuplicateNameError extends OError {}
 
 class InvalidNameError extends BackwardCompatibleError {}
@@ -300,6 +302,18 @@ class NonDeletableEntityError extends OError {
   }
 }
 
+class FoundConnectedClientsError extends OError {
+  constructor(nConnectedClients) {
+    super(`found ${nConnectedClients} remaining connected clients`)
+  }
+}
+
+class ConcurrentLoadingOfDocsDetectedError extends OError {
+  constructor() {
+    super('concurrent loading of docs detected')
+  }
+}
+
 module.exports = {
   OError,
   BackwardCompatibleError,
@@ -307,6 +321,7 @@ module.exports = {
   ForbiddenError,
   ServiceNotConfiguredError,
   TooManyRequestsError,
+  ResourceGoneError,
   DuplicateNameError,
   InvalidNameError,
   UnsupportedFileTypeError,
@@ -356,4 +371,6 @@ module.exports = {
   InvalidEmailError,
   InvalidInstitutionalEmailError,
   NonDeletableEntityError,
+  FoundConnectedClientsError,
+  ConcurrentLoadingOfDocsDetectedError,
 }

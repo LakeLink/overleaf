@@ -27,12 +27,14 @@ const projectFallback = {
   features: {},
 }
 
-export const ProjectProvider: FC = ({ children }) => {
+export const ProjectProvider: FC<React.PropsWithChildren> = ({ children }) => {
   const [project] = useScopeValue('project')
+  const joinedOnce = !!project
 
   const {
     _id,
     compiler,
+    imageName,
     name,
     rootDoc_id: rootDocId,
     members,
@@ -58,6 +60,7 @@ export const ProjectProvider: FC = ({ children }) => {
     return {
       _id,
       compiler,
+      imageName,
       name,
       rootDocId,
       members,
@@ -69,10 +72,12 @@ export const ProjectProvider: FC = ({ children }) => {
       trackChangesState,
       mainBibliographyDocId,
       projectSnapshot,
+      joinedOnce,
     }
   }, [
     _id,
     compiler,
+    imageName,
     name,
     rootDocId,
     members,
@@ -84,6 +89,7 @@ export const ProjectProvider: FC = ({ children }) => {
     trackChangesState,
     mainBibliographyDocId,
     projectSnapshot,
+    joinedOnce,
   ])
 
   return (

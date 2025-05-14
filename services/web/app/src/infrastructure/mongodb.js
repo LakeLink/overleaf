@@ -49,6 +49,7 @@ const db = {
   githubSyncUserCredentials: internalDb.collection('githubSyncUserCredentials'),
   globalMetrics: internalDb.collection('globalMetrics'),
   grouppolicies: internalDb.collection('grouppolicies'),
+  groupAuditLogEntries: internalDb.collection('groupAuditLogEntries'),
   institutions: internalDb.collection('institutions'),
   messages: internalDb.collection('messages'),
   migrations: internalDb.collection('migrations'),
@@ -81,6 +82,7 @@ const db = {
   userAuditLogEntries: internalDb.collection('userAuditLogEntries'),
   users: internalDb.collection('users'),
   onboardingDataCollection: internalDb.collection('onboardingDataCollection'),
+  scriptLogs: internalDb.collection('scriptLogs'),
 }
 
 const connectionPromise = mongoClient.connect()

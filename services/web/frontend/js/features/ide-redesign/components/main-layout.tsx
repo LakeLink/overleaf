@@ -8,10 +8,17 @@ import { HorizontalToggler } from '@/features/ide-react/components/resize/horizo
 import { useTranslation } from 'react-i18next'
 import { usePdfPane } from '@/features/ide-react/hooks/use-pdf-pane'
 import { useLayoutContext } from '@/shared/context/layout-context'
-import { useState } from 'react'
+import { ElementType, useState } from 'react'
 import EditorPanel from './editor-panel'
 import { useRailContext } from '../contexts/rail-context'
 import HistoryContainer from '@/features/ide-react/components/history-container'
+import { DefaultSynctexControl } from '@/features/pdf-preview/components/detach-synctex-control'
+import importOverleafModules from '../../../../macros/import-overleaf-module.macro'
+
+const mainEditorLayoutModalsModules: Array<{
+  import: { default: ElementType }
+  path: string
+}> = importOverleafModules('mainEditorLayoutModals')
 
 export default function MainLayout() {
   const [resizing, setResizing] = useState(false)
@@ -80,6 +87,11 @@ export default function MainLayout() {
                   tooltipWhenOpen={t('tooltip_hide_pdf')}
                   tooltipWhenClosed={t('tooltip_show_pdf')}
                 />
+                {pdfLayout === 'sideBySide' && (
+                  <div className="synctex-controls" hidden>
+                    <DefaultSynctexControl />
+                  </div>
+                )}
               </HorizontalResizeHandle>
               <Panel
                 collapsible
@@ -95,11 +107,21 @@ export default function MainLayout() {
                 onCollapse={handlePdfPaneCollapse}
               >
                 <PdfPreview />
+                {pdfLayout === 'flat' && view === 'pdf' && (
+                  <div className="synctex-controls" hidden>
+                    <DefaultSynctexControl />
+                  </div>
+                )}
               </Panel>
             </PanelGroup>
           </Panel>
         </PanelGroup>
       </div>
+      {mainEditorLayoutModalsModules.map(
+        ({ import: { default: Component }, path }) => (
+          <Component key={path} />
+        )
+      )}
     </div>
   )
 }

@@ -4,6 +4,7 @@
 
 const _ = require('lodash')
 const logger = require('@overleaf/logger')
+const metrics = require('@overleaf/metrics')
 
 const core = require('overleaf-editor-core')
 const Chunk = core.Chunk
@@ -14,6 +15,7 @@ const chunkStore = require('./chunk_store')
 const { BlobStore } = require('./blob_store')
 const { InvalidChangeError } = require('./errors')
 const { getContentHash } = require('./content_hash')
+const redisBackend = require('./chunk_store/redis')
 
 function countChangeBytes(change) {
   // Note: This is not quite accurate, because the raw change may contain raw
@@ -80,6 +82,7 @@ async function persistChanges(projectId, allChanges, limits, clientEndVersion) {
 
   let originalEndVersion
   let changesToPersist
+  let resyncNeeded = false
 
   limits = limits || {}
   _.defaults(limits, {
@@ -164,12 +167,14 @@ async function persistChanges(projectId, allChanges, limits, clientEndVersion) {
         const actualHash = content != null ? getContentHash(content) : null
         logger.debug({ expectedHash, actualHash }, 'validating content hash')
         if (actualHash !== expectedHash) {
-          throw new InvalidChangeError('content hash mismatch', {
-            projectId,
-            path,
-            expectedHash,
-            actualHash,
-          })
+          // only log a warning on the first mismatch in each persistChanges call
+          if (!resyncNeeded) {
+            logger.warn(
+              { projectId, path, expectedHash, actualHash },
+              'content hash mismatch'
+            )
+          }
+          resyncNeeded = true
         }
 
         // Remove the content hash from the change before storing it in the chunk.
@@ -179,8 +184,10 @@ async function persistChanges(projectId, allChanges, limits, clientEndVersion) {
     }
   }
 
-  async function extendLastChunkIfPossible() {
-    const latestChunk = await chunkStore.loadLatest(projectId)
+  async function loadLatestChunk() {
+    const latestChunk = await chunkStore.loadLatest(projectId, {
+      persistedOnly: true,
+    })
 
     currentChunk = latestChunk
     originalEndVersion = latestChunk.getEndVersion()
@@ -192,9 +199,50 @@ async function persistChanges(projectId, allChanges, limits, clientEndVersion) {
     }
 
     currentSnapshot = latestChunk.getSnapshot().clone()
-    const timer = new Timer()
-    currentSnapshot.applyAll(latestChunk.getChanges())
+    currentSnapshot.applyAll(currentChunk.getChanges())
+  }
 
+  async function queueChangesInRedis() {
+    const hollowSnapshot = currentSnapshot.clone()
+    // We're transforming a lazy snapshot to a hollow snapshot, so loadFiles()
+    // doesn't really need a blobStore, but its signature still requires it.
+    const blobStore = new BlobStore(projectId)
+    await hollowSnapshot.loadFiles('hollow', blobStore)
+    hollowSnapshot.applyAll(changesToPersist, { strict: true })
+    const baseVersion = currentChunk.getEndVersion()
+    await redisBackend.queueChanges(
+      projectId,
+      hollowSnapshot,
+      baseVersion,
+      changesToPersist
+    )
+  }
+
+  async function fakePersistRedisChanges() {
+    const baseVersion = currentChunk.getEndVersion()
+    const nonPersistedChanges = await redisBackend.getNonPersistedChanges(
+      projectId,
+      baseVersion
+    )
+
+    if (
+      serializeChanges(nonPersistedChanges) ===
+      serializeChanges(changesToPersist)
+    ) {
+      metrics.inc('persist_redis_changes_verification', 1, { status: 'match' })
+    } else {
+      logger.warn({ projectId }, 'mismatch of non-persisted changes from Redis')
+      metrics.inc('persist_redis_changes_verification', 1, {
+        status: 'mismatch',
+      })
+    }
+
+    const persistedVersion = baseVersion + nonPersistedChanges.length
+    await redisBackend.setPersistedVersion(projectId, persistedVersion)
+  }
+
+  async function extendLastChunkIfPossible() {
+    const timer = new Timer()
     const changesPushed = await fillChunk(currentChunk, changesToPersist)
     if (!changesPushed) {
       return
@@ -202,12 +250,7 @@ async function persistChanges(projectId, allChanges, limits, clientEndVersion) {
 
     checkElapsedTime(timer)
 
-    await chunkStore.update(
-      projectId,
-      originalEndVersion,
-      currentChunk,
-      earliestChangeTimestamp
-    )
+    await chunkStore.update(projectId, currentChunk, earliestChangeTimestamp)
   }
 
   async function createNewChunksAsNeeded() {
@@ -245,6 +288,13 @@ async function persistChanges(projectId, allChanges, limits, clientEndVersion) {
     changesToPersist = oldChanges
     const numberOfChangesToPersist = oldChanges.length
 
+    await loadLatestChunk()
+    try {
+      await queueChangesInRedis()
+      await fakePersistRedisChanges()
+    } catch (err) {
+      logger.error({ err }, 'Chunk buffer verification failed')
+    }
     await extendLastChunkIfPossible()
     await createNewChunksAsNeeded()
 
@@ -252,10 +302,18 @@ async function persistChanges(projectId, allChanges, limits, clientEndVersion) {
       numberOfChangesPersisted: numberOfChangesToPersist,
       originalEndVersion,
       currentChunk,
+      resyncNeeded,
     }
   } else {
     return null
   }
+}
+
+/**
+ * @param {core.Change[]} changes
+ */
+function serializeChanges(changes) {
+  return JSON.stringify(changes.map(change => change.toRaw()))
 }
 
 module.exports = persistChanges

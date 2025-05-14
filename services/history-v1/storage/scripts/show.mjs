@@ -6,6 +6,7 @@ import {
 } from '../lib/chunk_store/index.js'
 import { client } from '../lib/mongodb.js'
 import knex from '../lib/knex.js'
+import redis from '../lib/redis.js'
 import {
   loadGlobalBlobs,
   BlobStore,
@@ -47,7 +48,16 @@ async function listChunks(historyId) {
 async function fetchChunkLocal(historyId, version) {
   const chunkRecord = await getChunkMetadataForVersion(historyId, version)
   const chunk = await loadAtVersion(historyId, version)
-  return { key: version, chunk, metadata: chunkRecord, source: 'local storage' }
+  const persistedChunk = await loadAtVersion(historyId, version, {
+    persistedOnly: true,
+  })
+  return {
+    key: version,
+    chunk,
+    persistedChunk,
+    metadata: chunkRecord,
+    source: 'local storage',
+  }
 }
 
 async function fetchChunkRemote(historyId, version) {
@@ -72,7 +82,7 @@ async function fetchChunkRemote(historyId, version) {
 }
 
 async function displayChunk(historyId, version, options) {
-  const { key, chunk, metadata, source } = await (options.remote
+  const { key, chunk, persistedChunk, metadata, source } = await (options.remote
     ? fetchChunkRemote(historyId, version)
     : fetchChunkLocal(historyId, version))
   console.log('Source:', source)
@@ -80,6 +90,18 @@ async function displayChunk(historyId, version, options) {
   console.log('Key', key)
   // console.log('Number of changes', chunk.getChanges().length)
   console.log(JSON.stringify(chunk))
+  if (
+    persistedChunk &&
+    persistedChunk.getChanges().length !== chunk.getChanges().length
+  ) {
+    console.warn(
+      'Warning: Local chunk and persisted chunk have different number of changes:',
+      chunk.getChanges().length,
+      'local (including buffer) vs',
+      persistedChunk.getChanges().length,
+      'persisted'
+    )
+  }
 }
 
 async function fetchBlobRemote(historyId, blobHash) {
@@ -247,4 +269,7 @@ main()
   .finally(() => {
     knex.destroy().catch(err => console.error('Error closing Postgres:', err))
     client.close().catch(err => console.error('Error closing MongoDB:', err))
+    redis
+      .disconnect()
+      .catch(err => console.error('Error disconnecting Redis:', err))
   })
