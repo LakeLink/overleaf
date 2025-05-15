@@ -5,6 +5,9 @@ on:
     branches: [ "oauth2" ]
   workflow_dispatch:
 
+permissions:
+  packages: write
+
 jobs:
   build-base:
     runs-on: ubuntu-latest

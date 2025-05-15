@@ -234,6 +234,7 @@ const UserPagesController = {
     }
     res.render('user/login', {
       title: Settings.nav?.login_support_title || 'login',
+      oauth_login_hint: process.env.OAUTH_LOGIN_HINT || 'Login via SSO',
       login_support_title: Settings.nav?.login_support_title,
       login_support_text: Settings.nav?.login_support_text,
     })
