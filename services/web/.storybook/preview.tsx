@@ -29,7 +29,7 @@ function resetMeta() {
     isOverleaf: true,
     labsEnabled: true,
     maxEntitiesPerProject: 10,
-    maxUploadSize: 5 * 1024 * 1024,
+    maxUploadSize: 512 * 1024 * 1024,
     recaptchaDisabled: {
       invite: true,
       login: true,
